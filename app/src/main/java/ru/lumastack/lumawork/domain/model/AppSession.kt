@@ -64,6 +64,7 @@ data class UserProfile(
     val departmentTitle: String? = null,
     val departmentGroup: String? = null,
     val personnelNumber: String? = null,
+    val city: String? = null,
     val personalPhone: String? = null,
     val workEmail: String? = null,
     val vehicleModel: String? = null,

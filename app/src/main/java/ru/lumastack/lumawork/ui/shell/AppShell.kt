@@ -1,11 +1,14 @@
 package ru.lumastack.lumawork.ui.shell
 
 import androidx.activity.compose.BackHandler
+import ru.lumastack.lumawork.ui.profile.ProfileAvatar
+import ru.lumastack.lumawork.ui.profile.ProfileRoute
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,24 +22,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
@@ -51,12 +46,12 @@ import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import ru.lumastack.lumawork.R
-import ru.lumastack.lumawork.ui.theme.AppAppearance
-import ru.lumastack.lumawork.ui.theme.LocalAppAppearance
+import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
+import ru.lumastack.lumawork.domain.simpleone.RequestsMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
@@ -83,12 +78,11 @@ import ru.lumastack.lumawork.data.salary.SalaryRepository
 import ru.lumastack.lumawork.data.feedback.FeedbackRepository
 import ru.lumastack.lumawork.data.admin.AdminRepository
 import ru.lumastack.lumawork.domain.model.AppSession
-import ru.lumastack.lumawork.ui.adaptive.AppNavigationLayout
 import ru.lumastack.lumawork.ui.backpack.BackpackRoute
-import ru.lumastack.lumawork.ui.adaptive.appNavigationLayout
-import ru.lumastack.lumawork.ui.adaptive.appWidthClass
 import ru.lumastack.lumawork.ui.adaptive.appContentWidthClass
 import ru.lumastack.lumawork.ui.home.HomeScreen
+import ru.lumastack.lumawork.ui.home.RouteViewModel
+import ru.lumastack.lumawork.domain.route.RouteWorkType
 import ru.lumastack.lumawork.ui.coordination.CoordinationRoute
 import ru.lumastack.lumawork.ui.requests.RequestsActions
 import ru.lumastack.lumawork.ui.requests.RequestsScreen
@@ -131,6 +125,7 @@ enum class AppDestination(
 fun AppShell(
     session: AppSession,
     isOffline: Boolean,
+    authRepository: ru.lumastack.lumawork.data.auth.AuthRepository,
     routeRepository: RouteRepository,
     simpleOneRepository: SimpleOneRepository,
     coordinationRepository: CoordinationRepository,
@@ -160,6 +155,8 @@ fun AppShell(
             onPasswordChange = simpleOneViewModel::updatePassword,
             onSignIn = simpleOneViewModel::signIn,
             onRefresh = simpleOneViewModel::refresh,
+            onRefreshActive = simpleOneViewModel::refreshActiveRequests,
+            onRefreshAnalytics = simpleOneViewModel::refreshAnalytics,
             onSignOut = simpleOneViewModel::signOut,
             onSearchQueryChange = simpleOneViewModel::updateSearchQuery,
             onStatusFilterChange = simpleOneViewModel::updateStatusFilter,
@@ -170,83 +167,75 @@ fun AppShell(
         )
     }
 
+    var profileOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    var profileEditing by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    var settingsOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    var feedbackOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    val openProfile = { profileEditing = false; profileOpen = true }
     val contentStateHolder = rememberSaveableStateHolder()
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val navigationLayout = remember(maxWidth) {
-            appNavigationLayout(maxWidth.value.roundToInt())
-        }
-        val destinations = remember(session.user.isAdminRole) {
-            AppDestination.entries.filter { !it.adminOnly || session.user.isAdminRole }
-        }
-        var selectedName by rememberSaveable { mutableStateOf(AppDestination.Home.name) }
-        val selected = destinations.firstOrNull { it.name == selectedName } ?: AppDestination.Home
-        val onSelect: (AppDestination) -> Unit = { selectedName = it.name }
-        BackHandler(enabled = selected != AppDestination.Home) { onSelect(AppDestination.Home) }
-
-        if (navigationLayout == AppNavigationLayout.Drawer) {
-            CompactShell(
-                contentStateHolder = contentStateHolder,
-                session = session,
-                isOffline = isOffline,
-                routeRepository = routeRepository,
-                simpleOneRepository = simpleOneRepository,
-                coordinationRepository = coordinationRepository,
-                timeReportRepository = timeReportRepository,
-                backpackRepository = backpackRepository,
-                backpackPhotoRepository = backpackPhotoRepository,
-                backpackImageRepository = backpackImageRepository,
-                employeeRepository = employeeRepository,
-                autoRepository = autoRepository,
-                vehicleImageRepository = vehicleImageRepository,
-                fuelRepository = fuelRepository,
-                wikiRepository = wikiRepository,
-                ftpRepository = ftpRepository,
-                salaryRepository = salaryRepository,
-                feedbackRepository = feedbackRepository,
-                adminRepository = adminRepository,
-                simpleOneState = simpleOneState,
-                simpleOneActions = simpleOneActions,
-                destinations = destinations,
-                selected = selected,
-                onSelect = onSelect,
-                onLogout = onLogout,
-            )
-        } else {
-            TabletShell(
-                contentStateHolder = contentStateHolder,
-                session = session,
-                isOffline = isOffline,
-                routeRepository = routeRepository,
-                simpleOneRepository = simpleOneRepository,
-                coordinationRepository = coordinationRepository,
-                timeReportRepository = timeReportRepository,
-                backpackRepository = backpackRepository,
-                backpackPhotoRepository = backpackPhotoRepository,
-                backpackImageRepository = backpackImageRepository,
-                employeeRepository = employeeRepository,
-                autoRepository = autoRepository,
-                vehicleImageRepository = vehicleImageRepository,
-                fuelRepository = fuelRepository,
-                wikiRepository = wikiRepository,
-                ftpRepository = ftpRepository,
-                salaryRepository = salaryRepository,
-                feedbackRepository = feedbackRepository,
-                adminRepository = adminRepository,
-                simpleOneState = simpleOneState,
-                simpleOneActions = simpleOneActions,
-                usesWideSidebar = navigationLayout == AppNavigationLayout.Sidebar,
-                destinations = destinations,
-                selected = selected,
-                onSelect = onSelect,
-                onLogout = onLogout,
-            )
-        }
+    val destinations = remember(session.user.isAdminRole) {
+        AppDestination.entries.filter { (!it.adminOnly || session.user.isAdminRole) && it != AppDestination.Feedback }
     }
+    var selectedName by rememberSaveable { mutableStateOf(AppDestination.Home.name) }
+    val selected = destinations.firstOrNull { it.name == selectedName } ?: AppDestination.Home
+    val onSelect: (AppDestination) -> Unit = { selectedName = it.name }
+    BackHandler(enabled = selected != AppDestination.Home) { onSelect(AppDestination.Home) }
+
+    AppDrawerShell(
+        contentStateHolder = contentStateHolder,
+        session = session,
+        isOffline = isOffline,
+        routeRepository = routeRepository,
+        simpleOneRepository = simpleOneRepository,
+        coordinationRepository = coordinationRepository,
+        timeReportRepository = timeReportRepository,
+        backpackRepository = backpackRepository,
+        backpackPhotoRepository = backpackPhotoRepository,
+        backpackImageRepository = backpackImageRepository,
+        employeeRepository = employeeRepository,
+        autoRepository = autoRepository,
+        vehicleImageRepository = vehicleImageRepository,
+        fuelRepository = fuelRepository,
+        wikiRepository = wikiRepository,
+        ftpRepository = ftpRepository,
+        salaryRepository = salaryRepository,
+        feedbackRepository = feedbackRepository,
+        adminRepository = adminRepository,
+        simpleOneState = simpleOneState,
+        simpleOneActions = simpleOneActions,
+        destinations = destinations,
+        selected = selected,
+        onSelect = onSelect,
+        onOpenProfile = openProfile,
+        onOpenSettings = { settingsOpen = true },
+        onOpenFeedback = { feedbackOpen = true },
+    )
+    if (profileOpen) ProfileRoute(
+        session = session,
+        offline = isOffline,
+        auth = authRepository,
+        auto = autoRepository,
+        images = vehicleImageRepository,
+        startInEditor = profileEditing,
+        onDismiss = { profileOpen = false },
+    )
+    if (settingsOpen) AppSettingsSheet(
+        session = session,
+        onDismiss = { settingsOpen = false },
+        onOpenProfile = { settingsOpen = false; profileEditing = true; profileOpen = true },
+        onLogout = { settingsOpen = false; onLogout() },
+    )
+    if (feedbackOpen) AppFeedbackDialog(
+        session = session,
+        offline = isOffline,
+        repository = feedbackRepository,
+        onDismiss = { feedbackOpen = false },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CompactShell(
+private fun AppDrawerShell(
     contentStateHolder: SaveableStateHolder,
     session: AppSession,
     isOffline: Boolean,
@@ -271,7 +260,9 @@ private fun CompactShell(
     destinations: List<AppDestination>,
     selected: AppDestination,
     onSelect: (AppDestination) -> Unit,
-    onLogout: () -> Unit,
+    onOpenProfile: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenFeedback: () -> Unit,
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -281,8 +272,8 @@ private fun CompactShell(
         drawerContent = {
             ModalDrawerSheet(modifier = Modifier.width(320.dp)) {
                 NavigationMenu(
-                    session = session,
-                    isOffline = isOffline,
+                    onOpenSettings = { scope.launch { drawerState.close(); onOpenSettings() } },
+                    onOpenFeedback = { scope.launch { drawerState.close(); onOpenFeedback() } },
                     destinations = destinations,
                     selected = selected,
                     onSelect = { destination ->
@@ -298,8 +289,14 @@ private fun CompactShell(
             topBar = {
                 AppTopBar(
                     destination = selected,
+                    session = session,
+                    images = vehicleImageRepository,
+                    onOpenProfile = onOpenProfile,
                     onOpenNavigation = { scope.launch { drawerState.open() } },
-                    onLogout = onLogout,
+                    requestsState = simpleOneState,
+                    requestsActions = simpleOneActions,
+                    routeRepository = routeRepository,
+                    isOffline = isOffline,
                 )
             },
         ) { padding ->
@@ -329,168 +326,6 @@ private fun CompactShell(
                     onSelect = onSelect,
                     modifier = Modifier.padding(padding),
                 )
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TabletShell(
-    contentStateHolder: SaveableStateHolder,
-    session: AppSession,
-    isOffline: Boolean,
-    routeRepository: RouteRepository,
-    simpleOneRepository: SimpleOneRepository,
-    coordinationRepository: CoordinationRepository,
-    timeReportRepository: TimeReportRepository,
-    backpackRepository: BackpackRepository,
-    backpackPhotoRepository: BackpackPhotoRepository,
-    backpackImageRepository: BackpackImageRepository,
-    employeeRepository: EmployeeRepository,
-    autoRepository: AutoRepository,
-    vehicleImageRepository: VehicleImageRepository,
-    fuelRepository: FuelRepository,
-    wikiRepository: WikiRepository,
-    ftpRepository: FtpRepository,
-    salaryRepository: SalaryRepository,
-    feedbackRepository: FeedbackRepository,
-    adminRepository: AdminRepository,
-    simpleOneState: SimpleOneUiState,
-    simpleOneActions: RequestsActions,
-    usesWideSidebar: Boolean,
-    destinations: List<AppDestination>,
-    selected: AppDestination,
-    onSelect: (AppDestination) -> Unit,
-    onLogout: () -> Unit,
-) {
-    Row(Modifier.fillMaxSize()) {
-        if (usesWideSidebar) {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 1.dp,
-                modifier = Modifier
-                    .width(272.dp)
-                    .fillMaxHeight(),
-            ) {
-                NavigationMenu(
-                    session = session,
-                    isOffline = isOffline,
-                    destinations = destinations,
-                    selected = selected,
-                    onSelect = onSelect,
-                )
-            }
-        } else {
-            CompactNavigationRail(
-                session = session,
-                destinations = destinations,
-                selected = selected,
-                onSelect = onSelect,
-            )
-        }
-
-        Scaffold(
-            topBar = {
-                AppTopBar(
-                    destination = selected,
-                    onOpenNavigation = null,
-                    onLogout = onLogout,
-                )
-            },
-            modifier = Modifier.weight(1f),
-        ) { padding ->
-            contentStateHolder.SaveableStateProvider(selected.name) {
-                DestinationContent(
-                    destination = selected,
-                    session = session,
-                    isOffline = isOffline,
-                    routeRepository = routeRepository,
-                    simpleOneRepository = simpleOneRepository,
-                    coordinationRepository = coordinationRepository,
-                    timeReportRepository = timeReportRepository,
-                    backpackRepository = backpackRepository,
-                    backpackPhotoRepository = backpackPhotoRepository,
-                    backpackImageRepository = backpackImageRepository,
-                    employeeRepository = employeeRepository,
-                    autoRepository = autoRepository,
-                    vehicleImageRepository = vehicleImageRepository,
-                    fuelRepository = fuelRepository,
-                    wikiRepository = wikiRepository,
-                    ftpRepository = ftpRepository,
-                    salaryRepository = salaryRepository,
-                    feedbackRepository = feedbackRepository,
-                    adminRepository = adminRepository,
-                    simpleOneState = simpleOneState,
-                    simpleOneActions = simpleOneActions,
-                    onSelect = onSelect,
-                    modifier = Modifier.padding(padding),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CompactNavigationRail(
-    session: AppSession,
-    destinations: List<AppDestination>,
-    selected: AppDestination,
-    onSelect: (AppDestination) -> Unit,
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp,
-        modifier = Modifier
-            .width(88.dp)
-            .fillMaxHeight(),
-    ) {
-        LazyColumn(
-            modifier = Modifier.padding(horizontal = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            item(key = "rail-account") {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = CircleShape,
-                    modifier = Modifier
-                        .padding(vertical = 16.dp)
-                        .size(42.dp),
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Text(
-                            text = session.user.profile?.shortDisplayName
-                                ?.firstOrNull()
-                                ?.uppercase()
-                                ?: session.user.email.firstOrNull()?.uppercase() ?: "L",
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
-            items(destinations, key = { it.name }) { destination ->
-                NavigationRailItem(
-                    selected = destination == selected,
-                    onClick = { onSelect(destination) },
-                    icon = { DestinationMark(destination) },
-                    label = {
-                        Text(
-                            text = destination.title,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    },
-                    alwaysShowLabel = false,
-                )
-            }
-            item(key = "rail-bottom-space") {
-                Spacer(Modifier.size(12.dp))
             }
         }
     }
@@ -500,162 +335,93 @@ private fun CompactNavigationRail(
 @Composable
 private fun AppTopBar(
     destination: AppDestination,
-    onOpenNavigation: (() -> Unit)?,
-    onLogout: () -> Unit,
+    session: AppSession,
+    images: VehicleImageRepository,
+    onOpenProfile: () -> Unit,
+    onOpenNavigation: () -> Unit,
+    requestsState: SimpleOneUiState,
+    requestsActions: RequestsActions,
+    routeRepository: RouteRepository,
+    isOffline: Boolean,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
-    var logoutRequested by remember { mutableStateOf(false) }
-    val appearance = LocalAppAppearance.current
-    if (logoutRequested) {
-        AlertDialog(
-            onDismissRequest = { logoutRequested = false },
-            title = { Text("Выйти из приложения?") },
-            text = { Text("Для следующего входа понадобится код с почты.") },
-            confirmButton = { TextButton(onClick = { logoutRequested = false; onLogout() }) { Text("Выйти") } },
-            dismissButton = { TextButton(onClick = { logoutRequested = false }) { Text("Отмена") } },
-        )
-    }
-    TopAppBar(
-        title = {
-            Column {
-                Text(
-                    text = destination.title,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleLarge,
-                )
-                Text(
-                    text = destination.subtitle,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        },
-        navigationIcon = {
-            if (onOpenNavigation != null) {
+    Column {
+        TopAppBar(
+            title = {
+                if (destination == AppDestination.Home) {
+                    val routeModel: RouteViewModel = viewModel(key = "route-${session.user.id}-${session.token.hashCode()}-$isOffline",
+                        factory = RouteViewModel.factory(routeRepository, session, isOffline))
+                    val routeState by routeModel.state.collectAsStateWithLifecycle()
+                    AppSegmentedControl(titles = RouteWorkType.entries.map { it.title },
+                        selectedIndex = RouteWorkType.entries.indexOf(routeState.record.workType),
+                        onSelect = { routeModel.selectWorkType(RouteWorkType.entries[it]) }, modifier = Modifier.width(176.dp))
+                } else Text(destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            },
+            navigationIcon = {
                 IconButton(onClick = onOpenNavigation) {
                     Icon(Icons.Default.Menu, contentDescription = "Открыть меню")
                 }
-            }
-        },
-        actions = {
-            IconButton(onClick = { menuExpanded = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "Оформление и аккаунт")
-            }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                Text("Оформление", style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-                AppAppearance.entries.forEach { mode ->
-                    DropdownMenuItem(
-                        text = { Text(mode.title) },
-                        trailingIcon = { if (appearance.mode == mode) Icon(Icons.Default.Check, contentDescription = "Выбрано") },
-                        onClick = { appearance.onChange(mode); menuExpanded = false },
-                    )
+            },
+            actions = {
+                if (destination == AppDestination.Home) {
+                    IconButton(onClick = onOpenProfile, modifier = Modifier.semantics { contentDescription = "Открыть профиль" }) {
+                        ProfileAvatar(session.user, images)
+                    }
                 }
-                HorizontalDivider()
-                DropdownMenuItem(text = { Text("Выйти из аккаунта") }, onClick = {
-                    menuExpanded = false
-                    logoutRequested = true
-                })
-            }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.background,
-        ),
-    )
+            },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+        )
+        if (destination == AppDestination.Requests && requestsState.selectedRequest == null) {
+            AppSegmentedControl(
+                titles = RequestsMode.entries.map { it.title },
+                selectedIndex = RequestsMode.entries.indexOf(requestsState.mode),
+                onSelect = { requestsActions.onModeChange(RequestsMode.entries[it]) },
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+        }
+    }
 }
 
 @Composable
 private fun NavigationMenu(
-    session: AppSession,
-    isOffline: Boolean,
     destinations: List<AppDestination>,
     selected: AppDestination,
     onSelect: (AppDestination) -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenFeedback: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    LazyColumn(
-        modifier = modifier.padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        item(key = "account") {
-            AccountHeader(session, isOffline)
-        }
-        item(key = "divider") {
-            HorizontalDivider(modifier = Modifier.padding(bottom = 8.dp))
-        }
-        items(destinations, key = { it.name }) { destination ->
-            val isSelected = destination == selected
-            Surface(
-                onClick = { onSelect(destination) },
-                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                    else androidx.compose.ui.graphics.Color.Transparent,
-                contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().semantics { this.selected = isSelected },
-            ) {
-                Row(Modifier.heightIn(min = 46.dp).padding(horizontal = 12.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    DestinationMark(destination)
-                    Text(destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium)
+    Column(modifier.padding(horizontal = 18.dp, vertical = 28.dp)) {
+        Text("Инженер", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 18.dp, bottom = 24.dp))
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(destinations, key = { it.name }) { destination ->
+                val isSelected = destination == selected
+                Surface(
+                    onClick = { onSelect(destination) },
+                    color = if (isSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().semantics { this.selected = isSelected },
+                ) {
+                    Row(Modifier.heightIn(min = 46.dp).padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        DestinationMark(destination)
+                        Text(destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium)
+                    }
                 }
             }
         }
-        item(key = "bottom-space") {
-            Spacer(Modifier.size(12.dp))
-        }
-    }
-}
-
-@Composable
-private fun AccountHeader(session: AppSession, isOffline: Boolean) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 18.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = CircleShape,
-            modifier = Modifier.size(42.dp),
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    text = session.user.profile?.shortDisplayName
-                        ?.firstOrNull()
-                        ?.uppercase()
-                        ?: session.user.email.firstOrNull()?.uppercase() ?: "L",
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    fontWeight = FontWeight.Bold,
-                )
+        Row(Modifier.fillMaxWidth().padding(top = 22.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            IconButton(onClick = onOpenSettings,
+                modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape)) {
+                Icon(Icons.Default.Settings, contentDescription = "Настройки", modifier = Modifier.size(24.dp))
             }
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = session.user.profile?.shortDisplayName ?: "Инженер",
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                text = if (isOffline) "Локальный режим" else session.user.email,
-                color = if (isOffline) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-            )
+            IconButton(onClick = onOpenFeedback,
+                modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape)) {
+                Icon(painterResource(R.drawable.ic_sidebar_ladybug), contentDescription = "Обратная связь", modifier = Modifier.size(24.dp))
+            }
         }
     }
 }
@@ -729,6 +495,10 @@ private fun DestinationContent(
                 simpleOneState = simpleOneState,
                 widthClass = contentWidthClass,
                 onOpenDestination = onSelect,
+                onRefreshRequests = simpleOneActions.onRefreshActive,
+                fuelRepository = fuelRepository,
+                simpleOneRepository = simpleOneRepository,
+                requestsActions = simpleOneActions,
             )
             AppDestination.Requests -> RequestsScreen(
                 state = simpleOneState,
@@ -792,6 +562,7 @@ private fun DestinationContent(
             AppDestination.Analytics -> AnalyticsScreen(
                 state = simpleOneState,
                 widthClass = contentWidthClass,
+                onRefresh = simpleOneActions.onRefreshAnalytics,
             )
             AppDestination.Feedback -> FeedbackRoute(
                 session = session,

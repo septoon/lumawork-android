@@ -11,6 +11,8 @@ class FuelRepository(
     private val cache: FuelCache,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
 ) {
+    suspend fun fuelTypes(session: AppSession): List<String> = api.fuelTypes(session.token)
+
     suspend fun read(ownerUserId: String): FuelSnapshot? = cache.read(ownerUserId)
 
     suspend fun refresh(session: AppSession): FuelSnapshot = FuelSnapshot(

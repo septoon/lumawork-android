@@ -5,6 +5,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -17,12 +19,17 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.domain.model.AppUser
+import ru.lumastack.lumawork.domain.model.UserProfile
+import java.util.Base64
 
 interface AuthApi {
     suspend fun requestCode(email: String)
     suspend fun verifyCode(email: String, code: String): AppSession
     suspend fun currentUser(token: String): AppUser
     suspend fun logout(token: String)
+    suspend fun updateProfile(token: String, profile: UserProfile): AppUser
+    suspend fun uploadAvatar(token: String, bytes: ByteArray): AppUser
+    suspend fun deleteAvatar(token: String): AppUser
 }
 
 sealed class AuthFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
@@ -31,8 +38,8 @@ sealed class AuthFailure(message: String, cause: Throwable? = null) : Exception(
     )
 
     class Http(val status: Int, message: String) : AuthFailure(message)
-    class Network(cause: IOException) : AuthFailure("Не удалось подключиться к серверу авторизации.", cause)
-    data object InvalidResponse : AuthFailure("Сервер авторизации вернул некорректный ответ.")
+    class Network(cause: IOException) : AuthFailure("Не удалось войти. Проверьте подключение к интернету.", cause)
+    data object InvalidResponse : AuthFailure("Не удалось войти. Попробуйте ещё раз.")
 }
 
 class OkHttpAuthApi(
@@ -68,6 +75,24 @@ class OkHttpAuthApi(
             .post(ByteArray(0).toRequestBody(null))
             .build()
         execute(request).use(::requireSuccess)
+    }
+
+    override suspend fun updateProfile(token: String, profile: UserProfile): AppUser = withContext(Dispatchers.IO) {
+        val request = requestBuilder("/api/v2/profile", token)
+            .put(json.encodeToString(profile).toRequestBody(JSON_MEDIA_TYPE)).build()
+        execute(request).use { decode<CurrentUserResponse>(requireSuccess(it)).user }
+    }
+
+    override suspend fun uploadAvatar(token: String, bytes: ByteArray): AppUser = withContext(Dispatchers.IO) {
+        val body = AvatarBody(Base64.getEncoder().encodeToString(bytes), "image/jpeg")
+        val request = requestBuilder("/api/v2/profile/avatar", token)
+            .post(json.encodeToString(body).toRequestBody(JSON_MEDIA_TYPE)).build()
+        execute(request).use { decode<CurrentUserResponse>(requireSuccess(it)).user }
+    }
+
+    override suspend fun deleteAvatar(token: String): AppUser = withContext(Dispatchers.IO) {
+        val request = requestBuilder("/api/v2/profile/avatar", token).delete().build()
+        execute(request).use { decode<CurrentUserResponse>(requireSuccess(it)).user }
     }
 
     private inline fun <reified Body> post(path: String, body: Body): Request = requestBuilder(path)
@@ -107,7 +132,7 @@ class OkHttpAuthApi(
         }
         throw AuthFailure.Http(
             status = response.code,
-            message = payload?.message ?: "Ошибка авторизации (${response.code}).",
+            message = payload?.message ?: "Не удалось войти. Попробуйте ещё раз.",
         )
     }
 
@@ -158,6 +183,9 @@ private data class VerifyCodeBody(val email: String, val code: String)
 
 @Serializable
 private data class CurrentUserResponse(val user: AppUser)
+
+@Serializable
+private data class AvatarBody(val imageBase64: String, val mimeType: String)
 
 @Serializable
 private data class ErrorResponse(

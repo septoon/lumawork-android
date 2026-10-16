@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.fuel
 
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -36,6 +38,7 @@ import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -78,6 +81,7 @@ fun FuelRoute(
         factory = FuelViewModel.factory(repository, routeRepository, session, startOffline),
     )
     val state by fuelViewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(fuelViewModel) { fuelViewModel.reloadCached() }
     FuelScreen(
         state = state,
         widthClass = widthClass,
@@ -122,14 +126,15 @@ private fun FuelScreen(
             else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
         )
     }
-    Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
+    AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
+        enabled = !state.isSaving, contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
             LazyColumn(
                 Modifier.widthIn(max = 680.dp).fillMaxSize(),
                 contentPadding = PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                fuelHeader(state, onRefresh, onAddFuel, onAddAdjustment, onSelectYear)
+                fuelHeader(state, onAddFuel, onAddAdjustment, onSelectYear)
                 fuelMessages(state)
                 fuelMonths(state, onToggleMonth, onEdit, onRequestDelete)
             }
@@ -142,7 +147,7 @@ private fun FuelScreen(
                     Modifier.weight(0.42f).fillMaxHeight().widthIn(max = 470.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    fuelHeader(state, onRefresh, onAddFuel, onAddAdjustment, onSelectYear)
+                    fuelHeader(state, onAddFuel, onAddAdjustment, onSelectYear)
                     fuelMessages(state)
                     item(key = "archive") { ArchivePanel(state.archivedCount) }
                 }
@@ -184,7 +189,7 @@ private fun FuelScreen(
         AlertDialog(
             onDismissRequest = onCancelDelete,
             title = { Text("Удалить запись?") },
-            text = { Text("Запись будет удалена с сервера и исчезнет в iOS.") },
+            text = { Text("Запись будет удалена. Отменить это действие нельзя.") },
             confirmButton = { TextButton(onClick = onConfirmDelete) { Text("Удалить") } },
             dismissButton = { TextButton(onClick = onCancelDelete) { Text("Отмена") } },
         )
@@ -193,13 +198,12 @@ private fun FuelScreen(
 
 private fun androidx.compose.foundation.lazy.LazyListScope.fuelHeader(
     state: FuelUiState,
-    onRefresh: () -> Unit,
     onAddFuel: () -> Unit,
     onAddAdjustment: (FuelAdjustmentKind) -> Unit,
     onSelectYear: (String) -> Unit,
 ) {
     item(key = "balance") {
-        FuelBalancePanel(state, onRefresh)
+        FuelBalancePanel(state)
     }
     item(key = "actions") {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -261,7 +265,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelMonths(
 }
 
 @Composable
-private fun FuelBalancePanel(state: FuelUiState, onRefresh: () -> Unit) {
+private fun FuelBalancePanel(state: FuelUiState) {
     val totals = state.summary.totals
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f)),
@@ -273,7 +277,6 @@ private fun FuelBalancePanel(state: FuelUiState, onRefresh: () -> Unit) {
                     Text("Топливный баланс", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text("Расход, компенсации и задолженность", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
-                TextButton(onClick = onRefresh, enabled = !state.isLoading) { Text("Обновить") }
             }
             if (!state.summary.hasData) {
                 Text("Пока нет данных.", color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -44,7 +44,7 @@ data class AutoUiState(
 
 class AutoViewModel(
     private val repository: AutoRepository,
-    private val session: AppSession,
+    private var session: AppSession,
     private val startOffline: Boolean,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(AutoUiState())
@@ -52,11 +52,20 @@ class AutoViewModel(
     private var loadJob: Job? = null
 
     init {
+        viewModelScope.launch {
+            repository.changes.collect { (owner, snapshot) ->
+                if (owner == session.user.id) mutableState.update { it.copy(snapshot = snapshot) }
+            }
+        }
         loadJob = viewModelScope.launch {
             val cached = runCatching { repository.read(session.user.id) }.getOrNull()
             mutableState.update { it.copy(snapshot = cached ?: AutoSnapshot()) }
             if (!startOffline) refreshCurrent(showError = cached == null)
         }
+    }
+
+    fun updateSession(value: AppSession) {
+        if (value.user.id == session.user.id) session = value
     }
 
     fun refresh() {

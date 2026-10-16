@@ -54,11 +54,13 @@ fun buildRequestAnalytics(state: SimpleOneUiState, today: LocalDate = LocalDate.
 }
 
 @Composable
-fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, modifier: Modifier = Modifier) {
+fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, onRefresh: () -> Unit, modifier: Modifier = Modifier) {
     val analytics = remember(state.snapshot, state.closedArchive) { buildRequestAnalytics(state) }
     val dark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
     val background = remember(dark) { Brush.verticalGradient(if (dark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark) else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight)) }
-    Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
+    ru.lumastack.lumawork.ui.theme.AppRefreshContainer(modifier.fillMaxSize().background(background),
+        isRefreshing = state.isLoading || state.isClosedLoading, onRefresh = onRefresh,
+        enabled = state.isAuthorized) {
         LazyColumn(
             Modifier.widthIn(max = 1120.dp).fillMaxSize(),
             contentPadding = PaddingValues(20.dp),
@@ -70,7 +72,7 @@ fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, modifier
                     MetricRow(analytics)
                 } else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { MetricCards(analytics) }
             }
-            if (state.closedArchive.requests.isEmpty()) item { Notice("Для полной аналитики откройте вкладку «Закрытые SO» в заявках и обновите архив.") }
+            if (state.closedArchive.requests.isEmpty()) item { Notice("Нет данных о закрытых заявках.") }
             item {
                 if (widthClass == AppWidthClass.Compact) Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     AnalyticsPanel("Статусы активных", analytics.byStatus, MaterialTheme.colorScheme.primary)

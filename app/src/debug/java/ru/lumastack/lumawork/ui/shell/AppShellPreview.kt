@@ -1,5 +1,11 @@
 package ru.lumastack.lumawork.ui.shell
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
+import ru.lumastack.lumawork.data.auth.AuthApi
+import ru.lumastack.lumawork.data.auth.AuthRepository
+import ru.lumastack.lumawork.data.session.SessionStore
+import ru.lumastack.lumawork.data.session.RememberedEmailStore
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import ru.lumastack.lumawork.data.route.RouteApi
@@ -116,8 +122,10 @@ private fun TabletAppShellPreview() {
 internal fun PreviewShell() {
     LumaWorkTheme {
         val context = LocalContext.current
+        val session by previewAuthRepository.sessionChanges.collectAsState()
         AppShell(
-            session = previewSession,
+            session = session ?: previewSession,
+            authRepository = previewAuthRepository,
             isOffline = false,
             routeRepository = previewRouteRepository,
             simpleOneRepository = previewSimpleOneRepository,
@@ -169,12 +177,13 @@ private val previewRouteRepository = RouteRepository(
             token: String,
             date: String,
             settings: RouteSettings,
-        ): RouteDayRecord? = null
+            workType: ru.lumastack.lumawork.domain.route.RouteWorkType,
+        ): RouteDayRecord? = null.also { previewRefresh("home") }
 
         override suspend fun sendDay(token: String, record: RouteDayRecord) = Unit
     },
     cache = object : RouteCache {
-        override suspend fun read(userId: String, date: String): RouteDayRecord? = null
+        override suspend fun read(userId: String, date: String, workType: ru.lumastack.lumawork.domain.route.RouteWorkType): RouteDayRecord? = null
         override suspend fun save(userId: String, record: RouteDayRecord) = Unit
     },
 )
@@ -349,7 +358,7 @@ private val previewEmployeeRepository = EmployeeRepository(
 
 private val previewAutoRepository = AutoRepository(
     api = object : AutoApi {
-        override suspend fun vehicles(token: String): List<Vehicle> = emptyList()
+        override suspend fun vehicles(token: String): List<Vehicle> = emptyList<Vehicle>().also { previewRefresh("auto") }
         override suspend fun createVehicle(token: String, draft: VehicleDraft): Vehicle = error("unused")
         override suspend fun updateVehicle(token: String, vehicleId: String, draft: VehicleDraft): Vehicle = error("unused")
         override suspend fun maintenance(token: String): List<MaintenanceRecord> = emptyList()
@@ -364,7 +373,7 @@ private val previewAutoRepository = AutoRepository(
 
 private val previewFuelRepository = FuelRepository(
     api = object : FuelApi {
-        override suspend fun records(token: String): List<FuelRecord> = emptyList()
+        override suspend fun records(token: String): List<FuelRecord> = emptyList<FuelRecord>().also { previewRefresh("fuel") }
         override suspend fun create(token: String, draft: FuelDraft): FuelRecord = error("unused")
         override suspend fun update(token: String, recordId: String, draft: FuelDraft): FuelRecord = error("unused")
         override suspend fun delete(token: String, recordId: String) = Unit
@@ -377,7 +386,7 @@ private val previewFuelRepository = FuelRepository(
 
 private val previewWikiRepository = WikiRepository(
     api = object : WikiApi {
-        override suspend fun search(query: String, limit: Int): List<WikiSearchResult> = emptyList()
+        override suspend fun search(query: String, limit: Int): List<WikiSearchResult> = emptyList<WikiSearchResult>().also { previewRefresh("wiki") }
         override suspend fun article(id: String, maxChars: Int): WikiArticle = error("unused")
         override suspend fun isPdfAvailable(id: String): Boolean = false
         override fun pdfUrl(id: String): String = "https://wiki.lumastack.ru/pdf/$id"
@@ -392,7 +401,7 @@ private val previewWikiRepository = WikiRepository(
 
 private val previewFtpRepository = FtpRepository(
     api = object : FtpApi {
-        override suspend fun files(token: String, path: String) = FtpDirectoryResponse(path)
+        override suspend fun files(token: String, path: String) = FtpDirectoryResponse(path).also { previewRefresh("ftp") }
         override suspend fun download(token: String, item: FtpItem): java.io.File = error("unused")
     },
     cache = object : FtpCache {
@@ -403,7 +412,7 @@ private val previewFtpRepository = FtpRepository(
 
 private val previewSalaryRepository = SalaryRepository(
     api = object : SalaryApi {
-        override suspend fun records(token: String): List<SalaryEntry> = emptyList()
+        override suspend fun records(token: String): List<SalaryEntry> = emptyList<SalaryEntry>().also { previewRefresh("salary") }
         override suspend fun create(token: String, draft: AndroidSalaryDraft): SalaryEntry = error("unused")
         override suspend fun update(token: String, id: String, draft: AndroidSalaryDraft): SalaryEntry = error("unused")
         override suspend fun delete(token: String, id: String) = Unit
@@ -416,7 +425,7 @@ private val previewSalaryRepository = SalaryRepository(
 
 private val previewFeedbackRepository = FeedbackRepository(
     api = object : FeedbackApi {
-        override suspend fun messages(token: String, admin: Boolean): List<FeedbackMessage> = emptyList()
+        override suspend fun messages(token: String, admin: Boolean): List<FeedbackMessage> = emptyList<FeedbackMessage>().also { previewRefresh("feedback") }
         override suspend fun submit(token: String, draft: AndroidFeedbackDraft, images: List<FeedbackImage>): FeedbackMessage = error("unused")
         override suspend fun add(token: String, id: String, text: String): FeedbackMessage = error("unused")
         override suspend fun attachment(token: String, reportId: String, attachmentId: String, admin: Boolean): ByteArray = error("unused")
@@ -442,3 +451,35 @@ private val previewAdminRepository = AdminRepository(
         override suspend fun save(owner: String, snapshot: AdminSnapshot) = Unit
     },
 )
+
+private val previewAuthRepository by lazy {
+    var current = previewSession
+    AuthRepository(
+        api = object : AuthApi {
+            override suspend fun requestCode(email: String) = Unit
+            override suspend fun verifyCode(email: String, code: String) = current
+            override suspend fun currentUser(token: String) = current.user
+            override suspend fun logout(token: String) = Unit
+            override suspend fun updateProfile(token: String, profile: UserProfile): AppUser {
+                current = current.copy(user = current.user.copy(profile = profile))
+                return current.user
+            }
+            override suspend fun uploadAvatar(token: String, bytes: ByteArray) = current.user
+            override suspend fun deleteAvatar(token: String) = current.user.copy(avatarUrl = null)
+        },
+        sessionStore = object : SessionStore {
+            override fun read() = current
+            override fun save(session: AppSession) { current = session }
+            override fun clear() = Unit
+        },
+        emailStore = object : RememberedEmailStore {
+            override fun read() = current.user.email
+            override fun save(email: String) = Unit
+        },
+    )
+}
+
+/** Fixture-only callback marker for gesture checks; never logs account data. */
+private fun previewRefresh(section: String) {
+    android.util.Log.d("LumaWorkPreview", "refresh:$section")
+}

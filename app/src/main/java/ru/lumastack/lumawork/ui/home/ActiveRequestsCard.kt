@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.home
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +35,7 @@ fun ActiveRequestsCard(
     state: SimpleOneUiState,
     onOpenRequests: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenRequest: (SimpleOneRequest) -> Unit = { onOpenRequests() },
 ) {
     val requests = state.activeRequests
     val now = remember(requests) { LocalDateTime.now() }
@@ -87,12 +89,12 @@ fun ActiveRequestsCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    RequestMetric("Всего", requests.size, Modifier.weight(1f))
+                    RequestMetric("Всего", requests.size, Modifier.weight(1f).clickable(onClick = onOpenRequests))
                     RequestMetric("Просрочено", overdue, Modifier.weight(1f), isAlert = overdue > 0)
                     RequestMetric("Сегодня", dueToday, Modifier.weight(1f))
                 }
 
-                if (nearest != null) NearestRequestSummary(nearest)
+                if (nearest != null) NearestRequestSummary(nearest, onClick = { onOpenRequest(nearest) })
                 else Text(
                     text = "Заявок со сроком SLA нет",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -163,7 +165,7 @@ private fun RequestMetric(
 }
 
 @Composable
-private fun NearestRequestSummary(request: SimpleOneRequest) {
+private fun NearestRequestSummary(request: SimpleOneRequest, onClick: () -> Unit) {
     val overdue = request.isOverdue()
     Surface(
         color = if (overdue) {
@@ -172,7 +174,7 @@ private fun NearestRequestSummary(request: SimpleOneRequest) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
         },
         shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -209,6 +211,8 @@ private fun NearestRequestSummary(request: SimpleOneRequest) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+            if (request.assignedUser.isNotBlank()) Text(request.assignedUser, style = MaterialTheme.typography.bodySmall)
+            request.slaStatusText()?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             if (request.address.isNotBlank()) {
                 Text(
                     request.address,

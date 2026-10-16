@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.data.auto
 
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import ru.lumastack.lumawork.domain.auto.AutoSnapshot
@@ -14,6 +16,9 @@ class AutoRepository(
     private val cache: AutoCache,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
 ) {
+    private val mutableChanges = MutableSharedFlow<Pair<String, AutoSnapshot>>(extraBufferCapacity = 1)
+    val changes = mutableChanges.asSharedFlow()
+
     suspend fun read(ownerUserId: String): AutoSnapshot? = cache.read(ownerUserId)
 
     suspend fun refresh(session: AppSession): AutoSnapshot = coroutineScope {
@@ -31,12 +36,12 @@ class AutoRepository(
             maintenance = records.sortedByDescending(MaintenanceRecord::date),
             selectedVehicleId = selectedId,
             updatedAtEpochMillis = nowEpochMillis(),
-        ).also { cache.save(session.user.id, it) }
+        ).also { persist(session.user.id, it) }
     }
 
     suspend fun select(ownerUserId: String, vehicleId: String): AutoSnapshot {
         val previous = read(ownerUserId) ?: AutoSnapshot()
-        return previous.copy(selectedVehicleId = vehicleId).also { cache.save(ownerUserId, it) }
+        return previous.copy(selectedVehicleId = vehicleId).also { persist(ownerUserId, it) }
     }
 
     suspend fun createVehicle(session: AppSession, draft: VehicleDraft): AutoSnapshot {
@@ -49,7 +54,7 @@ class AutoRepository(
             vehicles = vehicles,
             selectedVehicleId = created.id,
             updatedAtEpochMillis = nowEpochMillis(),
-        ).also { cache.save(session.user.id, it) }
+        ).also { persist(session.user.id, it) }
     }
 
     suspend fun updateVehicle(session: AppSession, vehicleId: String, draft: VehicleDraft): AutoSnapshot {
@@ -66,7 +71,7 @@ class AutoRepository(
             vehicles = vehicles,
             selectedVehicleId = updated.id,
             updatedAtEpochMillis = nowEpochMillis(),
-        ).also { cache.save(session.user.id, it) }
+        ).also { persist(session.user.id, it) }
     }
 
     suspend fun saveMaintenance(
@@ -88,7 +93,12 @@ class AutoRepository(
         return previous.copy(
             maintenance = records.sortedByDescending(MaintenanceRecord::date),
             updatedAtEpochMillis = nowEpochMillis(),
-        ).also { cache.save(session.user.id, it) }
+        ).also { persist(session.user.id, it) }
+    }
+
+    private suspend fun persist(ownerUserId: String, snapshot: AutoSnapshot) {
+        cache.save(ownerUserId, snapshot)
+        mutableChanges.emit(ownerUserId to snapshot)
     }
 
     private suspend fun synchronizeLegacyVehicle(session: AppSession, vehicles: List<Vehicle>): List<Vehicle> {

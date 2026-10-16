@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Filled ladybug, matching the iOS sidebar's ladybug.fill action. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:strokeColor="#FF000000" android:strokeWidth="1.5" android:strokeLineCap="round"
+        android:pathData="M9.5,4.5 L8,2 M14.5,4.5 L16,2 M7,10 L4,8 M6,14 L3,14 M7,18 L4,20 M17,10 L20,8 M18,14 L21,14 M17,18 L20,20" />
+    <path android:fillColor="#FF000000" android:fillType="evenOdd"
+        android:pathData="M9,6 C9,4.3 10.3,3.5 12,3.5 C13.7,3.5 15,4.3 15,6 L15,7 C17.1,8.3 18,10.6 18,14 C18,18.5 15.8,22 12,22 C8.2,22 6,18.5 6,14 C6,10.6 6.9,8.3 9,7 Z M11.5,8 L11.5,21 L12.5,21 L12.5,8 Z M9,10 A1,1 0,1 0,9,12 A1,1 0,1 0,9,10 Z M15,10 A1,1 0,1 0,15,12 A1,1 0,1 0,15,10 Z M9,15 A1,1 0,1 0,9,17 A1,1 0,1 0,9,15 Z M15,15 A1,1 0,1 0,15,17 A1,1 0,1 0,15,15 Z" />
+</vector>

@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
                     onBackToEmail = viewModel::backToEmail,
                     onResetAccess = viewModel::resetAccessRevoked,
                     onLogout = viewModel::logout,
+                    authRepository = container.authRepository,
                     routeRepository = container.routeRepository,
                     simpleOneRepository = container.simpleOneRepository,
                     coordinationRepository = container.coordinationRepository,

@@ -2,16 +2,46 @@ package ru.lumastack.lumawork.data.auth
 
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
+import ru.lumastack.lumawork.domain.model.UserProfile
 import ru.lumastack.lumawork.data.session.RememberedEmailStore
 import ru.lumastack.lumawork.data.session.SessionStore
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.domain.model.AppUser
 
 class AuthRepositoryTest {
+    @Test
+    fun `late profile response cannot restore a session after logout`() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val api = FakeAuthApi(beforeProfileUpdate = { started.complete(Unit); release.await() })
+        val repository = repository(api, session())
+        val saving = async { runCatching { repository.updateProfile(UserProfile(firstName = "Updated")) } }
+        started.await()
+        repository.logout()
+        release.complete(Unit)
+        assertEquals(true, saving.await().isFailure)
+        assertNull(repository.session)
+    }
+    @Test
+    fun `saved profile updates the encrypted session and avatar mutations keep the profile`() = runBlocking {
+        val store = FakeSessionStore(session())
+        val repository = AuthRepository(FakeAuthApi(), store, FakeEmailStore())
+        val profile = UserProfile(firstName = "Тигран", city = "Симферополь")
+        repository.updateProfile(profile)
+        assertEquals(profile, store.read()?.user?.profile)
+        repository.uploadAvatar(byteArrayOf(1))
+        assertEquals("https://example.com/avatar.webp", repository.session?.user?.avatarUrl)
+        assertEquals(profile, repository.session?.user?.profile)
+        repository.deleteAvatar()
+        assertNull(repository.session?.user?.avatarUrl)
+        assertEquals(profile, AuthRepository(FakeAuthApi(), store, FakeEmailStore()).session?.user?.profile)
+    }
     @Test
     fun `email is trimmed and lowercased before request`() = runBlocking {
         val api = FakeAuthApi()
@@ -65,8 +95,17 @@ class AuthRepositoryTest {
 
 private class FakeAuthApi(
     private val currentUserError: Exception? = null,
+    private val beforeProfileUpdate: suspend () -> Unit = {},
 ) : AuthApi {
     var requestedEmail: String? = null
+    private var user = AppUser(id = "1", email = "user@example.com", role = "user")
+
+    override suspend fun updateProfile(token: String, profile: UserProfile): AppUser {
+        beforeProfileUpdate()
+        return user.copy(profile = profile).also { user = it }
+    }
+    override suspend fun uploadAvatar(token: String, bytes: ByteArray): AppUser = user.copy(avatarUrl = "https://example.com/avatar.webp").also { user = it }
+    override suspend fun deleteAvatar(token: String): AppUser = user.copy(avatarUrl = null).also { user = it }
 
     override suspend fun requestCode(email: String) {
         requestedEmail = email

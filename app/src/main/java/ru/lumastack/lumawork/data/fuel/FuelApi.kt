@@ -21,6 +21,7 @@ import ru.lumastack.lumawork.domain.fuel.FuelRecord
 import ru.lumastack.lumawork.domain.fuel.FuelRecordType
 
 interface FuelApi {
+    suspend fun fuelTypes(token: String): List<String> = emptyList()
     suspend fun records(token: String): List<FuelRecord>
     suspend fun create(token: String, draft: FuelDraft): FuelRecord
     suspend fun update(token: String, recordId: String, draft: FuelDraft): FuelRecord
@@ -28,10 +29,10 @@ interface FuelApi {
 }
 
 sealed class FuelFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
-    class Network(cause: IOException) : FuelFailure("Не удалось подключиться к серверу топлива.", cause)
+    class Network(cause: IOException) : FuelFailure("Не удалось загрузить данные топлива. Проверьте подключение к интернету.", cause)
     data object Unauthorized : FuelFailure("Сессия приложения «Инженер» истекла.")
-    class Http(val status: Int) : FuelFailure("Сервер топлива вернул HTTP $status.")
-    data object InvalidResponse : FuelFailure("Сервер топлива вернул некорректные данные.")
+    class Http(val status: Int) : FuelFailure("Не удалось выполнить действие с топливом. Попробуйте ещё раз.")
+    data object InvalidResponse : FuelFailure("Не удалось загрузить данные топлива.")
 }
 
 class OkHttpFuelApi(
@@ -45,6 +46,11 @@ class OkHttpFuelApi(
         .build(),
 ) : FuelApi {
     private val origin = baseOrigin.trimEnd('/')
+
+    override suspend fun fuelTypes(token: String): List<String> {
+        val profile = execute<GsmProfileResponse>(request("/api/v2/gsm/profile", token)).profile
+        return profile.fuelTypes.map(String::trim).filter(String::isNotBlank).ifEmpty { listOfNotNull(profile.fuelType?.trim()?.takeIf(String::isNotBlank)) }.distinct()
+    }
 
     override suspend fun records(token: String): List<FuelRecord> =
         execute<FuelRecordsResponse>(request("/api/v2/fuel", token)).records
@@ -117,6 +123,7 @@ class OkHttpFuelApi(
             mileage = mileageValue.takeIf { recordType == FuelRecordType.Fuel },
             liters = litersValue,
             fuelCost = fuelCostValue.takeIf { recordType == FuelRecordType.Fuel },
+            fuelType = fuelType.trim().takeIf { recordType == FuelRecordType.Fuel && it.isNotEmpty() },
         ),
     )
 
@@ -124,6 +131,11 @@ class OkHttpFuelApi(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }
+
+@Serializable
+private data class GsmProfileResponse(val profile: GsmFuelProfile = GsmFuelProfile())
+@Serializable
+private data class GsmFuelProfile(val fuelTypes: List<String> = emptyList(), val fuelType: String? = null)
 
 @Serializable
 private data class FuelRecordsResponse(val records: List<FuelRecord> = emptyList())
@@ -141,6 +153,7 @@ private data class FuelPayload(
     val mileage: Double? = null,
     val liters: Double? = null,
     val fuelCost: Double? = null,
+    val fuelType: String? = null,
 )
 
 private suspend fun Call.awaitFuel(): Response = suspendCancellableCoroutine { continuation ->

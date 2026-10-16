@@ -7,6 +7,7 @@ import org.junit.Test
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.domain.model.AppUser
 import ru.lumastack.lumawork.domain.route.RouteDayRecord
+import ru.lumastack.lumawork.domain.route.RouteWorkType
 import ru.lumastack.lumawork.domain.route.RouteSettings
 import ru.lumastack.lumawork.domain.route.defaultRouteDay
 
@@ -32,7 +33,7 @@ class RouteRepositoryTest {
     }
 
     @Test
-    fun `remote day is cached under current user`() = runBlocking {
+    fun `remote day remains a candidate until current selection accepts it`() = runBlocking {
         val remote = defaultRouteDay(date, settings).copy(distanceKm = 42)
         val cache = FakeRouteCache()
         val repository = RouteRepository(FakeRouteApi(remote), cache)
@@ -40,23 +41,30 @@ class RouteRepositoryTest {
         val refreshed = repository.refresh(session, date, settings, local = null)
 
         assertEquals(42, refreshed?.distanceKm)
-        assertEquals(remote, cache.values["user-1" to date])
+        assertNull(cache.values["user-1" to date])
     }
 
     @Test
-    fun `successful send resets only the local day and marks it sent`() = runBlocking {
+    fun `successful send retains submitted route and mileage without overwriting newer cache`() = runBlocking {
         val cache = FakeRouteCache()
         val api = FakeRouteApi(remote = null)
         val repository = RouteRepository(api, cache)
         val record = defaultRouteDay(date, settings).copy(distanceKm = 20, periodStartOdometer = 1000)
 
-        val reset = repository.send(session, record, settings)
+        val sent = repository.send(session, record)
 
         assertEquals(1, api.sendCount)
-        assertEquals(true, reset.sent)
-        assertEquals(null, reset.distanceKm)
-        assertEquals(reset, cache.values["user-1" to date])
+        assertEquals(record.copy(sent = true), sent)
+        assertNull(cache.values["user-1" to date])
     }
+    @Test fun `shared monthly odometer alone must not suppress remote day loading`() = runBlocking {
+        val api = FakeRouteApi(defaultRouteDay(date, settings).copy(distanceKm = 42))
+        val repository = RouteRepository(api, FakeRouteCache())
+        val refreshed = repository.refresh(session, date, settings, defaultRouteDay(date, settings).copy(periodStartOdometer = 1000))
+        assertEquals(1, api.fetchCount)
+        assertEquals(42, refreshed?.distanceKm)
+    }
+
 }
 
 private class FakeRouteApi(private val remote: RouteDayRecord?) : RouteApi {
@@ -67,6 +75,7 @@ private class FakeRouteApi(private val remote: RouteDayRecord?) : RouteApi {
         token: String,
         date: String,
         settings: RouteSettings,
+        workType: RouteWorkType,
     ): RouteDayRecord? {
         fetchCount += 1
         return remote
@@ -80,7 +89,7 @@ private class FakeRouteApi(private val remote: RouteDayRecord?) : RouteApi {
 private class FakeRouteCache : RouteCache {
     val values = mutableMapOf<Pair<String, String>, RouteDayRecord>()
 
-    override suspend fun read(userId: String, date: String): RouteDayRecord? = values[userId to date]
+    override suspend fun read(userId: String, date: String, workType: RouteWorkType): RouteDayRecord? = values[userId to date]
 
     override suspend fun save(userId: String, record: RouteDayRecord) {
         values[userId to record.date] = record

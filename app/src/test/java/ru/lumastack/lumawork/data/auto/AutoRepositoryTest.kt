@@ -1,6 +1,9 @@
 package ru.lumastack.lumawork.data.auto
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -14,6 +17,15 @@ import ru.lumastack.lumawork.domain.model.AppUser
 import ru.lumastack.lumawork.domain.model.UserProfile
 
 class AutoRepositoryTest {
+    @Test
+    fun `vehicle changes from the profile publish the persisted snapshot to an already open Auto screen`() = runBlocking {
+        val cache = FakeAutoCache().apply { value = AutoSnapshot(vehicles = listOf(Vehicle("v1", make = "Lada", model = "Vesta"))) }
+        val repository = AutoRepository(FakeAutoApi(cache.value!!.vehicles), cache)
+        val next = async(start = CoroutineStart.UNDISPATCHED) { repository.changes.first() }
+        val snapshot = repository.updateVehicle(session(), "v1", VehicleDraft(make = "Lada", model = "Vesta", sts = "UPDATED"))
+        assertEquals("owner" to snapshot, next.await())
+        assertEquals("UPDATED", cache.value?.vehicles?.single()?.sts)
+    }
     @Test
     fun `refresh fills missing typed vehicle fields through existing update endpoint`() = runBlocking {
         val api = FakeAutoApi(

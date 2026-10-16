@@ -2,8 +2,34 @@ package ru.lumastack.lumawork.domain.simpleone
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.LocalDateTime
+import java.util.TimeZone
 
 class SimpleOneModelsTest {
+    @Test
+    fun `SLA captions use the same minute hour and day bounds as iOS`() {
+        val now = LocalDateTime.of(2026, 10, 16, 12, 0)
+        val request = SimpleOneRequest("1", "REQ", deadline = "16.10.2026 12:00:30")
+        assertEquals("Осталось 1 мин.", request.slaStatusText(now))
+        assertEquals("Просрочено на 2 ч. 15 мин.", request.copy(deadline = "16.10.2026 09:45:00").slaStatusText(now))
+        assertEquals("Осталось 2 дн. 3 ч.", request.copy(deadline = "18.10.2026 15:00:00").slaStatusText(now))
+    }
+    @Test
+    fun `API UTC and localized XLSX deadlines represent the same local time`() {
+        val original = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Europe/Simferopol"))
+            val api = SimpleOneRequest("utc", "REQ", deadline = "2026-10-15 22:30:00")
+            val xlsx = api.copy(deadline = "16.10.2026 01:30:00")
+            assertEquals(LocalDateTime.of(2026, 10, 16, 1, 30), api.deadlineDateTime())
+            assertEquals(xlsx.deadlineDateTime(), api.deadlineDateTime())
+            assertEquals(false, api.isOverdue(LocalDateTime.of(2026, 10, 16, 1, 0)))
+            assertEquals(true, api.isDueToday(java.time.LocalDate.of(2026, 10, 16)))
+        } finally {
+            TimeZone.setDefault(original)
+        }
+    }
+
     private val available = SimpleOneRequest(
         sysId = "1",
         number = "REQ1",

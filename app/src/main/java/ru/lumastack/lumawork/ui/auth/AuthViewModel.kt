@@ -44,6 +44,15 @@ class AuthViewModel(private val repository: AuthRepository) : ViewModel() {
     val state = mutableState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            repository.sessionChanges.collect { session ->
+                mutableState.update { current ->
+                    if (current.phase != AuthPhase.Authenticated) current
+                    else if (session == null) AuthUiState(phase = AuthPhase.Email, email = current.email)
+                    else current.copy(session = session, email = session.user.email)
+                }
+            }
+        }
         if (cachedSession != null) refreshSession()
     }
 
@@ -185,9 +194,9 @@ private fun Exception.userMessage(): String = when (this) {
     is AuthFailure.Http -> message ?: "Ошибка авторизации."
     is AuthFailure.InvalidResponse -> message.orEmpty()
     is AuthFailure.Network -> when (cause) {
-        is SocketTimeoutException -> "Сервер авторизации не ответил вовремя."
-        is UnknownHostException -> "Не удалось найти сервер авторизации: api.work.lumastack.ru."
-        else -> "Не удалось подключиться к api.work.lumastack.ru."
+        is SocketTimeoutException -> "Не удалось войти. Попробуйте ещё раз."
+        is UnknownHostException -> "Нет соединения. Проверьте подключение к интернету."
+        else -> "Не удалось подключиться. Попробуйте ещё раз."
     }
     else -> "Не удалось выполнить запрос."
 }

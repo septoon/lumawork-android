@@ -140,6 +140,17 @@ class SimpleOneViewModel(
         }
     }
 
+    fun refreshActiveRequests() {
+        val current = mutableState.value
+        if (startOffline || !current.isAuthorized || current.isInitializing || current.isLoading) return
+        viewModelScope.launch { refreshActive(showError = true) }
+    }
+
+    fun refreshAnalytics() {
+        refreshActiveRequests()
+        loadClosedArchive(force = true)
+    }
+
     fun signOut() {
         viewModelScope.launch {
             repository.signOut(ownerUserId)
@@ -295,7 +306,7 @@ class SimpleOneViewModel(
                     it.copy(
                         isAuthorized = false,
                         isClosedLoading = false,
-                        errorMessage = "Сессия SimpleOne истекла. Показан локальный архив.",
+                        errorMessage = "Войдите в SimpleOne, чтобы обновить архив.",
                     )
                 }
             } catch (error: Exception) {

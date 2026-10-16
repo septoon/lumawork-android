@@ -16,8 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items as lazyRowItems
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -32,10 +30,19 @@ import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material3.MaterialTheme
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
-import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -65,7 +72,7 @@ import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 import ru.lumastack.lumawork.domain.simpleone.filterActiveRequests
 import ru.lumastack.lumawork.domain.simpleone.filterClosedRequests
-import ru.lumastack.lumawork.domain.simpleone.updatedAtDateTime
+import ru.lumastack.lumawork.domain.simpleone.parseSimpleOneDate
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
@@ -78,6 +85,8 @@ data class RequestsActions(
     val onPasswordChange: (String) -> Unit,
     val onSignIn: () -> Unit,
     val onRefresh: () -> Unit,
+    val onRefreshActive: () -> Unit,
+    val onRefreshAnalytics: () -> Unit,
     val onSignOut: () -> Unit,
     val onSearchQueryChange: (String) -> Unit,
     val onStatusFilterChange: (ActiveRequestsStatusFilter) -> Unit,
@@ -155,6 +164,7 @@ fun RequestsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RequestsListContent(
     state: SimpleOneUiState,
@@ -185,60 +195,130 @@ private fun RequestsListContent(
     }
     val visibleRequests = if (state.mode == RequestsMode.Active) activeRequests else closedRequests
 
-    LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(20.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+    PullToRefreshBox(
+        isRefreshing = state.isAuthorized &&
+            (if (state.mode == RequestsMode.Active) state.isLoading else state.isClosedLoading),
+        onRefresh = {
+            if (state.isAuthorized && !state.isLoading && !state.isClosedLoading) actions.onRefresh()
+        },
         modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize(),
     ) {
-        item(key = "connection", span = { GridItemSpan(maxLineSpan) }) {
-            SimpleOneConnectionCard(state = state, actions = actions)
-        }
-
-        item(key = "modes", span = { GridItemSpan(maxLineSpan) }) {
-            RequestsModeSelector(state.mode, actions.onModeChange)
-        }
-
-        item(key = "search-and-filters", span = { GridItemSpan(maxLineSpan) }) {
-            RequestsSearchAndFilters(state = state, actions = actions)
-        }
-
-        item(key = "heading", span = { GridItemSpan(maxLineSpan) }) {
-            RequestsHeading(state = state, count = visibleRequests.size)
-        }
-
-        if (visibleRequests.isEmpty()) {
-            item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
-                EmptyRequestsCard(state)
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Fixed(columns),
+            contentPadding = PaddingValues(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (!state.isAuthorized) {
+                item(key = "connection", span = { GridItemSpan(maxLineSpan) }) {
+                    SimpleOneConnectionCard(state = state, actions = actions)
+                }
+            } else if (state.errorMessage != null) {
+                item(key = "error", span = { GridItemSpan(maxLineSpan) }) {
+                    Text(state.errorMessage, color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium)
+                }
             }
-        } else {
-            items(visibleRequests, key = SimpleOneRequest::id) { request ->
-                RequestCard(request = request, selected = request.id == state.selectedRequest?.id, onClick = { actions.onOpenRequest(request) })
+
+            item(key = "search-and-filters", span = { GridItemSpan(maxLineSpan) }) {
+                RequestsSearchAndFilters(state = state, count = visibleRequests.size, actions = actions)
+            }
+
+            if (state.mode == RequestsMode.Closed) {
+                item(key = "heading", span = { GridItemSpan(maxLineSpan) }) {
+                    RequestsHeading(state = state, count = visibleRequests.size)
+                }
+            }
+
+            if (visibleRequests.isEmpty()) {
+                item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
+                    EmptyRequestsCard(state)
+                }
+            } else {
+                items(visibleRequests, key = SimpleOneRequest::id) { request ->
+                    RequestCard(request = request, selected = request.id == state.selectedRequest?.id, onClick = { actions.onOpenRequest(request) })
+                }
             }
         }
     }
 }
 
 @Composable
-private fun RequestsModeSelector(
-    selected: RequestsMode,
-    onSelect: (RequestsMode) -> Unit,
-) {
-    AppSegmentedControl(
-        titles = RequestsMode.entries.map { it.title },
-        selectedIndex = RequestsMode.entries.indexOf(selected),
-        onSelect = { onSelect(RequestsMode.entries[it]) },
-    )
-}
-
-@Composable
 private fun RequestsSearchAndFilters(
     state: SimpleOneUiState,
+    count: Int,
     actions: RequestsActions,
 ) {
+    var statusMenuExpanded by remember { mutableStateOf(false) }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
+    val counts = remember(state.activeRequests, state.searchQuery) {
+        ActiveRequestsStatusFilter.entries.associateWith { filter ->
+            filterActiveRequests(state.activeRequests, state.searchQuery, filter, state.sortOrder).size
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (state.isAuthorized) {
+            val busy = state.isLoading || state.isClosedLoading
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (state.mode == RequestsMode.Active) {
+                    Box(Modifier.weight(1f)) {
+                        TextButton(onClick = { sortMenuExpanded = true }) {
+                            Text(state.sortOrder.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = "Сортировка заявок")
+                        }
+                        DropdownMenu(sortMenuExpanded, { sortMenuExpanded = false }) {
+                            ActiveRequestsSortOrder.entries.forEach { order ->
+                                DropdownMenuItem(text = { Text(order.title) },
+                                    trailingIcon = { if (state.sortOrder == order) Icon(Icons.Default.Check, "Выбрано") },
+                                    onClick = { sortMenuExpanded = false; actions.onSortOrderChange(order) })
+                            }
+                        }
+                    }
+                } else Spacer(Modifier.weight(1f))
+                IconButton(onClick = actions.onSignOut, enabled = !busy) {
+                    Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Выйти из SimpleOne")
+                }
+            }
+        }
+        if (state.mode == RequestsMode.Active) {
+            Box {
+                TextButton(onClick = { statusMenuExpanded = true },
+                    contentPadding = PaddingValues(vertical = 4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(state.statusFilter.title, style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                        Surface(shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = .12f)) {
+                            Text(count.toString(), Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary)
+                        }
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Выбрать статус",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                DropdownMenu(expanded = statusMenuExpanded,
+                    onDismissRequest = { statusMenuExpanded = false }) {
+                    ActiveRequestsStatusFilter.entries.forEach { filter ->
+                        DropdownMenuItem(
+                            text = { Text("${filter.title} · ${counts[filter] ?: 0}") },
+                            trailingIcon = {
+                                if (state.statusFilter == filter) {
+                                    Icon(Icons.Default.Check, contentDescription = "Выбрано")
+                                }
+                            },
+                            onClick = {
+                                actions.onStatusFilterChange(filter)
+                                statusMenuExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
         AppTextField(
             value = state.searchQuery,
             onValueChange = actions.onSearchQueryChange,
@@ -247,32 +327,6 @@ private fun RequestsSearchAndFilters(
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             modifier = Modifier.fillMaxWidth(),
         )
-        if (state.mode == RequestsMode.Active) {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                lazyRowItems(ActiveRequestsStatusFilter.entries, key = { it.name }) { filter ->
-                    FilterChip(
-                        selected = state.statusFilter == filter,
-                        onClick = { actions.onStatusFilterChange(filter) },
-                        label = { Text(filter.title) },
-                    )
-                }
-                item(key = "sort") {
-                    OutlinedButton(
-                        onClick = {
-                            actions.onSortOrderChange(
-                                if (state.sortOrder == ActiveRequestsSortOrder.RegisteredAt) {
-                                    ActiveRequestsSortOrder.Deadline
-                                } else {
-                                    ActiveRequestsSortOrder.RegisteredAt
-                                },
-                            )
-                        },
-                    ) {
-                        Text(state.sortOrder.title)
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -290,12 +344,10 @@ private fun RequestsHeading(state: SimpleOneUiState, count: Int) {
             )
             Text(
                 text = when {
-                    state.mode == RequestsMode.Closed && !state.hasLoadedClosedArchive -> "Архив загружается только при открытии"
-                    state.mode == RequestsMode.Closed && state.closedArchive.source == ClosedArchiveSource.Xlsx ->
-                        "Полная XLSX-копия · Найдено: $count"
-                    state.mode == RequestsMode.Closed && state.closedArchive.isComplete ->
-                        "Резервная API-копия · ограниченные поля · Найдено: $count"
-                    state.mode == RequestsMode.Closed && !state.isAuthorized -> "Локальная копия доступна без сети"
+                    state.mode == RequestsMode.Closed && state.isClosedLoading && !state.hasLoadedClosedArchive -> "Загружаем архив…"
+                    state.mode == RequestsMode.Closed && state.closedArchive.source != ClosedArchiveSource.Xlsx && state.closedArchive.isComplete ->
+                        "Найдено: $count · Некоторые сведения недоступны"
+                    state.mode == RequestsMode.Closed && !state.isAuthorized && state.closedArchive.requests.isNotEmpty() -> "Войдите, чтобы обновить архив"
                     !state.isAuthorized && state.activeRequests.isNotEmpty() -> "Сохранённые данные — войдите для обновления"
                     else -> "Найдено: $count"
                 },
@@ -319,8 +371,8 @@ private fun EmptyRequestsCard(state: SimpleOneUiState) {
     ) {
         Text(
             text = when {
-                state.mode == RequestsMode.Closed && state.isClosedLoading -> "Синхронизирую закрытый архив…"
-                state.mode == RequestsMode.Closed && !state.isAuthorized -> "Локальный архив пуст. Войдите для первой синхронизации."
+                state.mode == RequestsMode.Closed && state.isClosedLoading -> "Загружаем архив…"
+                state.mode == RequestsMode.Closed && !state.isAuthorized -> "Войдите в SimpleOne, чтобы загрузить архив."
                 state.mode == RequestsMode.Closed -> "Закрытых заявок по поиску нет."
                 state.isAuthorized && !state.isLoading -> "Активных заявок по текущему фильтру нет."
                 !state.isAuthorized -> "После входа здесь появятся активные заявки."
@@ -337,7 +389,6 @@ private fun SimpleOneConnectionCard(
     state: SimpleOneUiState,
     actions: RequestsActions,
 ) {
-    val isBusy = state.isLoading || state.isClosedLoading
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
@@ -349,94 +400,46 @@ private fun SimpleOneConnectionCard(
             modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (state.isAuthorized) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = state.snapshot.currentUser?.displayName?.ifBlank { "SimpleOne" } ?: "SimpleOne",
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                        val updatedAt = if (state.mode == RequestsMode.Closed) {
-                            state.closedArchive.updatedAtDateTime()
-                        } else {
-                            state.snapshot.updatedAtDateTime()
-                        }
-                        Text(
-                            text = updatedAt?.format(UPDATED_FORMATTER)?.let { "Обновлено $it" }
-                                ?: "Данные ещё не синхронизировались",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                    if (isBusy) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = actions.onRefresh,
-                        enabled = !isBusy,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Обновить")
-                    }
-                    OutlinedButton(
-                        onClick = actions.onSignOut,
-                        enabled = !isBusy,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Выйти")
-                    }
-                }
-            } else {
-                Text("Вход в SimpleOne", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "Пароль используется только для входа и не сохраняется.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                AppTextField(
-                    value = state.username,
-                    onValueChange = actions.onUsernameChange,
-                    label = "Логин",
-                    singleLine = true,
-                    enabled = !state.isLoading,
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Text,
-                        imeAction = ImeAction.Next,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                AppTextField(
-                    value = state.password,
-                    onValueChange = actions.onPasswordChange,
-                    label = "Пароль",
-                    singleLine = true,
-                    enabled = !state.isLoading,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done,
-                    ),
-                    keyboardActions = KeyboardActions(onDone = { actions.onSignIn() }),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    onClick = actions.onSignIn,
-                    enabled = !state.isLoading,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    if (state.isLoading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.dp,
-                        )
-                    } else {
-                        Text("Войти и загрузить")
-                    }
+            Text("Вход в SimpleOne", style = MaterialTheme.typography.titleLarge)
+            AppTextField(
+                value = state.username,
+                onValueChange = actions.onUsernameChange,
+                label = "Логин",
+                singleLine = true,
+                enabled = !state.isLoading,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Next,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            AppTextField(
+                value = state.password,
+                onValueChange = actions.onPasswordChange,
+                label = "Пароль",
+                singleLine = true,
+                enabled = !state.isLoading,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(onDone = { actions.onSignIn() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = actions.onSignIn,
+                enabled = !state.isLoading,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (state.isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text("Войти и загрузить")
                 }
             }
 
@@ -513,6 +516,10 @@ private fun RequestCard(request: SimpleOneRequest, selected: Boolean = false, on
             }
             date?.let {
                 Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+            }
+            if (request.source == SimpleOneRequestSource.Active) request.slaStatusText()?.let {
+                Text(it, color = if (overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelMedium)
             }
             if (request.address.isNotBlank()) {
                 Text(
@@ -625,10 +632,10 @@ private fun SimpleOneRequest.detailFields(): List<DetailField> {
     val primary = listOf(
         DetailField("Номер SimpleOne", number),
         DetailField("Входящий номер", incomingNumber),
-        DetailField("Регистрация", registeredAt),
-        DetailField("Предельный срок", deadline),
-        DetailField("Выполнена", completedAt.ifBlank { resolvedAt }),
-        DetailField("Закрыта", closedAt),
+        DetailField("Регистрация", registeredAt.displaySimpleOneDate()),
+        DetailField("Предельный срок", deadline.displaySimpleOneDate()),
+        DetailField("Выполнена", completedAt.ifBlank { resolvedAt }.displaySimpleOneDate()),
+        DetailField("Закрыта", closedAt.displaySimpleOneDate()),
         DetailField("Причина ожидания", waitingReason),
         DetailField("Тип заявки", requestType),
         DetailField("Группа назначения", assignmentGroup),
@@ -666,6 +673,8 @@ private fun String.normalizedDetailTitle(): String = trim()
     .lowercase(Locale.ROOT)
     .replace(Regex("\\s+"), " ")
 
+private fun String.displaySimpleOneDate(): String = parseSimpleOneDate(this)?.format(DEADLINE_FORMATTER)
+    ?: if (startsWith("1970-")) "" else this
+
 private val RUSSIAN_LOCALE = Locale.forLanguageTag("ru")
-private val UPDATED_FORMATTER = DateTimeFormatter.ofPattern("d MMM, HH:mm", RUSSIAN_LOCALE)
 private val DEADLINE_FORMATTER = DateTimeFormatter.ofPattern("d MMM, HH:mm", RUSSIAN_LOCALE)

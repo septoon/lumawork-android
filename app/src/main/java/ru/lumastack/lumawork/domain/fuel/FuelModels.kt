@@ -33,6 +33,7 @@ data class FuelRecord(
     val mileage: Double? = null,
     val liters: Double? = null,
     val fuelCost: Double? = null,
+    val fuelType: String? = null,
 ) {
     val stableId: String
         get() = id ?: "${recordType.name}|${adjustmentKind?.name}|$monthKey|$date|$mileage|$liters|$fuelCost|$amount"
@@ -53,6 +54,7 @@ data class FuelDraft(
     val amount: String = "",
     val carryoverDebtRub: String = "",
     val comment: String = "",
+    val fuelType: String = "",
 ) {
     constructor(record: FuelRecord) : this(
         recordType = record.recordType,
@@ -65,6 +67,7 @@ data class FuelDraft(
         amount = record.amount.numberString(),
         carryoverDebtRub = record.carryoverDebtRub.numberString(),
         comment = record.comment.orEmpty(),
+        fuelType = record.fuelType.orEmpty(),
     )
 
     val mileageValue: Double? get() = mileage.number()
@@ -243,6 +246,16 @@ object FuelSummaryCalculator {
 
     private fun debtAmount(record: FuelRecord): Double = record.amount ?: (record.liters ?: 0.0) * APPROXIMATE_FUEL_PRICE
     private fun debtLiters(record: FuelRecord): Double = record.liters ?: (record.amount ?: 0.0) / APPROXIMATE_FUEL_PRICE
+}
+
+fun validateRefuelingDraft(draft: FuelDraft): String? {
+    if (draft.fuelType.isBlank()) return "Выберите тип топлива в ГСМ профиле."
+    val liters = draft.litersValue
+    val cost = draft.fuelCostValue
+    if (liters == null || !liters.isFinite() || liters < 0) return "Укажите корректное количество литров."
+    if (cost == null || !cost.isFinite() || cost < 0) return "Укажите корректную сумму заправки."
+    if (liters == 0.0 && cost == 0.0) return "Заполните литры и сумму заправки."
+    return validateFuelDraft(draft)
 }
 
 fun validateFuelDraft(draft: FuelDraft): String? {

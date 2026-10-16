@@ -66,6 +66,15 @@ class FuelViewModel(
         }
     }
 
+    fun reloadCached() {
+        viewModelScope.launch {
+            val cached = repository.read(session.user.id) ?: return@launch
+            mutableState.update { current ->
+                if ((cached.updatedAtEpochMillis ?: 0) >= (current.snapshot.updatedAtEpochMillis ?: 0)) current.copy(snapshot = cached) else current
+            }
+        }
+    }
+
     fun refresh() {
         loadJob?.cancel()
         loadJob = viewModelScope.launch { refreshCurrent(showError = true) }

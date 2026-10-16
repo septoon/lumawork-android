@@ -27,21 +27,30 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import ru.lumastack.lumawork.domain.route.RouteDayRecord
+import ru.lumastack.lumawork.domain.route.RouteWorkType
 import ru.lumastack.lumawork.domain.route.RouteSettings
 import ru.lumastack.lumawork.domain.route.RouteStop
 import ru.lumastack.lumawork.domain.route.RouteStopStatus
 import ru.lumastack.lumawork.domain.route.normalizeRouteDay
 
 interface RouteApi {
-    suspend fun fetchDay(token: String, date: String, settings: RouteSettings): RouteDayRecord?
+    suspend fun fetchDay(token: String, date: String, settings: RouteSettings, workType: RouteWorkType = RouteWorkType.Pos): RouteDayRecord?
+    suspend fun fetchMonth(token: String, month: String, settings: RouteSettings): List<RouteDayRecord> = emptyList()
+    suspend fun fetchOfficeAddresses(token: String): List<String> = emptyList()
+    suspend fun suggestedOdometer(token: String, month: String): Int? = null
+    suspend fun sendGsmReport(token: String, month: String): GsmReportResult = throw RouteFailure.InvalidResponse
     suspend fun sendDay(token: String, record: RouteDayRecord)
 }
 
+data class GsmReportResult(val fileName: String, val sentToEmail: String?, val confirmsEmailDelivery: Boolean, val skipEmail: Boolean) {
+    val message: String get() = if (confirmsEmailDelivery && !sentToEmail.isNullOrBlank()) "$fileName отправлен на $sentToEmail." else "$fileName сформирован."
+}
+
 sealed class RouteFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
-    class Network(cause: IOException) : RouteFailure("Не удалось подключиться к серверу маршрутов.", cause)
+    class Network(cause: IOException) : RouteFailure("Не удалось загрузить маршрут. Проверьте подключение к интернету.", cause)
     data object Unauthorized : RouteFailure("Требуется повторный вход.")
     class Http(val status: Int, message: String) : RouteFailure(message)
-    data object InvalidResponse : RouteFailure("Сервер маршрутов вернул некорректный ответ.")
+    data object InvalidResponse : RouteFailure("Не удалось загрузить маршрут.")
 
     val isRetryable: Boolean
         get() = this is Network || this is Http && status in setOf(502, 503, 504)
@@ -59,11 +68,52 @@ class OkHttpRouteApi(
         token: String,
         date: String,
         settings: RouteSettings,
+        workType: RouteWorkType,
     ): RouteDayRecord? {
-        val request = requestBuilder("/api/v2/routes?from=$date&to=$date", token).get().build()
+        val request = requestBuilder("/api/v2/routes?from=$date&to=$date&workType=${workType.wireValue}", token).get().build()
         return execute(request).use { response ->
             val body = requireSuccess(response)
-            if (body.isBlank()) null else parser.parseDay(json.parseToJsonElement(body), date, settings)
+            if (body.isBlank()) null else parser.parseDay(json.parseToJsonElement(body), date, settings, workType)
+        }
+    }
+
+    override suspend fun fetchMonth(token: String, month: String, settings: RouteSettings): List<RouteDayRecord> {
+        val period = java.time.YearMonth.parse(month)
+        val request = requestBuilder("/api/v2/routes?from=${period.atDay(1)}&to=${period.atEndOfMonth()}", token).get().build()
+        return execute(request).use { response ->
+            val body = requireSuccess(response)
+            if (body.isBlank()) emptyList() else parser.parseMonth(json.parseToJsonElement(body), month, settings)
+        }
+    }
+
+    override suspend fun fetchOfficeAddresses(token: String): List<String> {
+        val request = requestBuilder("/api/v2/offices", token).get().build()
+        return execute(request).use { response ->
+            val raw = json.parseToJsonElement(requireSuccess(response)) as? JsonObject ?: throw RouteFailure.InvalidResponse
+            val offices = raw["offices"] as? JsonArray ?: throw RouteFailure.InvalidResponse
+            offices.objects().map { it.string("address") }.filter(String::isNotBlank).distinct()
+        }
+    }
+
+    override suspend fun suggestedOdometer(token: String, month: String): Int? {
+        java.time.YearMonth.parse(month)
+        return execute(requestBuilder("/api/v2/gsm/odometer-suggestion?month=$month", token).get().build()).use { response ->
+            val raw = json.parseToJsonElement(requireSuccess(response)).jsonObject
+            raw.int("startOdometer")?.takeIf { it >= 0 && raw.string("month") == month }
+        }
+    }
+
+    override suspend fun sendGsmReport(token: String, month: String): GsmReportResult {
+        java.time.YearMonth.parse(month)
+        val body = buildJsonObject { put("month", month) }.toString().toRequestBody(JSON_MEDIA_TYPE)
+        val request = requestBuilder("/api/v2/gsm/report", token).post(body).build()
+        return execute(request, timeoutSeconds = 60).use { response ->
+            val raw = json.parseToJsonElement(requireSuccess(response)).jsonObject
+            if (raw.boolean("success") != true) throw RouteFailure.Http(response.code, raw.string("message", "error").ifBlank { "Сервер не подтвердил отправку отчёта." })
+            val result = GsmReportResult(raw.string("outputFileName").ifBlank { "Excel-отчёт" }, raw.string("sentToEmail").ifBlank { null },
+                raw.boolean("sent") == true || raw.string("status").equals("SENT", true), raw.boolean("skipEmail") == true)
+            if (!result.skipEmail && !result.confirmsEmailDelivery) throw RouteFailure.Http(response.code, "ГСМ отчет сформирован, но письмо не отправлено. Повторите попытку.")
+            result
         }
     }
 
@@ -79,11 +129,11 @@ class OkHttpRouteApi(
         .header("Accept", "application/json")
         .header("Authorization", "Bearer $token")
 
-    private suspend fun execute(request: Request): Response {
+    private suspend fun execute(request: Request, timeoutSeconds: Long = 20): Response {
         val call = client.newCall(request)
-        call.timeout().timeout(20, TimeUnit.SECONDS)
+        call.timeout().timeout(timeoutSeconds, TimeUnit.SECONDS)
         return try {
-            call.awaitRoute()
+            (if (timeoutSeconds > 20) client.newBuilder().readTimeout(timeoutSeconds, TimeUnit.SECONDS).build().newCall(request).also { it.timeout().timeout(timeoutSeconds, TimeUnit.SECONDS) } else call).awaitRoute()
         } catch (error: IOException) {
             throw RouteFailure.Network(error)
         }
@@ -93,17 +143,19 @@ class OkHttpRouteApi(
         val body = response.body.string()
         if (response.isSuccessful || response.code == 304) return body
         if (response.code == 401 || response.code == 403) throw RouteFailure.Unauthorized
-        val message = errorMessage(body) ?: "Ошибка маршрутов (${response.code})."
+        val message = errorMessage(body) ?: "Не удалось выполнить действие с маршрутом. Попробуйте ещё раз."
         throw RouteFailure.Http(response.code, message)
     }
 
     private fun errorMessage(body: String): String? {
         val payload = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
-        return payload.string("error").ifBlank { payload.string("message") }.ifBlank { null }
+        if (payload.string("error") == "GSM_PROFILE_REQUIRED") return "Заполните ГСМ профиль в настройках."
+        return payload.string("message").ifBlank { payload.string("error") }.ifBlank { null }
     }
 
     private fun payload(record: RouteDayRecord): JsonObject = buildJsonObject {
         put("date", record.date)
+        put("workType", record.workType.wireValue)
         putNullable("distanceKm", record.distanceKm)
         putNullable("periodStartOdometer", record.periodStartOdometer)
         put("sent", record.sent)
@@ -137,12 +189,13 @@ class OkHttpRouteApi(
 }
 
 class RoutePayloadParser {
-    fun parseDay(payload: JsonElement, date: String, settings: RouteSettings): RouteDayRecord? {
-        val raw = extractDay(payload, date) ?: return null
+    fun parseDay(payload: JsonElement, date: String, settings: RouteSettings, workType: RouteWorkType = RouteWorkType.Pos): RouteDayRecord? {
+        val raw = extractDay(payload, date, workType) ?: return null
         val stops = (raw["stops"] as? JsonArray).orEmpty().mapNotNull(::parseStop)
         return normalizeRouteDay(
             RouteDayRecord(
                 date = date,
+                workType = workType,
                 stops = stops,
                 distanceKm = raw.int("distanceKm", "distance_km"),
                 periodStartOdometer = raw.int("periodStartOdometer", "period_start_odometer"),
@@ -164,15 +217,29 @@ class RoutePayloadParser {
         )
     }
 
-    private fun extractDay(payload: JsonElement, date: String): JsonObject? = when (payload) {
-        is JsonArray -> payload.objects().firstOrNull { it.string("date") == date }
-        is JsonObject -> {
-            (payload["records"] as? JsonArray)?.objects()?.firstOrNull { it.string("date") == date }
-                ?: (payload["days"] as? JsonObject)?.get(date) as? JsonObject
-                ?: payload[date] as? JsonObject
-                ?: payload.takeIf { it.string("date") == date }
+    fun parseMonth(payload: JsonElement, month: String, settings: RouteSettings): List<RouteDayRecord> {
+        val dates = (1..java.time.YearMonth.parse(month).lengthOfMonth()).map { java.time.YearMonth.parse(month).atDay(it).toString() }
+        return dates.flatMap { date -> RouteWorkType.entries.mapNotNull { parseDay(payload, date, settings, it) } }
+    }
+
+    private fun extractDay(payload: JsonElement, date: String, workType: RouteWorkType): JsonObject? {
+        fun matches(raw: JsonObject) = raw.string("date") == date &&
+            (raw.string("workType").ifBlank { "POS" }.equals(workType.wireValue, ignoreCase = true))
+        return when (payload) {
+            is JsonArray -> payload.objects().firstOrNull(::matches)
+            is JsonObject -> {
+                val key = workType.storageKey(date)
+                (payload["records"] as? JsonArray)?.objects()?.firstOrNull(::matches)
+                    ?: ((payload["days"] as? JsonObject)?.get(key) as? JsonObject)?.takeIf {
+                        it.string("workType").ifBlank { workType.wireValue }.equals(workType.wireValue, true)
+                    }
+                    ?: (payload[key] as? JsonObject)?.takeIf {
+                        it.string("workType").ifBlank { workType.wireValue }.equals(workType.wireValue, true)
+                    }
+                    ?: payload.takeIf(::matches)
+            }
+            else -> null
         }
-        else -> null
     }
 
     private fun parseStop(element: JsonElement): RouteStop? {

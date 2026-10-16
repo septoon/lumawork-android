@@ -5,6 +5,15 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class FuelModelsTest {
+    @org.junit.Test fun `home refueling permits a zero cost or zero liters like iOS`() {
+        val draft = FuelDraft(fuelType = "АИ-95", liters = "10,5", fuelCost = "0")
+        org.junit.Assert.assertNull(validateRefuelingDraft(draft))
+        org.junit.Assert.assertNull(validateRefuelingDraft(draft.copy(liters = "0", fuelCost = "800")))
+        org.junit.Assert.assertNotNull(validateRefuelingDraft(draft.copy(liters = "0")))
+        org.junit.Assert.assertNotNull(validateRefuelingDraft(draft.copy(liters = "NaN")))
+        org.junit.Assert.assertNotNull(validateRefuelingDraft(draft.copy(fuelCost = "-1")))
+    }
+
     @Test
     fun `summary matches base norm and compensation rules`() {
         val summary = FuelSummaryCalculator.build(

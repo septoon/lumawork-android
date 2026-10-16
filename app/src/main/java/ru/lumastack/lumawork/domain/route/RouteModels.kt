@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import ru.lumastack.lumawork.domain.model.UserProfile
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
+import ru.lumastack.lumawork.domain.simpleone.parseSimpleOneDate
 
 @Serializable
 enum class RouteStopStatus {
@@ -28,6 +29,14 @@ data class RouteStop(
 )
 
 @Serializable
+enum class RouteWorkType(val title: String) {
+    @SerialName("POS") Pos("POS"),
+    @SerialName("ARM") Arm("АРМ");
+    val wireValue: String get() = if (this == Pos) "POS" else "ARM"
+    fun storageKey(date: String): String = if (this == Pos) date else "$date|ARM"
+}
+
+@Serializable
 data class RouteDayRecord(
     val date: String,
     val stops: List<RouteStop>,
@@ -41,6 +50,8 @@ data class RouteDayRecord(
     val fuelLiters: Double? = null,
     val fuelCostRub: Double? = null,
     val sent: Boolean = false,
+    val workType: RouteWorkType = RouteWorkType.Pos,
+    val queuedForSend: Boolean = false,
 )
 
 data class RouteSettings(
@@ -53,6 +64,11 @@ data class RouteSettings(
     val endAddress: String
         get() = warehouseAddress.ifBlank { OFFICE_ADDRESS }
 
+    fun address(kind: RouteEndpointKind): String = when (kind) {
+        RouteEndpointKind.Warehouse -> startAddress.trim()
+        RouteEndpointKind.Home -> homeAddress.trim()
+    }
+
     companion object {
         const val OFFICE_ADDRESS = "Алушта, ул. В. Хромых, 11"
 
@@ -63,8 +79,12 @@ data class RouteSettings(
     }
 }
 
-fun defaultRouteDay(date: String, settings: RouteSettings): RouteDayRecord = RouteDayRecord(
+enum class RouteEndpointKind(val title: String) { Warehouse("Склад"), Home("Дом") }
+enum class RouteEndpointRole(val title: String) { Start("Старт"), Finish("Финиш") }
+
+fun defaultRouteDay(date: String, settings: RouteSettings, workType: RouteWorkType = RouteWorkType.Pos): RouteDayRecord = RouteDayRecord(
     date = date,
+    workType = workType,
     stops = listOf(
         RouteStop(
             id = "start-$date",
@@ -200,3 +220,36 @@ private fun String?.clean(): String? = this?.trim()?.ifBlank { null }
 
 private val ROUTE_CITIES = listOf("Алушта", "Ялта", "Севастополь", "Симферополь", "Джанкой")
 private val ROUTE_COMMA_SPACING = Regex("\\s*,\\s*")
+
+fun makeYandexRouteUrl(addresses: List<String>): String? {
+    val points = addresses.map { it.trim().replace(ROUTE_COMMA_SPACING, ", ") }.filter(String::isNotBlank)
+        .map { address -> if (ROUTE_CITIES.any { address.contains(it, ignoreCase = true) }) address else "Алушта, $address" }
+    if (points.size < 2) return null
+    fun encode(value: String) = java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+    return "https://yandex.ru/maps/?rtext=${encode(points.joinToString("~"))}&rtt=auto&routes%5Bavoid%5D=unpaved%2Cpoor_condition"
+}
+
+fun closedRouteTemplate(requests: List<SimpleOneRequest>, date: String, warehouse: String): List<SimpleOneRequest> {
+    fun identity(address: String) = normalizeRouteAddress(address).lowercase(java.util.Locale.forLanguageTag("ru"))
+        .replace('ё', 'е').filter(Char::isLetterOrDigit)
+    fun isReturn(request: SimpleOneRequest): Boolean {
+        val type = request.requestType.trim().lowercase()
+        return type == "returnequip" || type == "return_equip" || type.contains("возврат")
+    }
+    val sorted = requests.mapNotNull { request ->
+        val dates = if (isReturn(request)) listOf(request.registeredAt, request.closedAt) else listOf(request.closedAt)
+        val closed = dates.mapNotNull(::parseSimpleOneDate)
+            .firstOrNull { it.toLocalDate().toString() == date } ?: return@mapNotNull null
+        val address = if (isReturn(request)) RouteSettings.OFFICE_ADDRESS else normalizeRouteAddress(request.address)
+        if (address.isBlank()) return@mapNotNull null
+        request.copy(address = address) to closed
+    }.sortedWith(compareBy({ it.second }, { it.first.number }))
+    val result = mutableListOf<SimpleOneRequest>()
+    sorted.forEach { (request, _) -> if (result.lastOrNull()?.let { identity(it.address) } != identity(request.address)) result += request }
+    val warehouseKey = identity(warehouse)
+    if (warehouseKey.isNotBlank()) {
+        while (result.firstOrNull()?.let { identity(it.address) } == warehouseKey) result.removeAt(0)
+        while (result.lastOrNull()?.let { identity(it.address) } == warehouseKey) result.removeAt(result.lastIndex)
+    }
+    return result
+}

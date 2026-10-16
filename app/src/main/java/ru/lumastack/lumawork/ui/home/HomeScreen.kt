@@ -1,54 +1,88 @@
 package ru.lumastack.lumawork.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppTextField
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import kotlinx.coroutines.delay
+import ru.lumastack.lumawork.data.fuel.FuelRepository
 import ru.lumastack.lumawork.data.route.RouteRepository
+import ru.lumastack.lumawork.data.simpleone.SimpleOneRepository
 import ru.lumastack.lumawork.domain.model.AppSession
-import ru.lumastack.lumawork.domain.route.RouteStop
+import ru.lumastack.lumawork.domain.route.RouteWorkType
+import ru.lumastack.lumawork.domain.route.makeYandexRouteUrl
+import ru.lumastack.lumawork.domain.simpleone.RequestsMode
+import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
+import ru.lumastack.lumawork.ui.requests.RequestsActions
+import ru.lumastack.lumawork.ui.requests.SimpleOneRequestDetailContent
 import ru.lumastack.lumawork.ui.shell.AppDestination
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+import ru.lumastack.lumawork.ui.theme.AppTextField
 import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
 import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
 import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
 import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     session: AppSession,
@@ -57,470 +91,193 @@ fun HomeScreen(
     simpleOneState: SimpleOneUiState,
     widthClass: AppWidthClass,
     onOpenDestination: (AppDestination) -> Unit,
+    onRefreshRequests: () -> Unit,
+    fuelRepository: FuelRepository,
+    simpleOneRepository: SimpleOneRepository,
+    requestsActions: RequestsActions,
     modifier: Modifier = Modifier,
 ) {
-    val routeViewModel: RouteViewModel = viewModel(
+    var selectedDate by rememberSaveable(session.user.id) { mutableStateOf(LocalDate.now().toString()) }
+    val model: RouteViewModel = viewModel(
         key = "route-${session.user.id}-${session.token.hashCode()}-$isOffline",
-        factory = RouteViewModel.factory(routeRepository, session, isOffline),
+        factory = RouteViewModel.factory(routeRepository, session, isOffline, LocalDate.parse(selectedDate)),
     )
-    val routeState by routeViewModel.state.collectAsStateWithLifecycle()
+    val state by model.state.collectAsStateWithLifecycle()
+    LaunchedEffect(model) { model.selectDate(LocalDate.parse(selectedDate)) }
+    LaunchedEffect(model, session.user.profile) { model.updateSettings(ru.lumastack.lumawork.domain.route.RouteSettings.from(session.user.profile)) }
     val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
     val background = remember(isDark) {
-        Brush.verticalGradient(
-            if (isDark) {
-                listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            } else {
-                listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight)
-            },
-        )
+        Brush.verticalGradient(if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
+            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight))
     }
     val maxContentWidth = when (widthClass) {
         AppWidthClass.Compact -> 560.dp
         AppWidthClass.Medium -> 920.dp
         AppWidthClass.Expanded -> 1120.dp
     }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var archiveOpen by rememberSaveable { mutableStateOf(false) }
+    var fuelOpen by rememberSaveable { mutableStateOf(false) }
+    var detailOpen by rememberSaveable { mutableStateOf(false) }
+    var routeUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var mapError by remember { mutableStateOf<String?>(null) }
+    var cachedClosed by remember(session.user.id) { mutableStateOf(emptyList<SimpleOneRequest>()) }
+    var savedAddresses by remember(session.user.id) { mutableStateOf(emptyList<String>()) }
+    LaunchedEffect(session.user.id) {
+        cachedClosed = simpleOneRepository.readClosedArchive(session.user.id)?.requests.orEmpty()
+    }
+    LaunchedEffect(state.record.date.take(7)) {
+        savedAddresses = routeRepository.readMonth(session, state.record.date.take(7)).flatMap { it.stops }.map { it.address }.filter(String::isNotBlank).distinct()
+    }
+    LaunchedEffect(state.record.date, state.record.workType, state.isRefreshing, cachedClosed, simpleOneState.closedArchive) {
+        model.autoImportClosedRequests(simpleOneState.closedArchive.requests.ifEmpty { cachedClosed })
+    }
+    LaunchedEffect(state.notice, state.errorMessage) {
+        if (state.notice != null || state.errorMessage != null) { delay(5000); model.dismissMessage() }
+    }
+    fun openMap() {
+        val url = makeYandexRouteUrl(state.record.stops.map { it.address })
+        if (url == null) { mapError = "Добавьте минимум два адреса в маршрут."; return }
+        routeUrl = url
+    }
+    var calendarOpen by rememberSaveable { mutableStateOf(false) }
+    var editorId by rememberSaveable(state.record.date, state.record.workType) { mutableStateOf<String?>(null) }
+    var sendConfirmation by rememberSaveable(state.record.date, state.record.workType) { mutableStateOf(false) }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(background)
-            .padding(horizontal = 20.dp),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = maxContentWidth)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            if (widthClass == AppWidthClass.Compact) {
-                ActiveRequestsCard(
-                    state = simpleOneState,
-                    onOpenRequests = { onOpenDestination(AppDestination.Requests) },
-                )
-                WorkDayCard(
-                    state = routeState,
-                    onDistanceChange = routeViewModel::updateDistance,
-                    onOdometerChange = routeViewModel::updateOdometer,
-                    onAddressChange = routeViewModel::updatePrimaryStopAddress,
-                    onRequestNumberChange = routeViewModel::updatePrimaryStopRequestNumber,
-                    activeRequestsCount = simpleOneState.activeRequests.size,
-                    onImportActiveRequests = {
-                        routeViewModel.importActiveRequests(simpleOneState.activeRequests)
-                    },
-                    onSend = routeViewModel::send,
-                )
-                if (isOffline) ConnectionCard(isOffline)
-                AccountCard(session)
-                QuickSectionsCard(
-                    widthClass = widthClass,
-                    onOpenDestination = onOpenDestination,
-                )
-            } else {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Column(
-                        modifier = Modifier.weight(0.9f),
-                        verticalArrangement = Arrangement.spacedBy(18.dp),
-                    ) {
-                        ActiveRequestsCard(
-                            state = simpleOneState,
-                            onOpenRequests = { onOpenDestination(AppDestination.Requests) },
-                        )
-                        WorkDayCard(
-                            state = routeState,
-                            onDistanceChange = routeViewModel::updateDistance,
-                            onOdometerChange = routeViewModel::updateOdometer,
-                            onAddressChange = routeViewModel::updatePrimaryStopAddress,
-                            onRequestNumberChange = routeViewModel::updatePrimaryStopRequestNumber,
-                            activeRequestsCount = simpleOneState.activeRequests.size,
-                            onImportActiveRequests = {
-                                routeViewModel.importActiveRequests(simpleOneState.activeRequests)
-                            },
-                            onSend = routeViewModel::send,
-                        )
-                    }
-                    Column(
-                        modifier = Modifier.weight(0.9f),
-                        verticalArrangement = Arrangement.spacedBy(18.dp),
-                    ) {
-                        AccountCard(session)
-                        if (isOffline) ConnectionCard(isOffline)
-                        QuickSectionsCard(
-                            widthClass = if (widthClass == AppWidthClass.Expanded) {
-                                AppWidthClass.Expanded
-                            } else {
-                                AppWidthClass.Compact
-                            },
-                            onOpenDestination = onOpenDestination,
-                        )
-                    }
+    Column(modifier.fillMaxSize().background(background), horizontalAlignment = Alignment.CenterHorizontally) {
+        AppRefreshContainer(Modifier.weight(1f).widthIn(max = maxContentWidth).fillMaxWidth(),
+            isRefreshing = state.isRefreshing || simpleOneState.isLoading,
+            enabled = !state.isSending,
+            onRefresh = { model.refresh(); onRefreshRequests() }) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                state.notice?.let { item { Snackbar { Text(it) } } }
+                state.errorMessage?.let { item { Snackbar { Text(it) } } }
+                if (state.record.workType == RouteWorkType.Pos) item {
+                    ActiveRequestsCard(simpleOneState, onOpenRequests = {
+                        requestsActions.onCloseRequest(); requestsActions.onModeChange(RequestsMode.Active)
+                        onOpenDestination(AppDestination.Requests)
+                    }, onOpenRequest = { requestsActions.onOpenRequest(it); detailOpen = true })
+                }
+                item {
+                    WorkDayCard(state, onOpenCalendar = { calendarOpen = true },
+                        onDistanceChange = model::updateDistance, onAddFuel = { fuelOpen = true },
+                        onOpenArchive = { archiveOpen = true }, onOpenMap = ::openMap)
+                }
+                item {
+                    RouteTimelineCard(state, onEditStop = { editorId = it }, onAddStop = model::addStop,
+                        onRemoveStop = model::removeStop, onReorderStop = model::reorderStop, onEndpointSelect = model::updateEndpoint)
+                }
+            }
+        }
+        Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = .96f)) {
+            Box(Modifier.widthIn(max = maxContentWidth).fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                AppButton(onClick = { keyboard?.hide(); if (state.canSend) sendConfirmation = true else model.send() },
+                    enabled = !state.isSending, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(50)) {
+                    if (state.isSending) CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                    else Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text(if (state.isSending) "Отправляю…" else "Отправить", Modifier.padding(start = 10.dp))
                 }
             }
         }
     }
+    if (calendarOpen) RouteCalendar(state.record.date, onDismiss = { calendarOpen = false }) {
+        selectedDate = it.toString()
+        model.selectDate(it)
+        calendarOpen = false
+    }
+    state.record.stops.firstOrNull { it.id == editorId }?.let { stop ->
+        val index = state.record.stops.indexOf(stop)
+        RouteStopEditor(stop, index, state.record.date, onDismiss = { editorId = null },
+            onSave = { address, number -> model.updateStop(stop.id, address, number); editorId = null },
+            workType = state.record.workType,
+            suggestions = (savedAddresses + state.record.stops.map { it.address } + listOf(state.settings.startAddress, state.settings.homeAddress)).filter(String::isNotBlank).distinct(),
+            offices = state.officeAddresses, isLoadingOffices = state.isLoadingOffices, onRefreshOffices = model::refreshOfficeAddresses)
+    }
+    if (sendConfirmation) AlertDialog(onDismissRequest = { sendConfirmation = false },
+        title = { Text("Отправить отчёт?") }, text = { Text("Будет отправлен отчёт ${state.record.workType.title} за ${state.dateTitle.lowercase()}.") },
+        confirmButton = { TextButton(onClick = { sendConfirmation = false; model.send() }) { Text("Отправить") } },
+        dismissButton = { TextButton(onClick = { sendConfirmation = false }) { Text("Отмена") } })
+    routeUrl?.let { url -> HomeRouteBrowser(url, onDismiss = { routeUrl = null }) }
+    state.sentReport?.let { sent ->
+        LaunchedEffect(sent) { delay(2400); model.dismissSentReport() }
+        androidx.compose.ui.window.Dialog(onDismissRequest = model::dismissSentReport) {
+            Card(shape = RoundedCornerShape(28.dp)) {
+                Column(Modifier.padding(28.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("✓", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
+                    Text("Отчёт ${sent.workType.title} отправлен", style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+                    Text(LocalDate.parse(sent.date).format(java.time.format.DateTimeFormatter.ofPattern("d MMMM", java.util.Locale.forLanguageTag("ru"))),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+    if (archiveOpen) RouteArchiveSheet(state, session, isOffline, routeRepository,
+        onDismiss = { archiveOpen = false }, onOdometerChange = model::updateOdometer)
+    if (fuelOpen) HomeFuelEntry(session, isOffline, fuelRepository, onDismiss = { fuelOpen = false })
+    if (detailOpen) ModalBottomSheet(onDismissRequest = { detailOpen = false; requestsActions.onCloseRequest() },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 980.dp) {
+        simpleOneState.selectedRequest?.let { request ->
+            SimpleOneRequestDetailContent(request, widthClass, simpleOneState.isDetailLoading, simpleOneState.detailErrorMessage,
+                onBack = { detailOpen = false; requestsActions.onCloseRequest() })
+        }
+    }
+    mapError?.let { message -> AlertDialog(onDismissRequest = { mapError = null }, title = { Text("Маршрут") },
+        text = { Text(message) }, confirmButton = { TextButton(onClick = { mapError = null }) { Text("Готово") } }) }
+
 }
 
 @Composable
-private fun WorkDayCard(
-    state: RouteUiState,
-    onDistanceChange: (String) -> Unit,
-    onOdometerChange: (String) -> Unit,
-    onAddressChange: (String) -> Unit,
-    onRequestNumberChange: (String) -> Unit,
-    activeRequestsCount: Int,
-    onImportActiveRequests: () -> Unit,
-    onSend: () -> Unit,
-) {
-    val middleStops = state.record.stops.drop(1).dropLast(1)
-    val primaryStop = middleStops.firstOrNull()
-    val visiblePoints = state.record.stops.filter { it.address.isNotBlank() }
-
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        ),
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Рабочий день", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        state.dateTitle,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+private fun WorkDayCard(state: RouteUiState, onOpenCalendar: () -> Unit, onDistanceChange: (String) -> Unit, onAddFuel: () -> Unit, onOpenArchive: () -> Unit, onOpenMap: () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = .96f)),
+        shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).clickable(onClick = onOpenCalendar).semantics { contentDescription = "Дата маршрута" }) {
+                    Text("Рабочий день", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(state.dateTitle, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
-                if (state.isRefreshing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Text(
-                        text = if (state.record.sent) "Отправлен" else "Черновик",
-                        color = if (state.record.sent) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
+                TextButton(onClick = onAddFuel) { Text("Добавить заправку") }
             }
-
-            RouteNumberField(state.distanceText, "Пробег дня", onDistanceChange)
-            RouteNumberField(state.odometerText, "Одометр на начало месяца", onOdometerChange)
-
             HorizontalDivider()
-            if (activeRequestsCount > 0) {
-                OutlinedButton(
-                    onClick = onImportActiveRequests,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Заполнить из заявок ($activeRequestsCount)")
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { RouteNumberField(state.distanceText, "Пробег дня", onDistanceChange) }
+                IconButton(onClick = onOpenMap) { androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(ru.lumastack.lumawork.R.drawable.ic_yandex_maps), "Составить маршрут в Яндекс.Картах", Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))) }
             }
-            Text("Основная точка", style = MaterialTheme.typography.titleSmall)
-            AppTextField(
-                value = primaryStop?.address.orEmpty(),
-                onValueChange = onAddressChange,
-                label = "Адрес",
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            AppTextField(
-                value = primaryStop?.requestNumber.orEmpty(),
-                onValueChange = onRequestNumberChange,
-                label = "Номер заявки",
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            if (visiblePoints.isNotEmpty()) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    visiblePoints.take(4).forEachIndexed { index, stop ->
-                        RoutePointRow(index = index + 1, stop = stop)
-                    }
-                    if (visiblePoints.size > 4) {
-                        Text(
-                            text = "Ещё ${visiblePoints.size - 4} точек",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-            }
-
-            state.notice?.let {
-                Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
-            }
-            state.errorMessage?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-            }
-
-            Button(
-                onClick = onSend,
-                enabled = state.canSend,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (state.isSending) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Text("Отправить рабочий день")
-                }
+            HorizontalDivider()
+            TextButton(onClick = onOpenArchive, modifier = Modifier.fillMaxWidth()) {
+                Text("Архив маршрутов", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                Text("›", style = MaterialTheme.typography.titleLarge)
             }
         }
     }
 }
 
 @Composable
-private fun RouteNumberField(
-    value: String,
-    label: String,
-    onValueChange: (String) -> Unit,
-) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically) {
+private fun RouteNumberField(value: String, label: String, onValueChange: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        AppTextField(
-            value = value,
-            onValueChange = onValueChange,
-            label = label,
-            placeholder = "0",
-            showLabel = false,
-            singleLine = true,
+        AppTextField(value, onValueChange, label, showLabel = false, placeholder = "0", singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.End,
-                fontWeight = FontWeight.SemiBold),
-            modifier = Modifier.width(112.dp),
-        )
-        Text("км", style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+            textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.End, fontWeight = FontWeight.SemiBold),
+            modifier = Modifier.width(82.dp))
+        Text("км", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RoutePointRow(index: Int, stop: RouteStop) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = RoundedCornerShape(10.dp),
-        ) {
-            Text(
-                text = index.toString(),
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = stop.address,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            val detail = stop.requestNumber.ifBlank { stop.reason }
-            if (detail.isNotBlank()) {
-                Text(
-                    text = detail,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
+private fun RouteCalendar(date: String, onDismiss: () -> Unit, onSelect: (LocalDate) -> Unit) {
+    val picker = rememberDatePickerState(initialSelectedDateMillis = LocalDate.parse(date).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
+    DatePickerDialog(onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = { picker.selectedDateMillis?.let { onSelect(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) } }) { Text("Готово") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } }) {
+        DatePicker(picker, title = { Text("Календарь", Modifier.padding(start = 24.dp, top = 16.dp)) })
     }
 }
-
-@Composable
-private fun AccountCard(session: AppSession) {
-    val profile = session.user.profile
-    val displayName = profile?.shortDisplayName ?: "Профиль сотрудника"
-    val details = listOfNotNull(
-        profile?.jobTitle.clean(),
-        profile?.departmentTitle.clean(),
-    )
-
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        ),
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("Профиль", style = MaterialTheme.typography.labelLarge)
-            Text(displayName, style = MaterialTheme.typography.headlineSmall)
-            details.forEach { detail ->
-                Text(
-                    text = detail,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            Text(
-                text = session.user.email,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ConnectionCard(isOffline: Boolean) {
-    val containerColor = if (isOffline) {
-        MaterialTheme.colorScheme.secondaryContainer
-    } else {
-        MaterialTheme.colorScheme.primaryContainer
-    }
-    val contentColor = if (isOffline) {
-        MaterialTheme.colorScheme.onSecondaryContainer
-    } else {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = containerColor),
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(
-                text = if (isOffline) "Локальный режим" else "Данные синхронизированы",
-                color = contentColor,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = if (isOffline) {
-                    "Сохранённая сессия доступна. Обновление продолжится после восстановления связи."
-                } else {
-                    "Учётная запись подтверждена общим сервером приложения «Инженер»."
-                },
-                color = contentColor,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-    }
-}
-
-@Composable
-private fun QuickSectionsCard(
-    widthClass: AppWidthClass,
-    onOpenDestination: (AppDestination) -> Unit,
-) {
-    val destinations = remember {
-        listOf(
-            AppDestination.Requests,
-            AppDestination.Coordination,
-            AppDestination.TimeReport,
-            AppDestination.Fuel,
-        )
-    }
-
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        ),
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Рабочие разделы", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "Быстрый переход к основным сценариям",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-
-            if (widthClass == AppWidthClass.Compact) {
-                destinations.forEach { destination ->
-                    QuickDestination(destination) { onOpenDestination(destination) }
-                }
-            } else {
-                destinations.chunked(2).forEach { rowDestinations ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        rowDestinations.forEach { destination ->
-                            Box(Modifier.weight(1f)) {
-                                QuickDestination(destination) { onOpenDestination(destination) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickDestination(
-    destination: AppDestination,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.62f),
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            Text(
-                destination.title,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                destination.subtitle,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-
-private fun String?.clean(): String? = this?.trim()?.ifBlank { null }

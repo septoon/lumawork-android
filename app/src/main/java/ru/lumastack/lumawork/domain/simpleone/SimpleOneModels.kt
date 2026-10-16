@@ -2,7 +2,9 @@ package ru.lumastack.lumawork.domain.simpleone
 
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.Duration
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import kotlinx.serialization.Serializable
 
@@ -122,6 +124,20 @@ data class SimpleOneRequest(
 
     fun isDueToday(today: LocalDate = LocalDate.now()): Boolean =
         deadlineDateTime()?.toLocalDate() == today
+
+    fun slaStatusText(now: LocalDateTime = LocalDateTime.now()): String? {
+        val deadline = deadlineDateTime() ?: return null
+        val interval = Duration.between(now, deadline)
+        val prefix = if (interval.isNegative) "Просрочено на" else "Осталось"
+        val seconds = interval.abs().seconds
+        val hours = seconds / 3600
+        val minutes = seconds % 3600 / 60
+        return when {
+            hours >= 24 -> "$prefix ${hours / 24} дн. ${hours % 24} ч."
+            hours > 0 -> "$prefix $hours ч. $minutes мин."
+            else -> "$prefix ${minutes.coerceAtLeast(1)} мин."
+        }
+    }
 }
 
 @Serializable
@@ -209,13 +225,17 @@ internal fun String.normalizedSimpleOneText(): String = trim()
     .lowercase()
     .replace(Regex("\\s+"), " ")
 
-private fun parseSimpleOneDate(value: String): LocalDateTime? {
+fun parseSimpleOneDate(value: String): LocalDateTime? {
     val normalized = value.trim()
     if (normalized.isEmpty()) return null
     val parsed = SIMPLE_ONE_DATE_FORMATTERS.firstNotNullOfOrNull { formatter ->
         runCatching { LocalDateTime.parse(normalized, formatter) }.getOrNull()
     } ?: return null
-    return parsed.takeIf { it.year > 1970 }
+    if (parsed.year <= 1970) return null
+    // API values are UTC. SO/XLSX display values already contain local time.
+    return if (normalized.getOrNull(4) == '-') {
+        parsed.atOffset(ZoneOffset.UTC).atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime()
+    } else parsed
 }
 
 private val SIMPLE_ONE_DATE_FORMATTERS = listOf(

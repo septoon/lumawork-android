@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.auto
 
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -89,6 +91,7 @@ fun AutoRoute(
         factory = AutoViewModel.factory(repository, session, startOffline),
     )
     val state by autoViewModel.state.collectAsStateWithLifecycle()
+    LaunchedEffect(session) { autoViewModel.updateSession(session) }
     AutoScreen(
         state = state,
         widthClass = widthClass,
@@ -135,7 +138,8 @@ private fun AutoScreen(
             else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
         )
     }
-    Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
+    AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
+        enabled = !state.isSaving, contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
             LazyColumn(
                 Modifier.widthIn(max = 720.dp).fillMaxSize(),
@@ -151,7 +155,7 @@ private fun AutoScreen(
                         onEdit = onEditVehicle,
                     )
                 }
-                item(key = "overview") { MaintenanceOverview(state, onRefresh, onAddMaintenance) }
+                item(key = "overview") { MaintenanceOverview(state, onAddMaintenance) }
                 autoMessages(state)
                 maintenanceItems(state.selectedMaintenance, onEditMaintenance)
             }
@@ -185,7 +189,7 @@ private fun AutoScreen(
                         contentPadding = PaddingValues(20.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        item(key = "overview") { MaintenanceOverview(state, onRefresh, onAddMaintenance) }
+                        item(key = "overview") { MaintenanceOverview(state, onAddMaintenance) }
                         autoMessages(state)
                         maintenanceItems(state.selectedMaintenance, onEditMaintenance)
                     }
@@ -271,7 +275,6 @@ private fun VehicleSelector(
             ) {
                 Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Добавьте автомобиль", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Данные синхронизируются с iOS через общий сервер.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         } else if (tablet) {
@@ -372,14 +375,13 @@ private fun VehicleImage(vehicle: Vehicle, repository: VehicleImageRepository, m
 }
 
 @Composable
-private fun MaintenanceOverview(state: AutoUiState, onRefresh: () -> Unit, onAdd: () -> Unit) {
+private fun MaintenanceOverview(state: AutoUiState, onAdd: () -> Unit) {
     val records = state.selectedMaintenance
     val total = records.mapNotNull(MaintenanceRecord::resolvedTotalCost).sum()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("ОБСЛУЖИВАНИЕ")
             Row {
-                TextButton(onClick = onRefresh, enabled = !state.isLoading) { Text("Обновить") }
                 Button(onClick = onAdd, enabled = state.selectedVehicle != null) { Text("Добавить") }
             }
         }
@@ -450,26 +452,36 @@ private fun VehicleEditorDialog(
     onSave: () -> Unit,
 ) {
     AutoEditorDialog(if (isEditing) "Редактирование" else "Новый автомобиль", isSaving, errorMessage, onDismiss, onSave) {
-        VehicleTextField("Государственный номер", draft.licensePlate, { onChange(draft.copy(licensePlate = VehicleInputValidation.formatPlate(it))) }, KeyboardType.Ascii)
-        VehicleTextField("VIN", draft.vin, { onChange(draft.copy(vin = VehicleInputValidation.normalizeVin(it))) }, KeyboardType.Ascii)
-        VehicleTextField("СТС", draft.sts, { onChange(draft.copy(sts = it.uppercase())) }, KeyboardType.Ascii)
-        VehicleTextField("ПТС", draft.pts, { onChange(draft.copy(pts = it.uppercase())) }, KeyboardType.Ascii)
-        VehicleTextField("Марка", draft.make, { onChange(draft.copy(make = it)) })
-        VehicleTextField("Модель", draft.model, { onChange(draft.copy(model = it)) })
-        VehicleTextField("Поколение", draft.generation, { onChange(draft.copy(generation = it)) })
-        VehicleTextField("Год выпуска", draft.year, { onChange(draft.copy(year = it.filter(Char::isDigit).take(4))) }, KeyboardType.Number)
-        VehicleTextField("Тип кузова", draft.bodyType, { onChange(draft.copy(bodyType = it)) })
-        VehicleTextField("Цвет", draft.colorName, { onChange(draft.copy(colorName = it)) })
-        VehicleTextField("Текущий пробег, км", draft.currentMileageKm, { onChange(draft.copy(currentMileageKm = it.filter(Char::isDigit))) }, KeyboardType.Number)
-        VehicleTextField("Объём двигателя, см³", draft.engineVolumeCm3, { onChange(draft.copy(engineVolumeCm3 = it.filter(Char::isDigit))) }, KeyboardType.Number)
-        VehicleTextField("Мощность, л.с.", draft.enginePowerHp, { onChange(draft.copy(enginePowerHp = it.filter(Char::isDigit))) }, KeyboardType.Number)
-        VehicleTextField("Моё название", draft.customName, { onChange(draft.copy(customName = it)) })
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Checkbox(checked = draft.isPrimary, onCheckedChange = { onChange(draft.copy(isPrimary = it)) })
-            Text("Основной автомобиль")
-        }
-        Text("Выбор в карусели не меняет автомобиль GSM.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        VehicleEditorFields(draft, onChange)
     }
+}
+
+@Composable
+internal fun VehicleEditorFields(
+    draft: VehicleDraft,
+    onChange: (VehicleDraft) -> Unit,
+    showPrimaryToggle: Boolean = true,
+    enabled: Boolean = true,
+) {
+    VehicleTextField("Государственный номер", draft.licensePlate, { onChange(draft.copy(licensePlate = VehicleInputValidation.formatPlate(it))) }, KeyboardType.Ascii, enabled)
+    VehicleTextField("VIN", draft.vin, { onChange(draft.copy(vin = VehicleInputValidation.normalizeVin(it))) }, KeyboardType.Ascii, enabled)
+    VehicleTextField("СТС", draft.sts, { onChange(draft.copy(sts = it.uppercase())) }, KeyboardType.Ascii, enabled)
+    VehicleTextField("ПТС", draft.pts, { onChange(draft.copy(pts = it.uppercase())) }, KeyboardType.Ascii, enabled)
+    VehicleTextField("Марка", draft.make, { onChange(draft.copy(make = it)) }, enabled = enabled)
+    VehicleTextField("Модель", draft.model, { onChange(draft.copy(model = it)) }, enabled = enabled)
+    VehicleTextField("Поколение", draft.generation, { onChange(draft.copy(generation = it)) }, enabled = enabled)
+    VehicleTextField("Год выпуска", draft.year, { onChange(draft.copy(year = it.filter(Char::isDigit).take(4))) }, KeyboardType.Number, enabled)
+    VehicleTextField("Тип кузова", draft.bodyType, { onChange(draft.copy(bodyType = it)) }, enabled = enabled)
+    VehicleTextField("Цвет", draft.colorName, { onChange(draft.copy(colorName = it)) }, enabled = enabled)
+    VehicleTextField("Текущий пробег, км", draft.currentMileageKm, { onChange(draft.copy(currentMileageKm = it.filter(Char::isDigit))) }, KeyboardType.Number, enabled)
+    VehicleTextField("Объём двигателя, см³", draft.engineVolumeCm3, { onChange(draft.copy(engineVolumeCm3 = it.filter(Char::isDigit))) }, KeyboardType.Number, enabled)
+    VehicleTextField("Мощность, л.с.", draft.enginePowerHp, { onChange(draft.copy(enginePowerHp = it.filter(Char::isDigit))) }, KeyboardType.Number, enabled)
+    VehicleTextField("Моё название", draft.customName, { onChange(draft.copy(customName = it)) }, enabled = enabled)
+    if (showPrimaryToggle) Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(checked = draft.isPrimary, onCheckedChange = { onChange(draft.copy(isPrimary = it)) })
+        Text("Основной автомобиль")
+    }
+    if (showPrimaryToggle) Text("Выбор в карусели не меняет автомобиль GSM.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable
@@ -542,10 +554,12 @@ private fun VehicleTextField(
     value: String,
     onValueChange: (String) -> Unit,
     keyboardType: KeyboardType = KeyboardType.Text,
+    enabled: Boolean = true,
 ) {
     AppTextField(
         value = value,
         onValueChange = onValueChange,
+        enabled = enabled,
         label = label,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         singleLine = true,

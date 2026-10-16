@@ -1,6 +1,9 @@
 package ru.lumastack.lumawork.ui.auth
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -22,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
@@ -36,15 +41,26 @@ import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ru.lumastack.lumawork.ui.shell.AppShell
@@ -79,6 +95,7 @@ fun AuthContent(
     onBackToEmail: () -> Unit,
     onResetAccess: () -> Unit,
     onLogout: () -> Unit,
+    authRepository: ru.lumastack.lumawork.data.auth.AuthRepository,
     routeRepository: RouteRepository,
     simpleOneRepository: SimpleOneRepository,
     coordinationRepository: CoordinationRepository,
@@ -100,6 +117,7 @@ fun AuthContent(
         AppShell(
             session = state.session,
             isOffline = state.isOffline,
+            authRepository = authRepository,
             routeRepository = routeRepository,
             simpleOneRepository = simpleOneRepository,
             coordinationRepository = coordinationRepository,
@@ -166,17 +184,19 @@ fun AuthContent(
                 style = MaterialTheme.typography.headlineLarge,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = when (state.phase) {
-                    AuthPhase.Code -> "Введите код, отправленный на почту."
-                    AuthPhase.AccessRevoked -> "Учётная запись больше не имеет доступа к приложению."
-                    else -> "Используйте рабочую почту — пароль не нужен."
-                },
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
+            if (state.phase == AuthPhase.Code || state.phase == AuthPhase.AccessRevoked) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = if (state.phase == AuthPhase.Code) {
+                        "Введите код, отправленный на почту."
+                    } else {
+                        "Учётная запись больше не имеет доступа к приложению."
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
             Spacer(Modifier.height(24.dp))
 
             Card(
@@ -249,20 +269,11 @@ private fun CodeContent(
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
     )
-    AppTextField(
-        value = state.code,
-        onValueChange = onCodeChange,
-        label = "Код",
-        singleLine = true,
+    OneTimeCodeInput(
+        code = state.code,
+        onCodeChange = onCodeChange,
         enabled = !state.isLoading,
-        visualTransformation = PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.NumberPassword,
-            imeAction = ImeAction.Done,
-        ),
-        keyboardActions = KeyboardActions(onDone = { onVerifyCode() }),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth(),
+        onDone = onVerifyCode,
     )
     PrimaryActionButton("Войти", state.isLoading, onVerifyCode)
     OutlinedButton(
@@ -273,6 +284,83 @@ private fun CodeContent(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text("Изменить почту")
+    }
+}
+
+@Composable
+private fun OneTimeCodeInput(
+    code: String,
+    onCodeChange: (String) -> Unit,
+    enabled: Boolean,
+    onDone: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val focusRequester = remember { FocusRequester() }
+    val shape = RoundedCornerShape(16.dp)
+
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        BasicTextField(
+            value = code,
+            onValueChange = onCodeChange,
+            enabled = enabled,
+            singleLine = true,
+            interactionSource = interaction,
+            textStyle = MaterialTheme.typography.titleLarge.copy(color = Color.Transparent),
+            cursorBrush = SolidColor(Color.Transparent),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.NumberPassword,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            modifier = Modifier
+                .widthIn(max = 340.dp)
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .semantics {
+                    contentDescription = "Код из письма"
+                    contentType = ContentType.SmsOtpCode
+                },
+            decorationBox = { innerTextField ->
+                Box {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        repeat(6) { index ->
+                            val active = focused && index == code.length.coerceAtMost(5)
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 54.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerLow, shape)
+                                    .border(
+                                        1.dp,
+                                        if (active) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outlineVariant,
+                                        shape,
+                                    )
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = code.getOrNull(index)?.toString().orEmpty(),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(
+                                        alpha = if (enabled) 1f else .45f,
+                                    ),
+                                    modifier = Modifier.clearAndSetSemantics { },
+                                )
+                            }
+                        }
+                    }
+                    Box(Modifier.matchParentSize(), contentAlignment = Alignment.CenterStart) {
+                        innerTextField()
+                    }
+                }
+            },
+        )
     }
 }
 
