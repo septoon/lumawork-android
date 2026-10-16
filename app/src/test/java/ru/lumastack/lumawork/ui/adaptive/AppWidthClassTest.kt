@@ -5,6 +5,29 @@ import org.junit.Test
 
 class AppWidthClassTest {
     @Test
+    fun `short forms scroll actions with the fields`() {
+        assertEquals(false, appFormHasPinnedActions(240))
+        assertEquals(false, appFormHasPinnedActions(359))
+        assertEquals(true, appFormHasPinnedActions(360))
+        assertEquals(true, appFormHasPinnedActions(600))
+    }
+
+    @Test
+    fun `large text can move form actions into the scrollable area`() {
+        assertEquals(false, appFormHasPinnedActions(600, 2f))
+        assertEquals(true, appFormHasPinnedActions(600, 1.5f))
+        assertEquals(true, appFormHasPinnedActions(720, 2f))
+    }
+
+    @Test
+    fun `invalid or small text scales do not reduce the minimum form height`() {
+        listOf(.8f, Float.NaN, Float.POSITIVE_INFINITY).forEach { scale ->
+            assertEquals(false, appFormHasPinnedActions(359, scale))
+            assertEquals(true, appFormHasPinnedActions(360, scale))
+        }
+    }
+
+    @Test
     fun `short windows keep forms in a single column`() {
         assertEquals(AppWidthClass.Compact, appContentWidthClass(1000, 479))
         assertEquals(AppWidthClass.Expanded, appContentWidthClass(1000, 480))

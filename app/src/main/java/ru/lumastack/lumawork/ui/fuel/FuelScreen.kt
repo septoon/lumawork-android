@@ -32,6 +32,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,8 +46,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.NumberFormat
@@ -124,7 +123,7 @@ private fun FuelScreen(
         )
     }
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
-        if (widthClass == AppWidthClass.Compact) {
+        if (widthClass != AppWidthClass.Expanded) {
             LazyColumn(
                 Modifier.widthIn(max = 680.dp).fillMaxSize(),
                 contentPadding = PaddingValues(20.dp),
@@ -362,51 +361,36 @@ private fun FuelEditorDialog(
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            Modifier.widthIn(max = 680.dp).fillMaxWidth().fillMaxHeight(0.92f).padding(16.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-        ) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (isEditing) "Редактирование" else if (draft.recordType == FuelRecordType.Fuel) "Новая запись" else "Новая корректировка",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Закрыть") }
-                }
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            if (draft.recordType == FuelRecordType.Fuel) {
-                                FuelField("Дата, ГГГГ-ММ-ДД", draft.date, { onChange(draft.copy(date = it)) })
-                                FuelField("Пробег, км", draft.mileage, { onChange(draft.copy(mileage = it)) }, KeyboardType.Decimal)
-                                FuelField("Литры", draft.liters, { onChange(draft.copy(liters = it)) }, KeyboardType.Decimal)
-                                FuelField("Сумма заправки", draft.fuelCost, { onChange(draft.copy(fuelCost = it)) }, KeyboardType.Decimal)
-                                FuelField("Комментарий", draft.comment, { onChange(draft.copy(comment = it)) })
-                            } else {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    AdjustmentButton("Выплата", draft.adjustmentKind == FuelAdjustmentKind.CompensationPayment) { onChange(draft.copy(adjustmentKind = FuelAdjustmentKind.CompensationPayment)) }
-                                    AdjustmentButton("Вычет долга", draft.adjustmentKind == FuelAdjustmentKind.DebtDeduction) { onChange(draft.copy(adjustmentKind = FuelAdjustmentKind.DebtDeduction)) }
-                                }
-                                FuelField("Месяц, ГГГГ-ММ", draft.monthKey, { onChange(draft.copy(monthKey = it)) })
-                                FuelField("Сумма", draft.amount, { onChange(draft.copy(amount = it)) }, KeyboardType.Decimal)
-                                FuelField("Литры", draft.liters, { onChange(draft.copy(liters = it)) }, KeyboardType.Decimal)
-                                if (draft.adjustmentKind == FuelAdjustmentKind.DebtDeduction) {
-                                    FuelField("Остаток долга", draft.carryoverDebtRub, { onChange(draft.copy(carryoverDebtRub = it)) }, KeyboardType.Decimal)
-                                }
-                                FuelField("Комментарий", draft.comment, { onChange(draft.copy(comment = it)) })
-                            }
-                        }
+    AppFormDialog(
+        title = if (isEditing) "Редактирование" else if (draft.recordType == FuelRecordType.Fuel) "Новая запись" else "Новая корректировка",
+        onDismiss = onDismiss,
+        confirmLabel = "Сохранить",
+        onConfirm = onSave,
+        isBusy = isSaving,
+        maxWidth = 680.dp,
+        errorMessage = errorMessage,
+        errorTitle = "Проверьте данные",
+    ) {
+        item(key = "fields") {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (draft.recordType == FuelRecordType.Fuel) {
+                    FuelField("Дата, ГГГГ-ММ-ДД", draft.date, { onChange(draft.copy(date = it)) })
+                    FuelField("Пробег, км", draft.mileage, { onChange(draft.copy(mileage = it)) }, KeyboardType.Decimal)
+                    FuelField("Литры", draft.liters, { onChange(draft.copy(liters = it)) }, KeyboardType.Decimal)
+                    FuelField("Сумма заправки", draft.fuelCost, { onChange(draft.copy(fuelCost = it)) }, KeyboardType.Decimal)
+                    FuelField("Комментарий", draft.comment, { onChange(draft.copy(comment = it)) })
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AdjustmentButton("Выплата", draft.adjustmentKind == FuelAdjustmentKind.CompensationPayment) { onChange(draft.copy(adjustmentKind = FuelAdjustmentKind.CompensationPayment)) }
+                        AdjustmentButton("Вычет долга", draft.adjustmentKind == FuelAdjustmentKind.DebtDeduction) { onChange(draft.copy(adjustmentKind = FuelAdjustmentKind.DebtDeduction)) }
                     }
-                }
-                errorMessage?.let { FuelMessage("Проверьте данные", it, true) }
-                Button(onClick = onSave, enabled = !isSaving, modifier = Modifier.fillMaxWidth()) {
-                    if (isSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Сохранить")
+                    FuelField("Месяц, ГГГГ-ММ", draft.monthKey, { onChange(draft.copy(monthKey = it)) })
+                    FuelField("Сумма", draft.amount, { onChange(draft.copy(amount = it)) }, KeyboardType.Decimal)
+                    FuelField("Литры", draft.liters, { onChange(draft.copy(liters = it)) }, KeyboardType.Decimal)
+                    if (draft.adjustmentKind == FuelAdjustmentKind.DebtDeduction) {
+                        FuelField("Остаток долга", draft.carryoverDebtRub, { onChange(draft.copy(carryoverDebtRub = it)) }, KeyboardType.Decimal)
+                    }
+                    FuelField("Комментарий", draft.comment, { onChange(draft.copy(comment = it)) })
                 }
             }
         }

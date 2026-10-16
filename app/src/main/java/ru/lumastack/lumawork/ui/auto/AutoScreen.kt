@@ -33,6 +33,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,8 +54,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.NumberFormat
@@ -137,7 +136,7 @@ private fun AutoScreen(
         )
     }
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
-        if (widthClass == AppWidthClass.Compact) {
+        if (widthClass != AppWidthClass.Expanded) {
             LazyColumn(
                 Modifier.widthIn(max = 720.dp).fillMaxSize(),
                 contentPadding = PaddingValues(20.dp),
@@ -523,29 +522,17 @@ private fun AutoEditorDialog(
     onSave: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            Modifier.widthIn(max = 760.dp).fillMaxWidth().fillMaxHeight(0.94f).padding(16.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-        ) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Закрыть") }
-                }
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
-                }
-                errorMessage?.let { AutoMessage("Проверьте данные", it, true) }
-                Button(onClick = onSave, enabled = !isSaving, modifier = Modifier.fillMaxWidth()) {
-                    if (isSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    else Text("Сохранить")
-                }
-            }
-        }
+    AppFormDialog(
+        title = title,
+        onDismiss = onDismiss,
+        confirmLabel = "Сохранить",
+        onConfirm = onSave,
+        isBusy = isSaving,
+        maxWidth = 760.dp,
+        errorMessage = errorMessage,
+        errorTitle = "Проверьте данные",
+    ) {
+        item(key = "fields") { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) { content() } }
     }
 }
 
