@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.employees
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,7 +19,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import ru.lumastack.lumawork.ui.theme.AppButton as Button
@@ -34,7 +38,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -118,6 +125,19 @@ private fun EmployeeScreen(
             else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
         )
     }
+    val directoryState = rememberLazyListState()
+    val detailState = rememberLazyListState()
+    var displayedEmployeeId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.selectedEmployee?.sysId) {
+        if (displayedEmployeeId != state.selectedEmployee?.sysId) {
+            detailState.scrollToItem(0)
+            displayedEmployeeId = state.selectedEmployee?.sysId
+        }
+    }
+    BackHandler(
+        enabled = state.selectedEmployee != null && !state.isAddressPickerOpen,
+        onBack = onCloseEmployee,
+    )
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
             if (state.selectedEmployee != null) {
@@ -127,6 +147,7 @@ private fun EmployeeScreen(
                     errorMessage = state.detailErrorMessage,
                     onBack = onCloseEmployee,
                     modifier = Modifier.fillMaxSize(),
+                    listState = detailState,
                 )
             } else {
                 EmployeeDirectoryContent(
@@ -136,6 +157,7 @@ private fun EmployeeScreen(
                     onOpenAddressPicker = onOpenAddressPicker,
                     onOpenEmployee = onOpenEmployee,
                     modifier = Modifier.fillMaxSize(),
+                    listState = directoryState,
                 )
             }
         } else {
@@ -157,6 +179,7 @@ private fun EmployeeScreen(
                         onOpenEmployee = onOpenEmployee,
                         contentPadding = PaddingValues(16.dp),
                         modifier = Modifier.fillMaxSize(),
+                        listState = directoryState,
                     )
                 }
                 Surface(
@@ -172,6 +195,7 @@ private fun EmployeeScreen(
                             errorMessage = state.detailErrorMessage,
                             onBack = null,
                             modifier = Modifier.fillMaxSize(),
+                            listState = detailState,
                         )
                     } ?: EmployeeSelectionHint(state, Modifier.fillMaxSize())
                 }
@@ -199,6 +223,7 @@ private fun EmployeeDirectoryContent(
     onOpenEmployee: (Employee) -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(20.dp),
+    listState: LazyListState = rememberLazyListState(),
 ) {
     val groups = remember(state.employees) {
         state.employees.groupBy { employee ->
@@ -207,6 +232,7 @@ private fun EmployeeDirectoryContent(
     }
     LazyColumn(
         modifier = modifier,
+        state = listState,
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -264,6 +290,7 @@ private fun EmployeeDirectoryContent(
                 EmployeeRow(
                     employee = employee,
                     isCurrentUser = employee.sysId == state.simpleOneUserId,
+                    isSelected = employee.sysId == state.selectedEmployee?.sysId,
                     onClick = { onOpenEmployee(employee) },
                 )
             }
@@ -359,10 +386,12 @@ private fun EmployeeLetterHeader(letter: String, count: Int) {
 }
 
 @Composable
-private fun EmployeeRow(employee: Employee, isCurrentUser: Boolean, onClick: () -> Unit) {
+private fun EmployeeRow(employee: Employee, isCurrentUser: Boolean, isSelected: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+        border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
         shape = RoundedCornerShape(18.dp),
         tonalElevation = 1.dp,
     ) {
@@ -414,6 +443,7 @@ private fun EmployeeDetail(
     errorMessage: String?,
     onBack: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     val uriHandler = LocalUriHandler.current
     val summaryFields = remember(employee) {
@@ -429,6 +459,7 @@ private fun EmployeeDetail(
     }
     LazyColumn(
         modifier = modifier,
+        state = listState,
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -527,7 +558,7 @@ private fun EmployeeAddressDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f).widthIn(max = 720.dp).padding(18.dp),
+            modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth().fillMaxHeight(0.9f).padding(18.dp),
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
@@ -538,7 +569,7 @@ private fun EmployeeAddressDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         Text("Адрес сотрудников", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text("ТГР Насел. пункт", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }

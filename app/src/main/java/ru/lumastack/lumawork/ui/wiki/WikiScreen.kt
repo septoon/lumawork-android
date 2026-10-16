@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -20,8 +21,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,8 +39,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -101,12 +108,24 @@ private fun WikiScreen(
             else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
         )
     }
+    val searchState = rememberLazyListState()
+    val articleState = rememberLazyListState()
+    var displayedArticleId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.selectedResult?.id) {
+        if (displayedArticleId != state.selectedResult?.id) {
+            articleState.scrollToItem(0)
+            displayedArticleId = state.selectedResult?.id
+        }
+    }
+    BackHandler(enabled = state.selectedResult != null, onBack = onCloseArticle)
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
             if (state.selectedResult == null) {
-                WikiSearchPanel(state, onQueryChange, onRefresh, onOpen, Modifier.widthIn(max = 680.dp).fillMaxSize())
+                WikiSearchPanel(state, onQueryChange, onRefresh, onOpen,
+                    Modifier.widthIn(max = 680.dp).fillMaxSize(), listState = searchState)
             } else {
-                WikiArticlePanel(state, onCloseArticle, pdfUrl, Modifier.widthIn(max = 760.dp).fillMaxSize())
+                WikiArticlePanel(state, onCloseArticle, pdfUrl,
+                    Modifier.widthIn(max = 760.dp).fillMaxSize(), listState = articleState)
             }
         } else {
             Row(
@@ -116,6 +135,7 @@ private fun WikiScreen(
                 WikiSearchPanel(
                     state, onQueryChange, onRefresh, onOpen,
                     Modifier.weight(0.42f).fillMaxHeight().widthIn(max = 470.dp),
+                    listState = searchState,
                 )
                 Surface(
                     Modifier.weight(0.58f).fillMaxHeight(),
@@ -126,7 +146,8 @@ private fun WikiScreen(
                     if (state.selectedResult == null) {
                         WikiEmpty("Выберите статью", "Содержание откроется здесь, а результаты поиска останутся слева.")
                     } else {
-                        WikiArticlePanel(state, onCloseArticle = null, pdfUrl = pdfUrl)
+                        WikiArticlePanel(state, onCloseArticle = null, pdfUrl = pdfUrl,
+                            listState = articleState)
                     }
                 }
             }
@@ -141,9 +162,11 @@ private fun WikiSearchPanel(
     onRefresh: () -> Unit,
     onOpen: (WikiSearchResult) -> Unit,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     LazyColumn(
         modifier,
+        state = listState,
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -239,11 +262,13 @@ private fun WikiArticlePanel(
     onCloseArticle: (() -> Unit)?,
     pdfUrl: () -> String?,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     val context = LocalContext.current
     val result = state.selectedResult ?: return
     LazyColumn(
         modifier,
+        state = listState,
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {

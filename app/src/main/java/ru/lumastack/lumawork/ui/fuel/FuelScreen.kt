@@ -364,7 +364,7 @@ private fun FuelEditorDialog(
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
-            Modifier.fillMaxWidth().fillMaxHeight(0.92f).widthIn(max = 680.dp).padding(16.dp),
+            Modifier.widthIn(max = 680.dp).fillMaxWidth().fillMaxHeight(0.92f).padding(16.dp),
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
@@ -373,6 +373,7 @@ private fun FuelEditorDialog(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         if (isEditing) "Редактирование" else if (draft.recordType == FuelRecordType.Fuel) "Новая запись" else "Новая корректировка",
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                     )

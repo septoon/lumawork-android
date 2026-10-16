@@ -525,14 +525,15 @@ private fun AutoEditorDialog(
 ) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
-            Modifier.fillMaxWidth().fillMaxHeight(0.94f).widthIn(max = 760.dp).padding(16.dp),
+            Modifier.widthIn(max = 760.dp).fillMaxWidth().fillMaxHeight(0.94f).padding(16.dp),
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
         ) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text(title, modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Закрыть") }
                 }
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
