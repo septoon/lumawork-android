@@ -135,6 +135,7 @@ internal fun PreviewShell() {
             backpackPhotoRepository = previewBackpackPhotoRepository,
             backpackImageRepository = rememberPreviewBackpackImageRepository(context),
             employeeRepository = previewEmployeeRepository,
+            workScheduleRepository = previewWorkScheduleRepository,
             autoRepository = previewAutoRepository,
             vehicleImageRepository = rememberPreviewVehicleImageRepository(context),
             fuelRepository = previewFuelRepository,
@@ -326,6 +327,21 @@ private val previewBackpackPhotoRepository = BackpackPhotoRepository(
     cache = object : BackpackPhotoCatalogCache {
         override suspend fun read(): BackpackPhotoCatalog? = BackpackPhotoCatalog()
         override suspend fun save(catalog: BackpackPhotoCatalog) = Unit
+    },
+)
+
+private val previewWorkScheduleRepository = ru.lumastack.lumawork.data.workschedule.WorkScheduleRepository(
+    api = ru.lumastack.lumawork.data.simpleone.OkHttpSimpleOneApi("https://preview.invalid"),
+    sessionStore = object : SimpleOneSessionStore {
+        override fun read(ownerUserId: String): StoredSimpleOneSession? = null
+        override fun save(session: StoredSimpleOneSession) = Unit
+        override fun clear(ownerUserId: String) = Unit
+        override fun readUsername(ownerUserId: String) = ""
+        override fun saveUsername(ownerUserId: String, username: String) = Unit
+    },
+    cache = object : ru.lumastack.lumawork.data.workschedule.WorkScheduleCache {
+        override suspend fun read(ownerUserId: String): ru.lumastack.lumawork.domain.workschedule.WorkScheduleSnapshot? = null
+        override suspend fun save(ownerUserId: String, snapshot: ru.lumastack.lumawork.domain.workschedule.WorkScheduleSnapshot) = Unit
     },
 )
 

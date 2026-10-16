@@ -22,6 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import ru.lumastack.lumawork.ui.workschedule.WorkScheduleRoute
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -69,6 +71,7 @@ import ru.lumastack.lumawork.data.backpack.BackpackRepository
 import ru.lumastack.lumawork.data.simpleone.SimpleOneRepository
 import ru.lumastack.lumawork.data.timereport.TimeReportRepository
 import ru.lumastack.lumawork.data.employees.EmployeeRepository
+import ru.lumastack.lumawork.data.workschedule.WorkScheduleRepository
 import ru.lumastack.lumawork.data.auto.AutoRepository
 import ru.lumastack.lumawork.data.auto.VehicleImageRepository
 import ru.lumastack.lumawork.data.fuel.FuelRepository
@@ -134,6 +137,7 @@ fun AppShell(
     backpackPhotoRepository: BackpackPhotoRepository,
     backpackImageRepository: BackpackImageRepository,
     employeeRepository: EmployeeRepository,
+    workScheduleRepository: WorkScheduleRepository,
     autoRepository: AutoRepository,
     vehicleImageRepository: VehicleImageRepository,
     fuelRepository: FuelRepository,
@@ -193,6 +197,7 @@ fun AppShell(
         backpackPhotoRepository = backpackPhotoRepository,
         backpackImageRepository = backpackImageRepository,
         employeeRepository = employeeRepository,
+        workScheduleRepository = workScheduleRepository,
         autoRepository = autoRepository,
         vehicleImageRepository = vehicleImageRepository,
         fuelRepository = fuelRepository,
@@ -247,6 +252,7 @@ private fun AppDrawerShell(
     backpackPhotoRepository: BackpackPhotoRepository,
     backpackImageRepository: BackpackImageRepository,
     employeeRepository: EmployeeRepository,
+    workScheduleRepository: WorkScheduleRepository,
     autoRepository: AutoRepository,
     vehicleImageRepository: VehicleImageRepository,
     fuelRepository: FuelRepository,
@@ -264,6 +270,10 @@ private fun AppDrawerShell(
     onOpenSettings: () -> Unit,
     onOpenFeedback: () -> Unit,
 ) {
+    var workScheduleOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(selected, simpleOneState.isAuthorized) {
+        if (selected != AppDestination.Employees || !simpleOneState.isAuthorized) workScheduleOpen = false
+    }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
@@ -292,7 +302,9 @@ private fun AppDrawerShell(
                     session = session,
                     images = vehicleImageRepository,
                     onOpenProfile = onOpenProfile,
-                    onOpenNavigation = { scope.launch { drawerState.open() } },
+                    onOpenNavigation = { if (workScheduleOpen) workScheduleOpen = false else scope.launch { drawerState.open() } },
+                    workScheduleOpen = workScheduleOpen,
+                    onOpenWorkSchedule = { workScheduleOpen = true },
                     requestsState = simpleOneState,
                     requestsActions = simpleOneActions,
                     routeRepository = routeRepository,
@@ -313,6 +325,7 @@ private fun AppDrawerShell(
                     backpackPhotoRepository = backpackPhotoRepository,
                     backpackImageRepository = backpackImageRepository,
                     employeeRepository = employeeRepository,
+                    workScheduleRepository = workScheduleRepository,
                     autoRepository = autoRepository,
                     vehicleImageRepository = vehicleImageRepository,
                     fuelRepository = fuelRepository,
@@ -324,6 +337,8 @@ private fun AppDrawerShell(
                     simpleOneState = simpleOneState,
                     simpleOneActions = simpleOneActions,
                     onSelect = onSelect,
+                    workScheduleOpen = workScheduleOpen,
+                    onCloseWorkSchedule = { workScheduleOpen = false },
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -339,6 +354,8 @@ private fun AppTopBar(
     images: VehicleImageRepository,
     onOpenProfile: () -> Unit,
     onOpenNavigation: () -> Unit,
+    workScheduleOpen: Boolean,
+    onOpenWorkSchedule: () -> Unit,
     requestsState: SimpleOneUiState,
     requestsActions: RequestsActions,
     routeRepository: RouteRepository,
@@ -354,14 +371,17 @@ private fun AppTopBar(
                     AppSegmentedControl(titles = RouteWorkType.entries.map { it.title },
                         selectedIndex = RouteWorkType.entries.indexOf(routeState.record.workType),
                         onSelect = { routeModel.selectWorkType(RouteWorkType.entries[it]) }, modifier = Modifier.width(176.dp))
-                } else Text(destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                } else Text(if (workScheduleOpen) "График работы" else destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
             },
             navigationIcon = {
                 IconButton(onClick = onOpenNavigation) {
-                    Icon(Icons.Default.Menu, contentDescription = "Открыть меню")
+                    Icon(if (workScheduleOpen) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Menu, contentDescription = if (workScheduleOpen) "Назад к сотрудникам" else "Открыть меню")
                 }
             },
             actions = {
+                if (destination == AppDestination.Employees && requestsState.isAuthorized && !workScheduleOpen) {
+                    IconButton(onClick = onOpenWorkSchedule) { Icon(painterResource(R.drawable.ic_nav_schedule), "График работы") }
+                }
                 if (destination == AppDestination.Home) {
                     IconButton(onClick = onOpenProfile, modifier = Modifier.semantics { contentDescription = "Открыть профиль" }) {
                         ProfileAvatar(session.user, images)
@@ -460,6 +480,7 @@ private fun DestinationContent(
     backpackPhotoRepository: BackpackPhotoRepository,
     backpackImageRepository: BackpackImageRepository,
     employeeRepository: EmployeeRepository,
+    workScheduleRepository: WorkScheduleRepository,
     autoRepository: AutoRepository,
     vehicleImageRepository: VehicleImageRepository,
     fuelRepository: FuelRepository,
@@ -471,12 +492,21 @@ private fun DestinationContent(
     simpleOneState: SimpleOneUiState,
     simpleOneActions: RequestsActions,
     onSelect: (AppDestination) -> Unit,
+    workScheduleOpen: Boolean,
+    onCloseWorkSchedule: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
         val fontScale = LocalDensity.current.fontScale
         val contentWidthClass = remember(maxWidth, maxHeight, fontScale) {
             appContentWidthClass(maxWidth.value.roundToInt(), maxHeight.value.roundToInt(), fontScale)
+        }
+        if (destination == AppDestination.Employees && workScheduleOpen) {
+            WorkScheduleRoute(repository = workScheduleRepository, ownerUserId = session.user.id,
+                simpleOneUserId = simpleOneState.snapshot.currentUser?.sysId.orEmpty(), isAuthorized = simpleOneState.isAuthorized,
+                startOffline = isOffline, profileCity = session.user.profile?.city, onBack = onCloseWorkSchedule,
+                authorizationRevision = simpleOneState.snapshot.updatedAtEpochMillis)
+            return@BoxWithConstraints
         }
         when (destination) {
             AppDestination.Backpack -> BackpackRoute(

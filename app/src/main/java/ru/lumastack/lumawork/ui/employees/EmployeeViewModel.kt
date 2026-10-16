@@ -13,11 +13,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.lumastack.lumawork.data.employees.EmployeeRepository
 import ru.lumastack.lumawork.data.simpleone.SimpleOneFailure
-import ru.lumastack.lumawork.domain.employees.Employee
-import ru.lumastack.lumawork.domain.employees.EmployeeAddress
-import ru.lumastack.lumawork.domain.employees.EmployeeDirectory
-import ru.lumastack.lumawork.domain.employees.EmployeeSnapshot
-import ru.lumastack.lumawork.domain.employees.filterEmployees
+import ru.lumastack.lumawork.domain.employees.*
 
 data class EmployeeUiState(
     val simpleOneUserId: String = "",
@@ -36,8 +32,7 @@ data class EmployeeUiState(
     val addressErrorMessage: String? = null,
     val detailErrorMessage: String? = null,
 ) {
-    val employees: List<Employee>
-        get() = visibleDirectory.employees
+    val employees: List<Employee> get() = visibleDirectory.employees
 }
 
 class EmployeeViewModel(
@@ -47,238 +42,199 @@ class EmployeeViewModel(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(EmployeeUiState())
     val state: StateFlow<EmployeeUiState> = mutableState.asStateFlow()
+    private var bootstrapJob: Job? = null
     private var loadJob: Job? = null
-    private var searchJob: Job? = null
     private var addressJob: Job? = null
     private var detailJob: Job? = null
+    private var generation = 0L
+    private var directoryRevision = 0L
+    private var addressRevision = 0L
+    private var detailRevision = 0L
 
     fun activate(simpleOneUserId: String, isAuthorized: Boolean) {
-        if (simpleOneUserId.isBlank()) {
-            mutableState.update { it.copy(isAuthorized = false) }
-            return
-        }
-        if (mutableState.value.simpleOneUserId == simpleOneUserId) {
-            val becameAuthorized = !mutableState.value.isAuthorized && isAuthorized
-            mutableState.update { it.copy(isAuthorized = isAuthorized) }
-            if (becameAuthorized && !startOffline) {
-                loadJob?.cancel()
-                loadJob = viewModelScope.launch { bootstrapAndRefresh(mutableState.value.snapshot) }
+        val old = state.value
+        if (old.simpleOneUserId == simpleOneUserId && simpleOneUserId.isNotBlank()) {
+            if (old.isAuthorized && !isAuthorized) {
+                cancelRequests()
+                mutableState.update { it.copy(isAuthorized = false, isLoading = false, isSearchingAddresses = false, isDetailLoading = false,
+                    selectedEmployee = null, isAddressPickerOpen = false) }
+            } else {
+                mutableState.update { it.copy(isAuthorized = isAuthorized) }
+                if (!old.isAuthorized && isAuthorized && !startOffline && bootstrapJob?.isActive != true) {
+                    val revision = generation
+                    bootstrapJob = viewModelScope.launch { bootstrapAndRefresh(revision) }
+                }
             }
             return
         }
-        loadJob?.cancel()
-        loadJob = viewModelScope.launch {
-            val cached = runCatching { repository.read(ownerUserId, simpleOneUserId) }.getOrNull()
-                ?: EmployeeSnapshot(simpleOneUserId)
-            mutableState.update {
-                it.copy(
-                    simpleOneUserId = simpleOneUserId,
-                    isAuthorized = isAuthorized,
-                    snapshot = cached,
-                    visibleDirectory = cached.currentDirectory(),
-                    query = "",
-                    selectedEmployee = null,
-                    errorMessage = null,
-                )
-            }
-            if (isAuthorized && !startOffline) bootstrapAndRefresh(cached)
+        cancelRequests()
+        mutableState.value = EmployeeUiState(simpleOneUserId = simpleOneUserId, isAuthorized = isAuthorized && simpleOneUserId.isNotBlank(), isLoading = simpleOneUserId.isNotBlank())
+        if (simpleOneUserId.isBlank()) return
+        val revision = generation
+        bootstrapJob = viewModelScope.launch {
+            val cached = repository.read(ownerUserId, simpleOneUserId) ?: EmployeeSnapshot(simpleOneUserId)
+            if (generation != revision) return@launch
+            mutableState.update { it.copy(snapshot = cached, visibleDirectory = cached.currentDirectory(it.query), isLoading = false) }
+            if (state.value.isAuthorized && !startOffline) bootstrapAndRefresh(revision)
         }
     }
 
     fun updateQuery(value: String) {
-        mutableState.update { state ->
-            val cachedDirectory = state.snapshot.currentDirectory()
-            state.copy(
-                query = value,
-                visibleDirectory = cachedDirectory.copy(
-                    employees = filterEmployees(cachedDirectory.employees, value),
-                ),
-                errorMessage = null,
-            )
-        }
-        searchJob?.cancel()
-        if (!mutableState.value.isAuthorized || mutableState.value.snapshot.selectedAddress == null) return
-        searchJob = viewModelScope.launch {
-            if (value.isNotBlank()) delay(SEARCH_DEBOUNCE_MILLIS)
-            refreshCurrent(showError = true)
-        }
+        mutableState.update { it.copy(query = value, visibleDirectory = it.snapshot.currentDirectory(value), errorMessage = null) }
+        requestDirectory(debounce = value.isNotBlank())
     }
 
-    fun refresh() {
+    fun refresh() = requestDirectory(debounce = false)
+
+    private fun requestDirectory(debounce: Boolean) {
         loadJob?.cancel()
-        loadJob = viewModelScope.launch { refreshCurrent(showError = true) }
+        val request = ++directoryRevision
+        mutableState.update { it.copy(isLoading = false) }
+        if (!canLoad() || state.value.snapshot.selectedAddress == null) return
+        val revision = generation
+        loadJob = viewModelScope.launch {
+            if (debounce) delay(SEARCH_DEBOUNCE_MILLIS)
+            refreshCurrent(revision, request)
+        }
     }
 
     fun openAddressPicker() {
-        mutableState.update { it.copy(isAddressPickerOpen = true, addressErrorMessage = null) }
+        if (state.value.isAuthorized) mutableState.update { it.copy(isAddressPickerOpen = true, addressErrorMessage = null) }
     }
 
     fun closeAddressPicker() {
-        addressJob?.cancel()
-        mutableState.update {
-            it.copy(isAddressPickerOpen = false, addressQuery = "", addressResults = emptyList())
-        }
+        addressJob?.cancel(); ++addressRevision
+        mutableState.update { it.copy(isAddressPickerOpen = false, addressQuery = "", addressResults = emptyList(), isSearchingAddresses = false) }
     }
 
     fun updateAddressQuery(value: String) {
-        mutableState.update {
-            it.copy(addressQuery = value, addressErrorMessage = null, addressResults = if (value.length < 2) emptyList() else it.addressResults)
-        }
         addressJob?.cancel()
-        if (value.trim().length < 2 || !mutableState.value.isAuthorized) return
+        val request = ++addressRevision
+        val query = value.trim()
+        mutableState.update { it.copy(addressQuery = value, addressErrorMessage = null, addressResults = emptyList(), isSearchingAddresses = false) }
+        if (query.length < 2 || !canLoad()) return
+        val revision = generation
         addressJob = viewModelScope.launch {
             delay(SEARCH_DEBOUNCE_MILLIS)
             mutableState.update { it.copy(isSearchingAddresses = true) }
             try {
-                val results = repository.searchAddresses(ownerUserId, value)
-                mutableState.update { it.copy(addressResults = results, isSearchingAddresses = false) }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: SimpleOneFailure.Unauthorized) {
-                mutableState.update {
-                    it.copy(isAuthorized = false, isSearchingAddresses = false, addressErrorMessage = "Сессия SimpleOne истекла.")
-                }
-            } catch (error: Exception) {
-                mutableState.update {
-                    it.copy(isSearchingAddresses = false, addressErrorMessage = error.userMessage("Не удалось найти населённый пункт."))
-                }
-            }
+                val results = repository.searchAddresses(ownerUserId, query)
+                if (generation == revision && addressRevision == request) mutableState.update { it.copy(addressResults = results) }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (generation == revision && addressRevision == request) reportFailure(error, address = true) }
+            finally { if (generation == revision && addressRevision == request) mutableState.update { it.copy(isSearchingAddresses = false) } }
         }
     }
 
     fun selectAddress(address: EmployeeAddress) {
-        loadJob?.cancel()
-        loadJob = viewModelScope.launch {
-            val simpleOneUserId = mutableState.value.simpleOneUserId
-            val snapshot = repository.selectAddress(ownerUserId, simpleOneUserId, address)
-            mutableState.update {
-                it.copy(
-                    snapshot = snapshot,
-                    visibleDirectory = snapshot.currentDirectory(),
-                    query = "",
-                    isAddressPickerOpen = false,
-                    addressQuery = "",
-                    addressResults = emptyList(),
-                    errorMessage = null,
-                )
-            }
-            if (!startOffline && mutableState.value.isAuthorized) refreshCurrent(showError = true)
-        }
+        changeAddress { user -> repository.selectAddress(ownerUserId, user, address) }
     }
 
     fun removeAddress(address: EmployeeAddress) {
-        loadJob?.cancel()
+        changeAddress(closePicker = false) { user -> repository.removeAddress(ownerUserId, user, address) }
+    }
+
+    private fun changeAddress(closePicker: Boolean = true, change: suspend (String) -> EmployeeSnapshot) {
+        if (state.value.simpleOneUserId.isBlank()) return
+        bootstrapJob?.cancel(); loadJob?.cancel()
+        closeEmployee()
+        val request = ++directoryRevision
+        val revision = generation
+        val user = state.value.simpleOneUserId
+        if (closePicker) closeAddressPicker()
         loadJob = viewModelScope.launch {
-            val current = mutableState.value
-            val snapshot = repository.removeAddress(ownerUserId, current.simpleOneUserId, address)
-            mutableState.update { it.copy(snapshot = snapshot, visibleDirectory = snapshot.currentDirectory()) }
+            try {
+                val snapshot = change(user)
+                if (generation != revision || directoryRevision != request) return@launch
+                mutableState.update { it.copy(snapshot = snapshot, visibleDirectory = snapshot.currentDirectory(), query = "", errorMessage = null, isLoading = false) }
+                if (canLoad()) refreshCurrent(revision, request)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (generation == revision && directoryRevision == request) reportFailure(error, address = true) }
         }
     }
 
-    fun openEmployee(employee: Employee) {
+    fun openEmployee(employee: Employee) = loadEmployee(employee, force = false)
+    fun refreshEmployee() { state.value.selectedEmployee?.let { loadEmployee(it, force = true) } }
+    fun showActionError(message: String) { mutableState.update { it.copy(detailErrorMessage = message) } }
+
+    private fun loadEmployee(employee: Employee, force: Boolean) {
         detailJob?.cancel()
-        val cached = mutableState.value.snapshot.detailCache[employee.sysId]
-        mutableState.update {
-            it.copy(
-                selectedEmployee = cached ?: employee,
-                isDetailLoading = cached?.detailSections.isNullOrEmpty() && it.isAuthorized,
-                detailErrorMessage = null,
-            )
-        }
-        if (!mutableState.value.isAuthorized || cached?.detailSections?.isNotEmpty() == true) return
+        val request = ++detailRevision
+        val cached = state.value.snapshot.detailCache[employee.sysId]
+        val shouldFetch = canLoad() && (force || cached?.detailSections.isNullOrEmpty())
+        mutableState.update { it.copy(selectedEmployee = cached ?: employee,
+            isDetailLoading = shouldFetch, detailErrorMessage = null) }
+        if (!shouldFetch) return
+        val revision = generation
+        val user = state.value.simpleOneUserId
         detailJob = viewModelScope.launch {
             try {
-                val current = mutableState.value
-                val (snapshot, detailed) = repository.employeeDetails(
-                    ownerUserId,
-                    current.simpleOneUserId,
-                    current.selectedEmployee ?: return@launch,
-                )
-                mutableState.update {
-                    it.copy(snapshot = snapshot, selectedEmployee = detailed, isDetailLoading = false)
+                val (snapshot, detailed) = repository.employeeDetails(ownerUserId, user, cached ?: employee)
+                if (generation == revision && detailRevision == request && state.value.selectedEmployee?.sysId == employee.sysId) {
+                    mutableState.update { it.copy(snapshot = snapshot, selectedEmployee = detailed,
+                        visibleDirectory = it.visibleDirectory.copy(employees = it.employees.map { old -> if (old.sysId == detailed.sysId) detailed else old })) }
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: SimpleOneFailure.Unauthorized) {
-                mutableState.update {
-                    it.copy(isAuthorized = false, isDetailLoading = false, detailErrorMessage = "Сессия SimpleOne истекла. Показаны сохранённые данные.")
-                }
-            } catch (error: Exception) {
-                mutableState.update {
-                    it.copy(isDetailLoading = false, detailErrorMessage = error.userMessage("Не удалось загрузить данные сотрудника."))
-                }
-            }
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { if (generation == revision && detailRevision == request) reportFailure(error, detail = true) }
+            finally { if (generation == revision && detailRevision == request) mutableState.update { it.copy(isDetailLoading = false) } }
         }
     }
 
     fun closeEmployee() {
-        detailJob?.cancel()
+        detailJob?.cancel(); ++detailRevision
         mutableState.update { it.copy(selectedEmployee = null, isDetailLoading = false, detailErrorMessage = null) }
     }
 
-    private suspend fun bootstrapAndRefresh(cached: EmployeeSnapshot) {
-        mutableState.update { it.copy(isLoading = cached.selectedAddress == null, errorMessage = null) }
+    private suspend fun bootstrapAndRefresh(revision: Long) {
+        if (!canLoad()) return
+        mutableState.update { it.copy(isLoading = it.snapshot.selectedAddress == null, errorMessage = null) }
         try {
-            val snapshot = repository.bootstrap(ownerUserId, mutableState.value.simpleOneUserId)
-            mutableState.update {
-                it.copy(snapshot = snapshot, visibleDirectory = snapshot.currentDirectory(), isLoading = false)
+            val snapshot = repository.bootstrap(ownerUserId, state.value.simpleOneUserId)
+            if (generation != revision || !canLoad()) return
+            mutableState.update { it.copy(snapshot = snapshot, visibleDirectory = snapshot.currentDirectory(it.query), isLoading = false) }
+            if (snapshot.selectedAddress != null) refreshCurrent(revision, ++directoryRevision)
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            if (generation == revision) {
+                mutableState.update { it.copy(isLoading = false) }
+                reportFailure(error)
             }
-            if (snapshot.selectedAddress != null) refreshCurrent(showError = cached.currentDirectory().employees.isEmpty())
-            else mutableState.update { it.copy(errorMessage = "Выберите населённый пункт.") }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: SimpleOneFailure.Unauthorized) {
-            mutableState.update { it.copy(isAuthorized = false, isLoading = false, errorMessage = "Сессия SimpleOne истекла.") }
-        } catch (error: Exception) {
-            mutableState.update { it.copy(isLoading = false, errorMessage = error.userMessage("Не удалось подготовить каталог сотрудников.")) }
         }
     }
 
-    private suspend fun refreshCurrent(showError: Boolean) {
-        val current = mutableState.value
+    private suspend fun refreshCurrent(revision: Long, request: Long) {
+        val current = state.value
         val address = current.snapshot.selectedAddress ?: return
-        if (!current.isAuthorized) return
+        if (!canLoad()) return
         mutableState.update { it.copy(isLoading = true, errorMessage = null) }
         try {
-            val (snapshot, directory) = repository.refreshDirectory(
-                ownerUserId,
-                current.simpleOneUserId,
-                address,
-                current.query,
-            )
-            mutableState.update {
-                it.copy(snapshot = snapshot, visibleDirectory = directory, isLoading = false, isAuthorized = true)
+            val (snapshot, directory) = repository.refreshDirectory(ownerUserId, current.simpleOneUserId, address, current.query)
+            if (generation == revision && directoryRevision == request && state.value.snapshot.selectedAddress?.sysId == address.sysId && state.value.query == current.query) {
+                mutableState.update { it.copy(snapshot = snapshot, visibleDirectory = directory) }
             }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: SimpleOneFailure.Unauthorized) {
-            mutableState.update {
-                it.copy(isAuthorized = false, isLoading = false, errorMessage = if (showError) "Сессия SimpleOne истекла. Показан сохранённый каталог." else null)
-            }
-        } catch (error: Exception) {
-            mutableState.update {
-                it.copy(isLoading = false, errorMessage = if (showError) error.userMessage("Не удалось загрузить сотрудников.") else null)
-            }
-        }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { if (generation == revision && directoryRevision == request) reportFailure(error) }
+        finally { if (generation == revision && directoryRevision == request) mutableState.update { it.copy(isLoading = false) } }
     }
 
-    private fun EmployeeSnapshot.currentDirectory(): EmployeeDirectory =
-        selectedAddress?.sysId?.let(directoriesByAddressId::get) ?: EmployeeDirectory()
-
-    private fun Throwable.userMessage(fallback: String): String =
-        (this as? SimpleOneFailure)?.message ?: fallback
-
+    private fun canLoad() = !startOffline && state.value.isAuthorized && state.value.simpleOneUserId.isNotBlank()
+    private fun cancelRequests() {
+        ++generation; ++directoryRevision; ++addressRevision; ++detailRevision
+        bootstrapJob?.cancel(); loadJob?.cancel(); addressJob?.cancel(); detailJob?.cancel()
+    }
+    private fun reportFailure(error: Exception, address: Boolean = false, detail: Boolean = false) {
+        if (error is SimpleOneFailure.Unauthorized || error is SimpleOneFailure.MissingCredentials) activate(state.value.simpleOneUserId, false)
+        val message = (error as? SimpleOneFailure)?.message ?: "Не удалось загрузить данные сотрудников."
+        mutableState.update { when { address -> it.copy(addressErrorMessage = message); detail -> it.copy(detailErrorMessage = message); else -> it.copy(errorMessage = message) } }
+    }
+    private fun EmployeeSnapshot.currentDirectory(query: String = ""): EmployeeDirectory {
+        val directory = selectedAddress?.sysId?.let(directoriesByAddressId::get) ?: EmployeeDirectory()
+        return directory.copy(employees = filterEmployees(directory.employees, query))
+    }
     companion object {
         private const val SEARCH_DEBOUNCE_MILLIS = 350L
-
-        fun factory(
-            repository: EmployeeRepository,
-            ownerUserId: String,
-            startOffline: Boolean,
-        ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                EmployeeViewModel(repository, ownerUserId, startOffline) as T
+        fun factory(repository: EmployeeRepository, ownerUserId: String, startOffline: Boolean): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>): T = EmployeeViewModel(repository, ownerUserId, startOffline) as T
         }
     }
 }

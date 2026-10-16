@@ -70,6 +70,7 @@ import ru.lumastack.lumawork.data.backpack.BackpackPhotoRepository
 import ru.lumastack.lumawork.data.backpack.BackpackRepository
 import ru.lumastack.lumawork.data.route.RouteRepository
 import ru.lumastack.lumawork.data.employees.EmployeeRepository
+import ru.lumastack.lumawork.data.workschedule.WorkScheduleRepository
 import ru.lumastack.lumawork.data.auto.AutoRepository
 import ru.lumastack.lumawork.data.auto.VehicleImageRepository
 import ru.lumastack.lumawork.data.fuel.FuelRepository
@@ -104,6 +105,7 @@ fun AuthContent(
     backpackPhotoRepository: BackpackPhotoRepository,
     backpackImageRepository: BackpackImageRepository,
     employeeRepository: EmployeeRepository,
+    workScheduleRepository: WorkScheduleRepository,
     autoRepository: AutoRepository,
     vehicleImageRepository: VehicleImageRepository,
     fuelRepository: FuelRepository,
@@ -126,6 +128,7 @@ fun AuthContent(
             backpackPhotoRepository = backpackPhotoRepository,
             backpackImageRepository = backpackImageRepository,
             employeeRepository = employeeRepository,
+            workScheduleRepository = workScheduleRepository,
             autoRepository = autoRepository,
             vehicleImageRepository = vehicleImageRepository,
             fuelRepository = fuelRepository,

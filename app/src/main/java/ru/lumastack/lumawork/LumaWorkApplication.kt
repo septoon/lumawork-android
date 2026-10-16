@@ -16,6 +16,8 @@ import ru.lumastack.lumawork.data.backpack.FileBackpackPhotoCatalogCache
 import ru.lumastack.lumawork.data.coordination.CoordinationRepository
 import ru.lumastack.lumawork.data.coordination.FileCoordinationCache
 import ru.lumastack.lumawork.data.employees.EmployeeRepository
+import ru.lumastack.lumawork.data.workschedule.WorkScheduleRepository
+import ru.lumastack.lumawork.data.workschedule.FileWorkScheduleCache
 import ru.lumastack.lumawork.data.fuel.FileFuelCache
 import ru.lumastack.lumawork.data.fuel.FuelRepository
 import ru.lumastack.lumawork.data.fuel.OkHttpFuelApi
@@ -147,6 +149,12 @@ class AppContainer(application: Application) {
     )
 
     val backpackImageRepository = BackpackImageRepository(application)
+
+    val workScheduleRepository = WorkScheduleRepository(
+        api = simpleOneApi,
+        sessionStore = simpleOneSessionStore,
+        cache = FileWorkScheduleCache(application, json),
+    )
 
     val employeeRepository = EmployeeRepository(
         api = simpleOneApi,

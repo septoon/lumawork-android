@@ -120,3 +120,33 @@ private fun String.normalizedEmployeeText(): String = trim()
     .replace('Ё', 'Е')
     .lowercase()
     .replace(Regex("\\s+"), " ")
+
+fun Employee.tenureText(today: java.time.LocalDate = java.time.LocalDate.now(), zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String? {
+    val field = detailSections.asSequence().flatMap { it.fields.asSequence() }.firstOrNull { field ->
+        val title = field.title.lowercase().replace('ё', 'е')
+        val system = field.id.lowercase()
+        listOf("дата приема", "прием на работу", "дата трудоустройства", "дата начала работы").any(title::contains) ||
+            listOf("hire_date", "employment_date", "employment_start", "work_start").any(system::contains)
+    } ?: return null
+    val raw = field.value.trim()
+    val iso = runCatching { java.time.OffsetDateTime.parse(raw).atZoneSameInstant(zone).toLocalDate() }.getOrNull()
+    val start = iso ?: listOf("dd.MM.uuuu", "dd.MM.uuuu HH:mm", "dd.MM.uuuu HH:mm:ss", "uuuu-MM-dd", "uuuu-MM-dd HH:mm", "uuuu-MM-dd HH:mm:ss", "uuuu-MM-dd'T'HH:mm:ss", "d MMMM uuuu").firstNotNullOfOrNull { pattern ->
+        runCatching {
+            java.time.LocalDate.parse(raw, java.time.format.DateTimeFormatterBuilder().parseCaseInsensitive().appendPattern(pattern).toFormatter(java.util.Locale.forLanguageTag("ru")).withResolverStyle(java.time.format.ResolverStyle.STRICT))
+        }.getOrNull()
+    } ?: return null
+    if (start > today) return null
+    val period = java.time.Period.between(start, today)
+    return buildList {
+        if (period.years > 0) add("${period.years} ${employeeCountWord(period.years, "год", "года", "лет")}")
+        if (period.months > 0) add("${period.months} ${employeeCountWord(period.months, "месяц", "месяца", "месяцев")}")
+        if (period.days > 0 || isEmpty()) add("${period.days} ${employeeCountWord(period.days, "день", "дня", "дней")}")
+    }.joinToString(" ")
+}
+
+fun employeeCountWord(count: Int, one: String, few: String, many: String): String = when {
+    count % 100 in 11..14 -> many
+    count % 10 == 1 -> one
+    count % 10 in 2..4 -> few
+    else -> many
+}

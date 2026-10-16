@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
                     backpackPhotoRepository = container.backpackPhotoRepository,
                     backpackImageRepository = container.backpackImageRepository,
                     employeeRepository = container.employeeRepository,
+                    workScheduleRepository = container.workScheduleRepository,
                     autoRepository = container.autoRepository,
                     vehicleImageRepository = container.vehicleImageRepository,
                     fuelRepository = container.fuelRepository,

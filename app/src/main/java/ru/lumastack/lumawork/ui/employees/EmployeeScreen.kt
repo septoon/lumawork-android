@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.employees
 
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -46,7 +48,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,8 +59,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.lumastack.lumawork.data.employees.EmployeeRepository
 import ru.lumastack.lumawork.domain.employees.Employee
 import ru.lumastack.lumawork.domain.employees.EmployeeAddress
-import ru.lumastack.lumawork.domain.employees.EmployeeField
-import ru.lumastack.lumawork.domain.employees.EmployeeSection
+import ru.lumastack.lumawork.domain.employees.employeeCountWord
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
@@ -81,7 +81,7 @@ fun EmployeeRoute(
         factory = EmployeeViewModel.factory(repository, ownerUserId, startOffline),
     )
     val state by employeeViewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(simpleOneState.snapshot.currentUser?.sysId, simpleOneState.isAuthorized) {
+    LaunchedEffect(simpleOneState.snapshot.currentUser?.sysId, simpleOneState.isAuthorized, simpleOneState.snapshot.updatedAtEpochMillis) {
         employeeViewModel.activate(
             simpleOneState.snapshot.currentUser?.sysId.orEmpty(),
             simpleOneState.isAuthorized,
@@ -99,6 +99,9 @@ fun EmployeeRoute(
         onRemoveAddress = employeeViewModel::removeAddress,
         onOpenEmployee = employeeViewModel::openEmployee,
         onCloseEmployee = employeeViewModel::closeEmployee,
+        onRefreshEmployee = employeeViewModel::refreshEmployee,
+        onActionError = employeeViewModel::showActionError,
+        canRefresh = !startOffline,
         modifier = modifier,
     )
 }
@@ -116,6 +119,9 @@ private fun EmployeeScreen(
     onRemoveAddress: (EmployeeAddress) -> Unit,
     onOpenEmployee: (Employee) -> Unit,
     onCloseEmployee: () -> Unit,
+    onRefreshEmployee: () -> Unit,
+    onActionError: (String) -> Unit,
+    canRefresh: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
@@ -138,6 +144,12 @@ private fun EmployeeScreen(
         enabled = state.selectedEmployee != null && !state.isAddressPickerOpen,
         onBack = onCloseEmployee,
     )
+    if (!state.isAuthorized) {
+        Box(modifier.fillMaxSize().background(background).padding(20.dp), contentAlignment = Alignment.TopCenter) {
+            MessagePanel("SimpleOne не подключён", "Войдите в SimpleOne на экране «Заявки», затем вернитесь к сотрудникам.")
+        }
+        return
+    }
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
             if (state.selectedEmployee != null) {
@@ -146,6 +158,7 @@ private fun EmployeeScreen(
                     isLoading = state.isDetailLoading,
                     errorMessage = state.detailErrorMessage,
                     onBack = onCloseEmployee,
+                    onRefresh = onRefreshEmployee, canRefresh = canRefresh && state.isAuthorized, onActionError = onActionError,
                     modifier = Modifier.fillMaxSize(),
                     listState = detailState,
                 )
@@ -176,7 +189,7 @@ private fun EmployeeScreen(
                         onQueryChange = onQueryChange,
                         onRefresh = onRefresh,
                         onOpenAddressPicker = onOpenAddressPicker,
-                        onOpenEmployee = onOpenEmployee,
+                            onOpenEmployee = onOpenEmployee,
                         contentPadding = PaddingValues(16.dp),
                         modifier = Modifier.fillMaxSize(),
                         listState = directoryState,
@@ -194,6 +207,7 @@ private fun EmployeeScreen(
                             isLoading = state.isDetailLoading,
                             errorMessage = state.detailErrorMessage,
                             onBack = null,
+                            onRefresh = onRefreshEmployee, canRefresh = canRefresh && state.isAuthorized, onActionError = onActionError,
                             modifier = Modifier.fillMaxSize(),
                             listState = detailState,
                         )
@@ -230,72 +244,76 @@ private fun EmployeeDirectoryContent(
             employee.sortName.firstOrNull()?.uppercaseChar()?.toString() ?: "#"
         }.toSortedMap(compareBy(String.CASE_INSENSITIVE_ORDER) { it })
     }
-    LazyColumn(
-        modifier = modifier,
-        state = listState,
-        contentPadding = contentPadding,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item(key = "hero") {
-            EmployeeHero(
-                state = state,
-                onOpenAddressPicker = onOpenAddressPicker,
-                onRefresh = onRefresh,
-            )
-        }
-        item(key = "search") {
-            AppTextField(
-                value = state.query,
-                onValueChange = onQueryChange,
-                label = "Поиск сотрудников", search = true,
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-            )
-        }
-        if (!state.isAuthorized && state.simpleOneUserId.isBlank()) {
-            item(key = "auth") {
-                MessagePanel("SimpleOne не подключён", "Войдите в SimpleOne в разделе «Заявки».")
+    AppRefreshContainer(modifier, isRefreshing = state.isLoading, onRefresh = onRefresh, enabled = state.isAuthorized && state.snapshot.selectedAddress != null) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = contentPadding,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item(key = "hero") {
+                EmployeeHero(
+                    state = state,
+                    onOpenAddressPicker = onOpenAddressPicker,
+                )
             }
-        }
-        state.errorMessage?.let { error ->
-            item(key = "error") { MessagePanel("Не удалось обновить каталог", error, isError = true) }
-        }
-        if (state.isLoading && state.employees.isEmpty()) {
-            item(key = "loading") {
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 28.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Text("Загружаю сотрудников")
+            item(key = "search") {
+                AppTextField(
+                    value = state.query,
+                    trailingIcon = { if (state.query.isNotEmpty()) TextButton(onClick = { onQueryChange("") }) { Text("×") } },
+                    onValueChange = onQueryChange,
+                    label = "Поиск сотрудников", search = true,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                )
+            }
+            if (!state.isAuthorized && state.simpleOneUserId.isBlank()) {
+                item(key = "auth") {
+                    MessagePanel("SimpleOne не подключён", "Войдите в SimpleOne в разделе «Заявки».")
                 }
             }
-        } else if (state.snapshot.selectedAddress != null && state.employees.isEmpty()) {
-            item(key = "empty") {
-                MessagePanel(
-                    if (state.query.isBlank()) "Сотрудников нет" else "Ничего не найдено",
-                    if (state.query.isBlank()) "SimpleOne не вернул сотрудников для выбранного населённого пункта."
-                    else "Измените запрос или населённый пункт.",
-                )
+            state.errorMessage?.let { error ->
+                item(key = "error") { MessagePanel("Не удалось обновить каталог", error, isError = true) }
             }
+            if (state.isLoading && state.employees.isEmpty()) {
+                item(key = "loading") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 28.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Загружаю сотрудников")
+                    }
+                }
+            } else if (state.snapshot.selectedAddress == null) {
+                item(key = "choose-address") { MessagePanel("Выберите населённый пункт", "Нажмите «Сменить населённый пункт» и сохраните адрес.") }
+            } else if (state.employees.isEmpty()) {
+                item(key = "empty") {
+                    MessagePanel(
+                        if (state.query.isBlank()) "Сотрудников нет" else "Ничего не найдено",
+                        if (state.query.isBlank()) "В выбранном населённом пункте сотрудники не найдены."
+                        else "Измените запрос или населённый пункт.",
+                    )
+                }
+            }
+            groups.forEach { (letter, employees) ->
+                item(key = "letter-$letter") {
+                    EmployeeLetterHeader(letter, employees.size)
+                }
+                items(employees, key = Employee::sysId) { employee ->
+                    EmployeeRow(
+                        employee = employee,
+                        isCurrentUser = employee.sysId == state.simpleOneUserId,
+                        isSelected = employee.sysId == state.selectedEmployee?.sysId,
+                        onClick = { onOpenEmployee(employee) },
+                    )
+                }
+            }
+            item(key = "bottom-space") { Spacer(Modifier.height(4.dp)) }
         }
-        groups.forEach { (letter, employees) ->
-            item(key = "letter-$letter") {
-                EmployeeLetterHeader(letter, employees.size)
-            }
-            items(employees, key = Employee::sysId) { employee ->
-                EmployeeRow(
-                    employee = employee,
-                    isCurrentUser = employee.sysId == state.simpleOneUserId,
-                    isSelected = employee.sysId == state.selectedEmployee?.sysId,
-                    onClick = { onOpenEmployee(employee) },
-                )
-            }
-        }
-        item(key = "bottom-space") { Spacer(Modifier.height(4.dp)) }
     }
 }
 
@@ -303,7 +321,6 @@ private fun EmployeeDirectoryContent(
 private fun EmployeeHero(
     state: EmployeeUiState,
     onOpenAddressPicker: () -> Unit,
-    onRefresh: () -> Unit,
 ) {
     val address = state.snapshot.selectedAddress
     Card(
@@ -351,19 +368,27 @@ private fun EmployeeHero(
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
                         )
-                        Text("сотрудников", color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall)
+                        Text(employeeCountWord(state.visibleDirectory.totalCount, "сотрудник", "сотрудника", "сотрудников"), color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (state.employees.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy((-11).dp)) {
+                        state.employees.take(4).forEach { employee ->
+                            Surface(color = employeeAccent(employee.sysId), shape = CircleShape, border = BorderStroke(2.dp, Color.White.copy(alpha = .7f))) {
+                                Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) { Text(employee.initials, color = Color.White, style = MaterialTheme.typography.labelSmall) }
+                            }
+                        }
+                        if (state.employees.size > 4) Surface(color = Color.Black.copy(alpha = .25f), shape = CircleShape, border = BorderStroke(2.dp, Color.White.copy(alpha = .5f))) {
+                            Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) { Text("+${state.employees.size - 4}", color = Color.White, style = MaterialTheme.typography.labelSmall) }
+                        }
+                    }
+                }
                 Button(
                     onClick = onOpenAddressPicker,
                     modifier = Modifier.weight(1f),
-                ) { Text("Населённый пункт", maxLines = 1) }
-                OutlinedButton(
-                    onClick = onRefresh,
-                    enabled = state.isAuthorized && address != null && !state.isLoading,
-                ) { Text("Обновить") }
+                ) { Text("Сменить населённый пункт", maxLines = 2) }
             }
         }
     }
@@ -432,96 +457,6 @@ private fun EmployeeRow(employee: Employee, isCurrentUser: Boolean, isSelected: 
                 }
             }
             Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.titleLarge)
-        }
-    }
-}
-
-@Composable
-private fun EmployeeDetail(
-    employee: Employee,
-    isLoading: Boolean,
-    errorMessage: String?,
-    onBack: (() -> Unit)?,
-    modifier: Modifier = Modifier,
-    listState: LazyListState = rememberLazyListState(),
-) {
-    val uriHandler = LocalUriHandler.current
-    val summaryFields = remember(employee) {
-        listOf(
-            "Должность" to employee.position,
-            "Подразделение" to employee.department,
-            "Организация" to employee.company,
-            "Руководитель" to employee.manager,
-            "Населённый пункт" to employee.address?.title.orEmpty(),
-            "Логин" to employee.login,
-            "Обновлено" to employee.updatedAt,
-        ).filter { it.second.isNotBlank() }
-    }
-    LazyColumn(
-        modifier = modifier,
-        state = listState,
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item(key = "header") {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (onBack != null) OutlinedButton(onClick = onBack) { Text("Назад") }
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier.size(62.dp).background(employeeAccent(employee.sysId), RoundedCornerShape(20.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) { Text(employee.initials, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(employee.fullName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(employee.roleText, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                if (employee.phone.isNotBlank() || employee.email.isNotBlank()) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (employee.phone.isNotBlank()) {
-                            Button(onClick = { uriHandler.openUri("tel:${employee.phone}") }, modifier = Modifier.weight(1f)) { Text("Позвонить") }
-                        }
-                        if (employee.email.isNotBlank()) {
-                            OutlinedButton(onClick = { uriHandler.openUri("mailto:${employee.email}") }, modifier = Modifier.weight(1f)) { Text("Почта") }
-                        }
-                    }
-                }
-            }
-        }
-        if (isLoading) {
-            item(key = "loading") {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                }
-            }
-        }
-        errorMessage?.let { item(key = "error") { MessagePanel("Детали не обновлены", it, isError = true) } }
-        if (summaryFields.isNotEmpty()) {
-            item(key = "summary") {
-                DetailSection("Основная информация", summaryFields.mapIndexed { index, pair -> EmployeeField("summary-$index", pair.first, pair.second) })
-            }
-        }
-        items(employee.detailSections, key = EmployeeSection::id) { section ->
-            DetailSection(section.title, section.fields)
-        }
-    }
-}
-
-@Composable
-private fun DetailSection(title: String, fields: List<EmployeeField>) {
-    Card(
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
-        shape = RoundedCornerShape(18.dp),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            fields.forEachIndexed { index, field ->
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(field.title, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
-                    Text(field.value, style = MaterialTheme.typography.bodyMedium)
-                }
-                if (index < fields.lastIndex) HorizontalDivider()
-            }
         }
     }
 }
@@ -613,7 +548,7 @@ private fun EmployeeAddressDialog(
                         item(key = "address-empty") { MessagePanel("Ничего не найдено", "Уточните название населённого пункта.") }
                     }
                     items(state.addressResults, key = { "result-${it.sysId}" }) { address ->
-                        AddressRow(address, false, onSelect = { onSelect(address) }, onRemove = null)
+                        AddressRow(address, address.sysId == state.snapshot.selectedAddress?.sysId, onSelect = { onSelect(address) }, onRemove = null)
                     }
                 }
             }

@@ -47,6 +47,9 @@ import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneUser
 import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
+import ru.lumastack.lumawork.domain.workschedule.WorkSchedule
+import ru.lumastack.lumawork.domain.workschedule.WorkScheduleJournal
+import ru.lumastack.lumawork.data.workschedule.WorkScheduleParser
 
 interface SimpleOneApi {
     suspend fun login(username: String, password: String): String
@@ -71,6 +74,8 @@ interface SimpleOneApi {
         authKey: String,
     ): Pair<List<Employee>, Int> = emptyList<Employee>() to 0
     suspend fun employeeDetails(employee: Employee, authKey: String): Employee = employee
+    suspend fun workScheduleJournals(authKey: String): List<WorkScheduleJournal> = throw SimpleOneFailure.InvalidResponse
+    suspend fun workSchedule(journal: WorkScheduleJournal, authKey: String): WorkSchedule = throw SimpleOneFailure.InvalidResponse
 }
 
 sealed class SimpleOneFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
@@ -275,6 +280,35 @@ class OkHttpSimpleOneApi(
         columns = COORDINATION_COLUMNS,
         maxPages = MAX_COORDINATION_PAGES,
     ).filter { isReturnEquipmentRequest(it.requestType) }
+
+    override suspend fun workScheduleJournals(authKey: String): List<WorkScheduleJournal> {
+        val journals = linkedMapOf<String, WorkScheduleJournal>()
+        var page = 1
+        while (true) {
+            val url = "$origin/list/itsm_tchnsrv_accounting_journal".toHttpUrl().newBuilder()
+                .addQueryParameter("page", page.toString())
+                .addQueryParameter("per_page", PAGE_SIZE.toString()).build()
+            val response = request(authenticatedRequest(url.toString(), authKey))
+            val parsed = WorkScheduleParser.journals(response)
+            val previousCount = journals.size
+            parsed.forEach { journals.putIfAbsent(it.sysId, it) }
+            val hasMore = simpleOneTotalCount(response)?.let { page * PAGE_SIZE < it } ?: (parsed.size == PAGE_SIZE)
+            if (!hasMore || journals.size == previousCount) break
+            page += 1
+        }
+        return journals.values.sortedWith(compareBy<WorkScheduleJournal> { it.cityName }.thenByDescending { it.year }.thenByDescending { it.month })
+    }
+
+    override suspend fun workSchedule(journal: WorkScheduleJournal, authKey: String): WorkSchedule {
+        val recordUrl = "$origin/record/itsm_tchnsrv_accounting_journal".toHttpUrl().newBuilder().addPathSegment(journal.sysId).build()
+        val record = request(authenticatedRequest(recordUrl.toString(), authKey))
+        val widgetId = WorkScheduleParser.widgetInstanceId(record)
+        val url = "$origin/widget/run-server-script".toHttpUrl().newBuilder().addPathSegment(widgetId).build()
+        val payload = buildJsonObject { put("recordID", journal.sysId); put("action", "load") }
+        val loaded = request(authenticatedRequest(url.toString(), authKey).newBuilder()
+            .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE)).build())
+        return WorkScheduleParser.schedule(loaded, journal, WorkScheduleParser.auditInfo(record))
+    }
 
     override suspend fun employeeAddresses(query: String, authKey: String): List<EmployeeAddress> {
         val normalized = sanitizeEmployeeConditionValue(query)
