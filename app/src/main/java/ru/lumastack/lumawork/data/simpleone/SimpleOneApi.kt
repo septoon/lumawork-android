@@ -33,6 +33,9 @@ import okhttp3.Response
 import ru.lumastack.lumawork.domain.coordination.CoordinationRegion
 import ru.lumastack.lumawork.domain.coordination.isReturnEquipmentRequest
 import ru.lumastack.lumawork.data.timereport.TimeReportParser
+import ru.lumastack.lumawork.domain.backpack.OfficeEquipmentItem
+import ru.lumastack.lumawork.domain.backpack.OfficeEquipmentField
+import ru.lumastack.lumawork.domain.backpack.OfficeEquipmentSection
 import ru.lumastack.lumawork.domain.backpack.BackpackItem
 import ru.lumastack.lumawork.domain.backpack.NOT_SET
 import ru.lumastack.lumawork.domain.employees.Employee
@@ -54,6 +57,10 @@ interface SimpleOneApi {
     suspend fun timeReportEntries(authKey: String): List<TimeReportEntry>
     suspend fun exportTimeReport(userId: String, authKey: String): ByteArray
     suspend fun backpackItems(authKey: String): List<BackpackItem>
+    suspend fun backpackList(authKey: String): List<BackpackItem> = backpackItems(authKey)
+    suspend fun backpackItemDetails(item: BackpackItem, authKey: String): BackpackItem = item
+    suspend fun officeEquipment(authKey: String): List<OfficeEquipmentItem> = emptyList()
+    suspend fun officeEquipmentDetails(item: OfficeEquipmentItem, authKey: String): OfficeEquipmentItem = item
     suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest
     suspend fun coordinationRequests(region: CoordinationRegion, authKey: String): List<SimpleOneRequest>
     suspend fun returnEquipmentRequests(userId: String, authKey: String): List<SimpleOneRequest>
@@ -164,7 +171,7 @@ class OkHttpSimpleOneApi(
     override suspend fun exportTimeReport(userId: String, authKey: String): ByteArray =
         exportClient.exportTimeReport(userId, authKey)
 
-    override suspend fun backpackItems(authKey: String): List<BackpackItem> {
+    override suspend fun backpackList(authKey: String): List<BackpackItem> {
         val items = mutableListOf<BackpackItem>()
         val seenIds = mutableSetOf<String>()
         var page = 1
@@ -184,7 +191,11 @@ class OkHttpSimpleOneApi(
             page += 1
         }
 
-        return items.chunked(BACKPACK_DETAIL_CONCURRENCY).flatMap { chunk ->
+        return items
+    }
+
+    override suspend fun backpackItems(authKey: String): List<BackpackItem> =
+        backpackList(authKey).chunked(BACKPACK_DETAIL_CONCURRENCY).flatMap { chunk ->
             coroutineScope {
                 chunk.map { item ->
                     async {
@@ -205,15 +216,34 @@ class OkHttpSimpleOneApi(
                 .thenBy { it.name }
                 .thenBy { it.serialNumber },
         )
-    }
 
-    private suspend fun backpackItemDetails(item: BackpackItem, authKey: String): BackpackItem {
+    override suspend fun backpackItemDetails(item: BackpackItem, authKey: String): BackpackItem {
         val response = request(
             authenticatedRequest("$origin/record/itsm_tchnsrv_balances_in_warehouses/${item.id}", authKey),
         )
         val record = simpleOneRecordItem(response) ?: throw serverFailure(response)
             ?: SimpleOneFailure.InvalidResponse
         return parseBackpackItem(flattenSimpleOneRecord(record)).mergeMissing(item)
+    }
+
+    override suspend fun officeEquipment(authKey: String): List<OfficeEquipmentItem> {
+        val items = linkedMapOf<String, OfficeEquipmentItem>()
+        for (page in 1..MAX_BACKPACK_PAGES) {
+            val url = "$origin/list/itsm_tchnsrv_office_equipment".toHttpUrl().newBuilder()
+                .addQueryParameter("condition", "(ownerDYNAMIC156957141416138823)")
+                .addQueryParameter("page", page.toString()).addQueryParameter("per_page", "100").build()
+            val raw = request(authenticatedRequest(url.toString(), authKey))
+            val records = simpleOneListItems(raw) ?: throw serverFailure(raw) ?: SimpleOneFailure.InvalidResponse
+            records.map(::parseOfficeEquipment).filter { it.id.isNotBlank() }.forEach { items[it.id] = it }
+            if (records.size < 100) break
+        }
+        return items.values.sortedWith(compareByDescending<OfficeEquipmentItem> { it.receivedAtEpochMillis }.thenBy { it.name })
+    }
+
+    override suspend fun officeEquipmentDetails(item: OfficeEquipmentItem, authKey: String): OfficeEquipmentItem {
+        val raw = request(authenticatedRequest("$origin/record/itsm_tchnsrv_office_equipment/${item.id}", authKey))
+        val record = simpleOneRecordItem(raw) ?: throw serverFailure(raw) ?: SimpleOneFailure.InvalidResponse
+        return parseOfficeEquipment(record, item)
     }
 
     override suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest {
@@ -684,6 +714,41 @@ internal fun parseBackpackItem(item: JsonObject): BackpackItem {
         quantity = quantity,
     )
 }
+
+internal fun parseOfficeEquipment(raw: JsonObject, fallback: OfficeEquipmentItem? = null): OfficeEquipmentItem {
+    val item = flattenSimpleOneRecord(raw)
+    val vendor = firstNonEmpty(item.fieldDisplay("c_vendor"), fallback?.vendor.orEmpty())
+    val model = firstNonEmpty(item.field("c_model"), item.fieldDisplay("cmdb_model_id"), fallback?.model.orEmpty())
+    val date = normalizeBackpackDate(firstNonEmpty(item.field("sys_updated_at"), fallback?.receivedAt.orEmpty()))
+    return OfficeEquipmentItem(
+        id = firstNonEmpty(item.field("sys_id", "record_id", "id"), fallback?.id.orEmpty()),
+        name = firstNonEmpty(item.field("c_alternative_name"), item.field("name"), fallback?.name.orEmpty(), listOf(vendor, model).filter(String::isNotBlank).joinToString(" "), "Оборудование"),
+        serialNumber = firstNonEmpty(item.field("serial_number"), fallback?.serialNumber.orEmpty()),
+        vendor = vendor, model = model, number = firstNonEmpty(item.field("number"), fallback?.number.orEmpty()),
+        location = firstNonEmpty(item.fieldDisplay("company_location"), fallback?.location.orEmpty()),
+        owner = firstNonEmpty(item.fieldDisplay("owner"), fallback?.owner.orEmpty()), receivedAt = date.first,
+        receivedAtEpochMillis = date.second ?: fallback?.receivedAtEpochMillis,
+        additionalInformation = firstNonEmpty(item.field("c_additional_info").plainSimpleOneText(), fallback?.additionalInformation.orEmpty()),
+        description = firstNonEmpty(item.field("description").plainSimpleOneText(), fallback?.description.orEmpty()),
+        detailSections = parseOfficeEquipmentSections(raw).ifEmpty { fallback?.detailSections.orEmpty() },
+    )
+}
+
+private fun parseOfficeEquipmentSections(raw: JsonObject): List<OfficeEquipmentSection> =
+    (raw["sections"] as? JsonArray).orEmpty().mapIndexedNotNull { sectionIndex, value ->
+        val section = value as? JsonObject ?: return@mapIndexedNotNull null
+        val fields = (section["elements"] as? JsonArray).orEmpty().mapIndexedNotNull fields@{ fieldIndex, value ->
+            val element = value as? JsonObject ?: return@fields null
+            if ("split" in element || "widget_instance_id" in element) return@fields null
+            val field = parseEmployeeField(element, fieldIndex) ?: return@fields null
+            val title = if (element.string("sys_column_name") == "sys_updated_at" || field.title.equals("Когда изменено", ignoreCase = true)) "Получено" else field.title
+            OfficeEquipmentField("$sectionIndex|${field.id}", title, field.value)
+        }
+        if (fields.isEmpty()) null else {
+            val title = section.string("name").trim('*', ' ').ifBlank { "Информация" }
+            OfficeEquipmentSection("$sectionIndex|$title", title, fields)
+        }
+    }
 
 internal fun parseEmployeeAddress(item: JsonObject): EmployeeAddress? {
     val sysId = firstNonEmpty(item.field("sys_id"), item.fieldDisplay("sys_id"))

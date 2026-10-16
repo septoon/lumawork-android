@@ -5,6 +5,38 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BackpackModelsTest {
+    @Test fun `location filters instances before grouping and return equipment defaults to car`() {
+        val one = item("1", "Pax", "000-AB12", "", 1, 1)
+        val two = item("2", "Pax", "SN2", "", 1, 2)
+        val snapshot = BackpackSnapshot("user", listOf(one, two), returnSerialNumbers = setOf("000ab12"))
+        assertEquals(BackpackLocation.Car, snapshot.location(one))
+        assertEquals(BackpackLocation.Warehouse, snapshot.location(two))
+        assertEquals(listOf("1"), visibleBackpackItems(snapshot, "", BackpackLocation.Car).map { it.id })
+        assertEquals(1, backpackGroups(visibleBackpackItems(snapshot, "", BackpackLocation.Car)).single().quantity)
+        val moved = snapshot.copy(locationOverrides = mapOf(one.storageIdentity to BackpackLocation.Absent))
+        assertEquals(BackpackLocation.Absent, moved.location(one))
+    }
+
+    @Test fun `return serial matching uses exact iOS field labels and normalized tokens`() {
+        val requests = listOf(ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest("1", "REQ", tableFields = mapOf(
+            "Серийный номер демонтируемого ТО" to "000-AB12; CD3456", "Другое поле" to "SHOULDNOTMATCH")))
+        val serials = returnEquipmentSerials(requests)
+        assertTrue("000ab12" in serials)
+        assertTrue("cd3456" in serials)
+        assertTrue("shouldnotmatch" !in serials)
+    }
+
+    @Test
+    fun `serial search filters instances before calculating model quantities like iOS`() {
+        val groups = backpackGroups(listOf(
+            item("1", "Pax D200", "SN-1", "10.08.2026", 100L, 1),
+            item("2", "Pax D200", "SN-2", "12.08.2026", 300L, 2),
+        ))
+        val filtered = filterBackpackGroups(groups, "SN-1").single()
+        assertEquals(listOf("SN-1"), filtered.items.map(BackpackItem::serialNumber))
+        assertEquals(1, filtered.quantity)
+    }
+
     @Test
     fun `groups models sums quantity and sorts newest first`() {
         val groups = backpackGroups(

@@ -13,6 +13,7 @@ data class BackpackItem(
     val receivedAt: String,
     val receivedAtEpochMillis: Long? = null,
     val quantity: Int = 0,
+    val detailsFetchedAtEpochMillis: Long? = null,
 )
 
 @Serializable
@@ -20,6 +21,11 @@ data class BackpackSnapshot(
     val simpleOneUserId: String,
     val items: List<BackpackItem> = emptyList(),
     val updatedAtEpochMillis: Long? = null,
+    val locationOverrides: Map<String, BackpackLocation> = emptyMap(),
+    val returnSerialNumbers: Set<String> = emptySet(),
+    val returnUpdatedAtEpochMillis: Long? = null,
+    val officeEquipment: List<OfficeEquipmentItem> = emptyList(),
+    val officeUpdatedAtEpochMillis: Long? = null,
 )
 
 data class BackpackItemGroup(
@@ -71,12 +77,13 @@ fun backpackGroups(items: List<BackpackItem>): List<BackpackItemGroup> = items
 fun filterBackpackGroups(groups: List<BackpackItemGroup>, query: String): List<BackpackItemGroup> {
     val normalizedQuery = normalizedBackpackText(query)
     if (normalizedQuery.isEmpty()) return groups
-    return groups.filter { group ->
-        normalizedBackpackText(group.name).contains(normalizedQuery) || group.items.any { item ->
-            normalizedBackpackText(item.serialNumber).contains(normalizedQuery) ||
+    return backpackGroups(groups.flatMap { group ->
+        group.items.filter { item ->
+            normalizedBackpackText(item.name).contains(normalizedQuery) ||
+                normalizedBackpackText(item.serialNumber).contains(normalizedQuery) ||
                 normalizedBackpackText(item.receivedAt).contains(normalizedQuery)
         }
-    }
+    })
 }
 
 fun BackpackPhotoCatalog.photoFor(itemName: String): BackpackPhoto? {
@@ -151,3 +158,56 @@ private val NON_ALPHANUMERIC = Regex("[^\\p{L}\\p{N}]+")
 private val BRAND_TERMS = setOf("aisino", "feitian", "morefun", "pax", "unitodi", "vanstone")
 private val VARIANT_TERMS = setOf("внешняя", "переносной", "стационарный")
 const val NOT_SET = "(не задано)"
+
+@Serializable
+enum class BackpackLocation(val title: String) {
+    Warehouse("На складе"), Car("В машине"), Home("Дома"), Absent("Отсутствует")
+}
+
+val BackpackItem.storageIdentity: String get() = serialNumber.trim().takeUnless { it.isEmpty() || it == NOT_SET } ?: id
+fun normalizedSerial(raw: String): String = normalizedBackpackText(java.text.Normalizer.normalize(raw, java.text.Normalizer.Form.NFKC)).filter(Char::isLetterOrDigit)
+fun BackpackSnapshot.isReturn(item: BackpackItem): Boolean = normalizedSerial(item.serialNumber) in returnSerialNumbers
+fun BackpackSnapshot.location(item: BackpackItem): BackpackLocation = locationOverrides[item.storageIdentity]
+    ?: if (isReturn(item)) BackpackLocation.Car else BackpackLocation.Warehouse
+fun visibleBackpackItems(snapshot: BackpackSnapshot?, query: String, location: BackpackLocation?): List<BackpackItem> {
+    if (snapshot == null) return emptyList()
+    val filtered = filterBackpackGroups(backpackGroups(snapshot.items), query).flatMap { it.items }
+    return filtered.filter { location == null || snapshot.location(it) == location }
+}
+
+fun returnEquipmentSerials(requests: List<ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest>): Set<String> {
+    val labels = setOf("Серийный номер демонтируемого ТО", "S/N терминала", "Номер принятого оборудования POS", "Оборудование POS").map(::normalizedBackpackText)
+    return requests.flatMap { request -> request.tableFields.entries.filter { normalizedBackpackText(it.key) in labels }.flatMap { (_, raw) ->
+        (listOf(raw) + raw.split(Regex("[\\s,;/|]+"))).map(::normalizedSerial).filter { it.length >= 4 }
+    } }.toSet()
+}
+
+fun BackpackItem.hasSameListFields(other: BackpackItem): Boolean = id == other.id && name == other.name && serialNumber == other.serialNumber && responsible == other.responsible && quantity == other.quantity
+fun BackpackItem.preserveDetails(cached: BackpackItem?): BackpackItem = if (cached != null && hasSameListFields(cached) && receivedAtEpochMillis == null)
+    copy(receivedAt = cached.receivedAt, receivedAtEpochMillis = cached.receivedAtEpochMillis, detailsFetchedAtEpochMillis = cached.detailsFetchedAtEpochMillis) else this
+fun BackpackItem.needsDetails(now: Long, force: Boolean): Boolean = force || (receivedAtEpochMillis == null && (detailsFetchedAtEpochMillis == null || now - detailsFetchedAtEpochMillis !in 0 until 300_000))
+
+@Serializable
+data class OfficeEquipmentItem(
+    val id: String,
+    val name: String,
+    val serialNumber: String = "",
+    val vendor: String = "",
+    val model: String = "",
+    val number: String = "",
+    val location: String = "",
+    val owner: String = "",
+    val receivedAt: String = "",
+    val receivedAtEpochMillis: Long? = null,
+    val additionalInformation: String = "",
+    val description: String = "",
+    val detailSections: List<OfficeEquipmentSection> = emptyList(),
+) {
+    fun matches(query: String): Boolean = normalizedBackpackText(listOf(name, serialNumber, vendor, model, number, receivedAt).joinToString(" ")).contains(normalizedBackpackText(query))
+}
+
+@Serializable
+data class OfficeEquipmentField(val id: String, val title: String, val value: String)
+
+@Serializable
+data class OfficeEquipmentSection(val id: String, val title: String, val fields: List<OfficeEquipmentField>)
