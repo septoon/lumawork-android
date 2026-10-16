@@ -26,6 +26,7 @@ data class AutoUiState(
     val editingVehicleId: String? = null,
     val maintenanceEditor: MaintenanceDraft? = null,
     val editingMaintenanceId: String? = null,
+    val editingMaintenanceRecord: MaintenanceRecord? = null,
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
     val errorMessage: String? = null,
@@ -50,11 +51,15 @@ class AutoViewModel(
     private val mutableState = MutableStateFlow(AutoUiState())
     val state: StateFlow<AutoUiState> = mutableState.asStateFlow()
     private var loadJob: Job? = null
+    private var saveJob: Job? = null
+    private var selectionJob: Job? = null
+    private var generation = 0L
+    private var pendingSelection: String? = null
 
     init {
         viewModelScope.launch {
             repository.changes.collect { (owner, snapshot) ->
-                if (owner == session.user.id) mutableState.update { it.copy(snapshot = snapshot) }
+                if (owner == session.user.id) publish(snapshot)
             }
         }
         loadJob = viewModelScope.launch {
@@ -65,26 +70,42 @@ class AutoViewModel(
     }
 
     fun updateSession(value: AppSession) {
-        if (value.user.id == session.user.id) session = value
+        if (value.user.id != session.user.id) return
+        val changed = session.token != value.token
+        session = value
+        if (changed) {
+            ++generation
+            loadJob?.cancel(); saveJob?.cancel(); selectionJob?.cancel()
+            mutableState.update { it.copy(isSaving = false, isLoading = false) }
+            if (!startOffline) refresh()
+        }
     }
 
     fun refresh() {
+        if (startOffline || state.value.isSaving) return
         loadJob?.cancel()
         loadJob = viewModelScope.launch { refreshCurrent(showError = true) }
     }
 
     fun selectVehicle(vehicleId: String) {
+        if (state.value.snapshot.vehicles.none { it.id == vehicleId }) return
+        selectionJob?.cancel()
+        pendingSelection = vehicleId
         mutableState.update { it.copy(snapshot = it.snapshot.copy(selectedVehicleId = vehicleId)) }
-        viewModelScope.launch {
-            val snapshot = repository.select(session.user.id, vehicleId)
-            mutableState.update { it.copy(snapshot = snapshot) }
+        selectionJob = viewModelScope.launch {
+            try {
+                val snapshot = repository.select(session.user.id, vehicleId)
+                if (pendingSelection == vehicleId) publish(snapshot)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { mutableState.update { it.copy(errorMessage = error.userMessage()) } }
+            finally { if (pendingSelection == vehicleId) pendingSelection = null }
         }
     }
 
     fun addVehicle() {
         mutableState.update {
             it.copy(
-                vehicleEditor = VehicleDraft(isPrimary = it.snapshot.vehicles.isEmpty()),
+                vehicleEditor = VehicleDraft(),
                 editingVehicleId = null,
                 editorErrorMessage = null,
             )
@@ -102,29 +123,36 @@ class AutoViewModel(
     }
 
     fun closeVehicleEditor() {
+        if (state.value.isSaving) return
         mutableState.update { it.copy(vehicleEditor = null, editingVehicleId = null, editorErrorMessage = null) }
     }
 
     fun saveVehicle() {
+        if (state.value.isSaving) return
+        if (startOffline) { mutableState.update { it.copy(editorErrorMessage = "Нет подключения. Сохранить автомобиль можно после входа онлайн.") }; return }
         val draft = mutableState.value.vehicleEditor ?: return
         val error = vehicleDraftError(draft)
         if (error != null) {
             mutableState.update { it.copy(editorErrorMessage = error) }
             return
         }
-        viewModelScope.launch {
-            mutableState.update { it.copy(isSaving = true, editorErrorMessage = null, errorMessage = null) }
+        val editingId = state.value.editingVehicleId
+        val revision = generation
+        val activeSession = session
+        mutableState.update { it.copy(isSaving = true, editorErrorMessage = null, errorMessage = null) }
+        saveJob = viewModelScope.launch {
             try {
-                val snapshot = mutableState.value.editingVehicleId?.let { id ->
-                    repository.updateVehicle(session, id, draft)
-                } ?: repository.createVehicle(session, draft)
+                val snapshot = editingId?.let { id ->
+                    repository.updateVehicle(activeSession, id, draft)
+                } ?: repository.createVehicle(activeSession, draft)
+                if (generation != revision) return@launch
                 mutableState.update {
                     it.copy(
                         snapshot = snapshot,
                         vehicleEditor = null,
                         editingVehicleId = null,
                         isSaving = false,
-                        notice = if (mutableState.value.editingVehicleId == null) "Автомобиль добавлен." else "Автомобиль обновлён.",
+                        notice = if (editingId == null) "Автомобиль добавлен." else "Автомобиль обновлён.",
                     )
                 }
             } catch (error: CancellationException) {
@@ -145,6 +173,7 @@ class AutoViewModel(
                     mileage = vehicle.currentMileageKm?.toString().orEmpty(),
                 ),
                 editingMaintenanceId = null,
+                editingMaintenanceRecord = null,
                 editorErrorMessage = null,
             )
         }
@@ -155,6 +184,7 @@ class AutoViewModel(
             it.copy(
                 maintenanceEditor = MaintenanceDraft(record, it.snapshot.selectedVehicleId),
                 editingMaintenanceId = record.id,
+                editingMaintenanceRecord = record,
                 editorErrorMessage = null,
             )
         }
@@ -165,26 +195,36 @@ class AutoViewModel(
     }
 
     fun closeMaintenanceEditor() {
-        mutableState.update { it.copy(maintenanceEditor = null, editingMaintenanceId = null, editorErrorMessage = null) }
+        if (state.value.isSaving) return
+        mutableState.update { it.copy(maintenanceEditor = null, editingMaintenanceId = null, editingMaintenanceRecord = null, editorErrorMessage = null) }
     }
 
     fun saveMaintenance() {
+        if (state.value.isSaving) return
+        if (startOffline) { mutableState.update { it.copy(editorErrorMessage = "Нет подключения. Сохранить обслуживание можно после входа онлайн.") }; return }
+        if (state.value.editingMaintenanceRecord != null && state.value.editingMaintenanceId.isNullOrBlank()) {
+            mutableState.update { it.copy(editorErrorMessage = "Нельзя обновить запись без id.") }; return
+        }
         val draft = mutableState.value.maintenanceEditor ?: return
         val error = maintenanceDraftError(draft)
         if (error != null) {
             mutableState.update { it.copy(editorErrorMessage = error) }
             return
         }
-        viewModelScope.launch {
-            mutableState.update { it.copy(isSaving = true, editorErrorMessage = null, errorMessage = null) }
+        val editingId = state.value.editingMaintenanceId
+        val activeSession = session
+        val revision = generation
+        mutableState.update { it.copy(isSaving = true, editorErrorMessage = null, errorMessage = null) }
+        saveJob = viewModelScope.launch {
             try {
-                val editingId = mutableState.value.editingMaintenanceId
-                val snapshot = repository.saveMaintenance(session, editingId, draft)
+                val snapshot = repository.saveMaintenance(activeSession, editingId, draft)
+                if (generation != revision) return@launch
                 mutableState.update {
                     it.copy(
                         snapshot = snapshot,
                         maintenanceEditor = null,
                         editingMaintenanceId = null,
+                        editingMaintenanceRecord = null,
                         isSaving = false,
                         notice = if (editingId == null) "Запись обслуживания добавлена." else "Запись обслуживания обновлена.",
                     )
@@ -200,8 +240,12 @@ class AutoViewModel(
     private suspend fun refreshCurrent(showError: Boolean) {
         mutableState.update { it.copy(isLoading = true, errorMessage = null) }
         try {
+            val revision = generation
             val snapshot = repository.refresh(session)
-            mutableState.update { it.copy(snapshot = snapshot, isLoading = false) }
+            if (generation == revision) {
+                publish(snapshot)
+                mutableState.update { it.copy(isLoading = false) }
+            }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -211,20 +255,22 @@ class AutoViewModel(
         }
     }
 
-    private fun vehicleDraftError(draft: VehicleDraft): String? =
-        ru.lumastack.lumawork.domain.auto.VehicleInputValidation.plateError(draft.licensePlate)
-            ?: ru.lumastack.lumawork.domain.auto.VehicleInputValidation.vinError(draft.vin)
-            ?: if (draft.make.isBlank() || draft.model.isBlank()) "Укажите марку и модель." else null
+    private fun publish(snapshot: AutoSnapshot) {
+        val selected = pendingSelection?.takeIf { id -> snapshot.vehicles.any { it.id == id } } ?: snapshot.selectedVehicleId
+        mutableState.update { it.copy(snapshot = snapshot.copy(selectedVehicleId = selected)) }
+    }
+
+    private fun vehicleDraftError(draft: VehicleDraft): String? = ru.lumastack.lumawork.domain.auto.VehicleDraftValidation.error(draft)
 
     private fun maintenanceDraftError(draft: MaintenanceDraft): String? = when {
-        draft.vehicleId.isNullOrBlank() -> "Выберите автомобиль."
+        state.value.snapshot.vehicles.none { it.id == draft.vehicleId } -> "Выберите автомобиль."
         runCatching { LocalDate.parse(draft.date) }.isFailure -> "Введите дату в формате ГГГГ-ММ-ДД."
         draft.procedure.isBlank() -> "Укажите выполненную работу."
-        draft.mileage.toIntOrNull() == null -> "Укажите пробег целым числом."
-        draft.parts.any { it.name.isBlank() || it.cost.replace(',', '.').toDoubleOrNull()?.let { cost -> cost >= 0 } != true } ->
-            "Проверьте названия и стоимость запчастей."
-        draft.workCost.isNotBlank() && draft.workCost.replace(',', '.').toDoubleOrNull()?.let { it >= 0 } != true ->
-            "Проверьте стоимость работы."
+        draft.mileage.toIntOrNull()?.let { it >= 0 } != true -> "Пробег должен быть неотрицательным числом."
+        draft.parts.any { part ->
+            !(part.name.isBlank() && part.cost.isBlank()) && (part.name.isBlank() || part.cost.replace(',', '.').toDoubleOrNull()?.let { it.isFinite() && it >= 0 } != true)
+        } -> "Для каждой запчасти укажите название и неотрицательную стоимость."
+        draft.workCost.isNotBlank() && draft.workCost.replace(',', '.').toDoubleOrNull()?.let { it.isFinite() && it >= 0 } != true -> "Проверьте стоимость работы."
         else -> null
     }
 

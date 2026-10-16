@@ -2,6 +2,12 @@ package ru.lumastack.lumawork.data.auto
 
 import java.io.IOException
 import java.util.UUID
+import java.util.Base64
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import ru.lumastack.lumawork.domain.auto.VehicleDocument
+import ru.lumastack.lumawork.domain.auto.VehicleDocumentInput
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -25,6 +31,9 @@ interface AutoApi {
     suspend fun vehicles(token: String): List<Vehicle>
     suspend fun createVehicle(token: String, draft: VehicleDraft): Vehicle
     suspend fun updateVehicle(token: String, vehicleId: String, draft: VehicleDraft): Vehicle
+    suspend fun uploadDocument(token: String, vehicleId: String, input: VehicleDocumentInput, onProgress: (Double) -> Unit): VehicleDocument
+    suspend fun downloadDocument(token: String, vehicleId: String, documentId: String): ByteArray
+    suspend fun deleteDocument(token: String, vehicleId: String, documentId: String)
     suspend fun maintenance(token: String): List<MaintenanceRecord>
     suspend fun createMaintenance(token: String, draft: MaintenanceDraft): MaintenanceRecord
     suspend fun updateMaintenance(token: String, recordId: String, draft: MaintenanceDraft): MaintenanceRecord
@@ -34,6 +43,7 @@ sealed class AutoFailure(message: String, cause: Throwable? = null) : Exception(
     class Network(cause: IOException) : AutoFailure("Не удалось подключиться. Проверьте подключение к интернету.", cause)
     data object Unauthorized : AutoFailure("Сессия приложения «Инженер» истекла.")
     class Http(val status: Int) : AutoFailure("Не удалось выполнить действие в разделе «Авто». Попробуйте ещё раз.")
+    class Document(message: String) : AutoFailure(message)
     data object InvalidResponse : AutoFailure("Не удалось загрузить данные раздела «Авто».")
 }
 
@@ -57,6 +67,70 @@ class OkHttpAutoApi(
 
     override suspend fun updateVehicle(token: String, vehicleId: String, draft: VehicleDraft): Vehicle =
         execute<VehicleResponse>(request("/api/v2/vehicles/$vehicleId", token, "PUT", draft.payload())).vehicle
+
+    override suspend fun uploadDocument(
+        token: String,
+        vehicleId: String,
+        input: VehicleDocumentInput,
+        onProgress: (Double) -> Unit,
+    ): VehicleDocument = withContext(Dispatchers.IO) {
+        val uploadId = UUID.randomUUID().toString()
+        val totalChunks = (input.data.size + VehicleDocumentInput.CHUNK_BYTES - 1) / VehicleDocumentInput.CHUNK_BYTES
+        var document: VehicleDocument? = null
+        repeat(totalChunks) { index ->
+            val offset = index * VehicleDocumentInput.CHUNK_BYTES
+            val bytes = input.data.copyOfRange(offset, minOf(offset + VehicleDocumentInput.CHUNK_BYTES, input.data.size))
+            val payload = json.encodeToString(DocumentChunkPayload.serializer(), DocumentChunkPayload(
+                uploadId = uploadId,
+                documentId = input.id,
+                kind = input.kind.wireValue,
+                fileName = input.fileName,
+                mimeType = input.mimeType,
+                chunkIndex = index,
+                totalChunks = totalChunks,
+                chunkBase64 = Base64.getEncoder().encodeToString(bytes),
+            ))
+            val response = execute<DocumentChunkResponse>(request(documentPath(vehicleId) + "/chunk", token, "POST", payload))
+            if (index == totalChunks - 1) {
+                if (!response.complete || response.document?.id != input.id) throw AutoFailure.InvalidResponse
+                document = response.document
+            }
+            onProgress((index + 1).toDouble() / totalChunks)
+        }
+        document ?: throw AutoFailure.InvalidResponse
+    }
+
+    override suspend fun downloadDocument(token: String, vehicleId: String, documentId: String): ByteArray =
+        withContext(Dispatchers.IO) {
+            executeResponse(request(documentPath(vehicleId, documentId), token)).use { response ->
+                val body = response.body
+                if (body.contentLength() > VehicleDocumentInput.MAX_BYTES) throw AutoFailure.InvalidResponse
+                body.byteStream().use { stream ->
+                    val output = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count == -1) break
+                        if (output.size() + count > VehicleDocumentInput.MAX_BYTES) throw AutoFailure.InvalidResponse
+                        output.write(buffer, 0, count)
+                    }
+                    output.toByteArray().also { if (it.isEmpty()) throw AutoFailure.InvalidResponse }
+                }
+            }
+        }
+
+    override suspend fun deleteDocument(token: String, vehicleId: String, documentId: String) {
+        withContext(Dispatchers.IO) {
+            executeResponse(request(documentPath(vehicleId, documentId), token, "DELETE")).close()
+        }
+    }
+
+    private fun documentPath(vehicleId: String, documentId: String? = null): String {
+        val url = origin.toHttpUrl().newBuilder().addPathSegments("api/v2/vehicles")
+            .addPathSegment(vehicleId).addPathSegment("documents")
+        if (documentId != null) url.addPathSegment(documentId)
+        return url.build().encodedPath
+    }
 
     override suspend fun maintenance(token: String): List<MaintenanceRecord> =
         execute<MaintenanceListResponse>(request("/api/v2/maintenance", token)).records
@@ -84,11 +158,19 @@ class OkHttpAutoApi(
         return when (method) {
             "POST" -> builder.post(requireNotNull(payload).toRequestBody(JSON_MEDIA_TYPE)).build()
             "PUT" -> builder.put(requireNotNull(payload).toRequestBody(JSON_MEDIA_TYPE)).build()
+            "DELETE" -> builder.delete().build()
             else -> builder.get().build()
         }
     }
 
-    private suspend inline fun <reified Value> execute(request: Request): Value {
+    private suspend inline fun <reified Value> execute(request: Request): Value = withContext(Dispatchers.IO) {
+        executeResponse(request).use { response ->
+            val body = response.body.string()
+            runCatching { json.decodeFromString<Value>(body) }.getOrElse { throw AutoFailure.InvalidResponse }
+        }
+    }
+
+    private suspend fun executeResponse(request: Request): Response {
         val call = client.newCall(request)
         call.timeout().timeout(30, TimeUnit.SECONDS)
         val response = try {
@@ -96,12 +178,22 @@ class OkHttpAutoApi(
         } catch (error: IOException) {
             throw AutoFailure.Network(error)
         }
-        return response.use {
-            if (it.code == 401 || it.code == 403) throw AutoFailure.Unauthorized
-            if (!it.isSuccessful) throw AutoFailure.Http(it.code)
-            val body = it.body.string()
-            runCatching { json.decodeFromString<Value>(body) }.getOrElse { throw AutoFailure.InvalidResponse }
+        if (response.code == 401 || response.code == 403) {
+            response.close()
+            throw AutoFailure.Unauthorized
         }
+        if (!response.isSuccessful) {
+            val status = response.code
+            val message = response.use {
+                if ("documents" in request.url.pathSegments) runCatching {
+                    json.decodeFromString<DocumentErrorResponse>(it.body.string()).message
+                        ?.trim()?.takeIf { value -> value.isNotBlank() && value.length <= 300 }
+                }.getOrNull() else null
+            }
+            if (message != null) throw AutoFailure.Document(message)
+            throw AutoFailure.Http(status)
+        }
+        return response
     }
 
     private fun VehicleDraft.payload(): String = json.encodeToString(
@@ -151,6 +243,24 @@ class OkHttpAutoApi(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }
+
+@Serializable
+private data class DocumentErrorResponse(val message: String? = null)
+
+@Serializable
+private data class DocumentChunkPayload(
+    val uploadId: String,
+    val documentId: String,
+    val kind: String,
+    val fileName: String,
+    val mimeType: String,
+    val chunkIndex: Int,
+    val totalChunks: Int,
+    val chunkBase64: String,
+)
+
+@Serializable
+private data class DocumentChunkResponse(val complete: Boolean, val document: VehicleDocument? = null)
 
 @Serializable
 private data class VehicleListResponse(val vehicles: List<Vehicle> = emptyList())

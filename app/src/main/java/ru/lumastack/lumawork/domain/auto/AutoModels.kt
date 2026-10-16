@@ -32,6 +32,7 @@ data class Vehicle(
     val imageUrl: String? = null,
     val imageStatus: String = "",
     val gsmSettings: VehicleGsmSettings? = null,
+    val documents: List<VehicleDocument>? = null,
 ) {
     val displayName: String
         get() = customName.clean()

@@ -378,7 +378,10 @@ private val previewAutoRepository = AutoRepository(
         override suspend fun createVehicle(token: String, draft: VehicleDraft): Vehicle = error("unused")
         override suspend fun updateVehicle(token: String, vehicleId: String, draft: VehicleDraft): Vehicle = error("unused")
         override suspend fun maintenance(token: String): List<MaintenanceRecord> = emptyList()
-        override suspend fun createMaintenance(token: String, draft: MaintenanceDraft): MaintenanceRecord = error("unused")
+        override suspend fun uploadDocument(token: String, vehicleId: String, input: ru.lumastack.lumawork.domain.auto.VehicleDocumentInput, onProgress: (Double) -> Unit): ru.lumastack.lumawork.domain.auto.VehicleDocument = error("unused")
+    override suspend fun downloadDocument(token: String, vehicleId: String, documentId: String): ByteArray = error("unused")
+    override suspend fun deleteDocument(token: String, vehicleId: String, documentId: String) = Unit
+    override suspend fun createMaintenance(token: String, draft: MaintenanceDraft): MaintenanceRecord = error("unused")
         override suspend fun updateMaintenance(token: String, recordId: String, draft: MaintenanceDraft): MaintenanceRecord = error("unused")
     },
     cache = object : AutoCache {

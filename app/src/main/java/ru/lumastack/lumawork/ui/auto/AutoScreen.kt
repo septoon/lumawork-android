@@ -108,6 +108,8 @@ fun AutoRoute(
         onUpdateMaintenanceDraft = autoViewModel::updateMaintenanceDraft,
         onCloseMaintenanceEditor = autoViewModel::closeMaintenanceEditor,
         onSaveMaintenance = autoViewModel::saveMaintenance,
+        documentsContent = { vehicle -> VehicleDocumentsSection(session, vehicle, repository, startOffline) },
+        startOffline = startOffline,
         modifier = modifier,
     )
 }
@@ -129,6 +131,8 @@ private fun AutoScreen(
     onUpdateMaintenanceDraft: (MaintenanceDraft) -> Unit,
     onCloseMaintenanceEditor: () -> Unit,
     onSaveMaintenance: () -> Unit,
+    documentsContent: @Composable (Vehicle) -> Unit,
+    startOffline: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
@@ -139,7 +143,7 @@ private fun AutoScreen(
         )
     }
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
-        enabled = !state.isSaving, contentAlignment = Alignment.TopCenter) {
+        enabled = !state.isSaving && !startOffline, contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
             LazyColumn(
                 Modifier.widthIn(max = 720.dp).fillMaxSize(),
@@ -157,7 +161,7 @@ private fun AutoScreen(
                 }
                 item(key = "overview") { MaintenanceOverview(state, onAddMaintenance) }
                 autoMessages(state)
-                maintenanceItems(state.selectedMaintenance, onEditMaintenance)
+                if (state.selectedVehicle != null && !state.isLoading) maintenanceItems(state.selectedMaintenance, onEditMaintenance)
             }
         } else {
             Row(
@@ -191,7 +195,7 @@ private fun AutoScreen(
                     ) {
                         item(key = "overview") { MaintenanceOverview(state, onAddMaintenance) }
                         autoMessages(state)
-                        maintenanceItems(state.selectedMaintenance, onEditMaintenance)
+                        if (state.selectedVehicle != null && !state.isLoading) maintenanceItems(state.selectedMaintenance, onEditMaintenance)
                     }
                 }
             }
@@ -199,9 +203,11 @@ private fun AutoScreen(
     }
 
     state.vehicleEditor?.let { draft ->
-        VehicleEditorDialog(
+        VehicleEditor(
             draft = draft,
-            isEditing = state.editingVehicleId != null,
+            editingVehicle = state.snapshot.vehicles.firstOrNull { it.id == state.editingVehicleId },
+            imageContent = { vehicle -> VehicleImage(vehicle, imageRepository, Modifier.fillMaxWidth().height(180.dp)) },
+            documentsContent = { state.snapshot.vehicles.firstOrNull { it.id == state.editingVehicleId }?.let { documentsContent(it) } },
             isSaving = state.isSaving,
             errorMessage = state.editorErrorMessage,
             onChange = onUpdateVehicleDraft,
@@ -213,7 +219,7 @@ private fun AutoScreen(
         MaintenanceEditorDialog(
             draft = draft,
             vehicles = state.snapshot.vehicles,
-            isEditing = state.editingMaintenanceId != null,
+            isEditing = state.editingMaintenanceRecord != null,
             isSaving = state.isSaving,
             errorMessage = state.editorErrorMessage,
             onChange = onUpdateMaintenanceDraft,
@@ -254,122 +260,17 @@ private fun androidx.compose.foundation.lazy.LazyListScope.maintenanceItems(
 }
 
 @Composable
-private fun VehicleSelector(
-    state: AutoUiState,
-    imageRepository: VehicleImageRepository,
-    onSelect: (String) -> Unit,
-    onAdd: () -> Unit,
-    onEdit: (Vehicle) -> Unit,
-    tablet: Boolean = false,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel("АВТОМОБИЛИ")
-            TextButton(onClick = onAdd) { Text("Добавить") }
-        }
-        if (state.snapshot.vehicles.isEmpty()) {
-            Surface(
-                Modifier.fillMaxWidth().clickable(onClick = onAdd),
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-            ) {
-                Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Добавьте автомобиль", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                }
-            }
-        } else if (tablet) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                state.snapshot.vehicles.forEach { vehicle ->
-                    VehicleCard(
-                        vehicle = vehicle,
-                        selected = vehicle.id == state.snapshot.selectedVehicleId,
-                        imageRepository = imageRepository,
-                        onSelect = { onSelect(vehicle.id) },
-                        onEdit = { onEdit(vehicle) },
-                        compact = true,
-                    )
-                }
-            }
-        } else {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                state.snapshot.vehicles.forEach { vehicle ->
-                    VehicleCard(
-                        vehicle = vehicle,
-                        selected = vehicle.id == state.snapshot.selectedVehicleId,
-                        imageRepository = imageRepository,
-                        onSelect = { onSelect(vehicle.id) },
-                        onEdit = { onEdit(vehicle) },
-                        modifier = Modifier.width(310.dp),
-                    )
-                }
-                Surface(
-                    Modifier.width(130.dp).height(230.dp).clickable(onClick = onAdd),
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-                ) {
-                    Box(contentAlignment = Alignment.Center) { Text("+\nДобавить", fontWeight = FontWeight.Bold) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun VehicleCard(
-    vehicle: Vehicle,
-    selected: Boolean,
-    imageRepository: VehicleImageRepository,
-    onSelect: () -> Unit,
-    onEdit: () -> Unit,
-    modifier: Modifier = Modifier,
-    compact: Boolean = false,
-) {
-    Card(
-        onClick = onSelect,
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-        ),
-        shape = RoundedCornerShape(24.dp),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text(vehicle.displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(vehicle.modelLine.ifBlank { "Марка и модель не указаны" }, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                }
-                TextButton(onClick = onEdit) { Text("Изменить") }
-            }
-            if (!compact) VehicleImage(vehicle, imageRepository, Modifier.fillMaxWidth().height(105.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                vehicle.licensePlate?.takeIf(String::isNotBlank)?.let { PlateBadge(it) }
-                vehicle.year?.let { InfoBadge(it.toString()) }
-                if (vehicle.isPrimary) InfoBadge("Основной")
-            }
-            val info = listOfNotNull(
-                vehicle.currentMileageKm?.let { "${formatInt(it)} км" },
-                vehicle.colorName?.takeIf(String::isNotBlank),
-            ).joinToString(" · ")
-            if (info.isNotBlank()) Text(info, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-@Composable
-private fun VehicleImage(vehicle: Vehicle, repository: VehicleImageRepository, modifier: Modifier = Modifier) {
+internal fun VehicleImage(vehicle: Vehicle, repository: VehicleImageRepository, modifier: Modifier = Modifier) {
     var bitmap by remember(vehicle.imageUrl) { mutableStateOf<android.graphics.Bitmap?>(null) }
     LaunchedEffect(vehicle.imageUrl) { bitmap = vehicle.imageUrl?.let { repository.load(it) } }
     Box(
-        modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(16.dp)),
+        modifier,
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
             Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
         } else {
-            Text("АВТО", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
+            Image(androidx.compose.ui.res.painterResource(ru.lumastack.lumawork.R.drawable.car_placeholder), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
         }
     }
 }
@@ -399,6 +300,12 @@ private fun MaintenanceOverview(state: AutoUiState, onAdd: () -> Unit) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     AutoMetric("Последнее ТО", records.firstOrNull()?.date?.shortDate() ?: "Нет данных", Modifier.weight(1f))
                     AutoMetric("Пробег", records.firstOrNull()?.let { "${formatInt(it.mileage)} км" } ?: "Нет данных", Modifier.weight(1f))
+                }
+                records.firstOrNull()?.let { latest ->
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Последняя работа", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                        Text(latest.procedure, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
@@ -442,49 +349,6 @@ private fun MaintenanceRow(record: MaintenanceRecord, onClick: () -> Unit) {
 }
 
 @Composable
-private fun VehicleEditorDialog(
-    draft: VehicleDraft,
-    isEditing: Boolean,
-    isSaving: Boolean,
-    errorMessage: String?,
-    onChange: (VehicleDraft) -> Unit,
-    onDismiss: () -> Unit,
-    onSave: () -> Unit,
-) {
-    AutoEditorDialog(if (isEditing) "Редактирование" else "Новый автомобиль", isSaving, errorMessage, onDismiss, onSave) {
-        VehicleEditorFields(draft, onChange)
-    }
-}
-
-@Composable
-internal fun VehicleEditorFields(
-    draft: VehicleDraft,
-    onChange: (VehicleDraft) -> Unit,
-    showPrimaryToggle: Boolean = true,
-    enabled: Boolean = true,
-) {
-    VehicleTextField("Государственный номер", draft.licensePlate, { onChange(draft.copy(licensePlate = VehicleInputValidation.formatPlate(it))) }, KeyboardType.Ascii, enabled)
-    VehicleTextField("VIN", draft.vin, { onChange(draft.copy(vin = VehicleInputValidation.normalizeVin(it))) }, KeyboardType.Ascii, enabled)
-    VehicleTextField("СТС", draft.sts, { onChange(draft.copy(sts = it.uppercase())) }, KeyboardType.Ascii, enabled)
-    VehicleTextField("ПТС", draft.pts, { onChange(draft.copy(pts = it.uppercase())) }, KeyboardType.Ascii, enabled)
-    VehicleTextField("Марка", draft.make, { onChange(draft.copy(make = it)) }, enabled = enabled)
-    VehicleTextField("Модель", draft.model, { onChange(draft.copy(model = it)) }, enabled = enabled)
-    VehicleTextField("Поколение", draft.generation, { onChange(draft.copy(generation = it)) }, enabled = enabled)
-    VehicleTextField("Год выпуска", draft.year, { onChange(draft.copy(year = it.filter(Char::isDigit).take(4))) }, KeyboardType.Number, enabled)
-    VehicleTextField("Тип кузова", draft.bodyType, { onChange(draft.copy(bodyType = it)) }, enabled = enabled)
-    VehicleTextField("Цвет", draft.colorName, { onChange(draft.copy(colorName = it)) }, enabled = enabled)
-    VehicleTextField("Текущий пробег, км", draft.currentMileageKm, { onChange(draft.copy(currentMileageKm = it.filter(Char::isDigit))) }, KeyboardType.Number, enabled)
-    VehicleTextField("Объём двигателя, см³", draft.engineVolumeCm3, { onChange(draft.copy(engineVolumeCm3 = it.filter(Char::isDigit))) }, KeyboardType.Number, enabled)
-    VehicleTextField("Мощность, л.с.", draft.enginePowerHp, { onChange(draft.copy(enginePowerHp = it.filter(Char::isDigit))) }, KeyboardType.Number, enabled)
-    VehicleTextField("Моё название", draft.customName, { onChange(draft.copy(customName = it)) }, enabled = enabled)
-    if (showPrimaryToggle) Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(checked = draft.isPrimary, onCheckedChange = { onChange(draft.copy(isPrimary = it)) })
-        Text("Основной автомобиль")
-    }
-    if (showPrimaryToggle) Text("Выбор в карусели не меняет автомобиль GSM.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-}
-
-@Composable
 private fun MaintenanceEditorDialog(
     draft: MaintenanceDraft,
     vehicles: List<Vehicle>,
@@ -505,7 +369,7 @@ private fun MaintenanceEditorDialog(
                 }
             }
         }
-        VehicleTextField("Дата, ГГГГ-ММ-ДД", draft.date, { onChange(draft.copy(date = it)) }, KeyboardType.Ascii)
+        MaintenanceDateField(draft.date, { onChange(draft.copy(date = it)) }, !isSaving)
         VehicleTextField("Процедура", draft.procedure, { onChange(draft.copy(procedure = it)) })
         VehicleTextField("Пробег", draft.mileage, { onChange(draft.copy(mileage = it.filter(Char::isDigit))) }, KeyboardType.Number)
         VehicleTextField("Стоимость работы", draft.workCost, { onChange(draft.copy(workCost = it)) }, KeyboardType.Decimal)
@@ -574,7 +438,7 @@ private fun SectionLabel(value: String) {
 }
 
 @Composable
-private fun PlateBadge(value: String) {
+internal fun PlateBadge(value: String) {
     Surface(color = Color.White, shape = RoundedCornerShape(6.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color.DarkGray)) {
         Text(value, Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = Color.Black, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
     }
@@ -609,3 +473,21 @@ private fun String.shortDate(): String = runCatching {
 
 private fun formatRubles(value: Double): String = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("ru-RU")).format(value)
 private fun formatInt(value: Int): String = NumberFormat.getIntegerInstance(Locale.forLanguageTag("ru-RU")).format(value)
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun MaintenanceDateField(value: String, onChange: (String) -> Unit, enabled: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    OutlinedButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text("Дата: ${value.shortDate()}") }
+    if (open) {
+        val picker = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = runCatching {
+            LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        }.getOrNull())
+        androidx.compose.material3.DatePickerDialog(onDismissRequest = { open = false }, confirmButton = {
+            TextButton(onClick = {
+                picker.selectedDateMillis?.let { onChange(java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()) }
+                open = false
+            }, enabled = picker.selectedDateMillis != null) { Text("Готово") }
+        }, dismissButton = { TextButton(onClick = { open = false }) { Text("Отмена") } }) { androidx.compose.material3.DatePicker(picker) }
+    }
+}
