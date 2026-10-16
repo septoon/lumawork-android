@@ -1,13 +1,15 @@
 package ru.lumastack.lumawork.ui.requests
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items as lazyRowItems
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -24,16 +28,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
+import ru.lumastack.lumawork.ui.theme.AppTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -84,7 +94,7 @@ fun RequestsScreen(
     actions: RequestsActions,
     modifier: Modifier = Modifier,
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
     val background = remember(isDark) {
         Brush.verticalGradient(
             if (isDark) {
@@ -100,16 +110,47 @@ fun RequestsScreen(
         contentAlignment = Alignment.TopCenter,
     ) {
         val selected = state.selectedRequest
-        if (selected != null) {
-            SimpleOneRequestDetailContent(
-                request = selected,
-                widthClass = widthClass,
-                isLoading = state.isDetailLoading,
-                errorMessage = state.detailErrorMessage,
-                onBack = actions.onCloseRequest,
-            )
+        val listState = rememberLazyGridState()
+        val detailState = rememberLazyGridState()
+        var displayedDetailId by rememberSaveable { mutableStateOf<String?>(null) }
+        LaunchedEffect(selected?.id) {
+            if (displayedDetailId != selected?.id) {
+                detailState.scrollToItem(0)
+                displayedDetailId = selected?.id
+            }
+        }
+        BackHandler(enabled = selected != null, onBack = actions.onCloseRequest)
+        if (widthClass == AppWidthClass.Expanded) {
+            Row(
+                Modifier.widthIn(max = 1400.dp).fillMaxSize().padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Surface(Modifier.weight(.43f).fillMaxHeight(), shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = .65f)) {
+                    RequestsListContent(state, AppWidthClass.Compact, actions, listState)
+                }
+                Surface(Modifier.weight(.57f).fillMaxHeight(), shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = .65f)) {
+                    if (selected != null) {
+                        SimpleOneRequestDetailContent(selected, AppWidthClass.Compact,
+                            state.isDetailLoading, state.detailErrorMessage, actions.onCloseRequest,
+                            gridState = detailState)
+                    } else {
+                        Column(Modifier.fillMaxSize().padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center) {
+                            Text("Выберите заявку", style = MaterialTheme.typography.titleLarge)
+                            Text("Полная информация откроется здесь.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        } else if (selected != null) {
+            SimpleOneRequestDetailContent(selected, widthClass, state.isDetailLoading,
+                state.detailErrorMessage, actions.onCloseRequest, gridState = detailState)
         } else {
-            RequestsListContent(state = state, widthClass = widthClass, actions = actions)
+            RequestsListContent(state, widthClass, actions, listState)
         }
     }
 }
@@ -119,6 +160,7 @@ private fun RequestsListContent(
     state: SimpleOneUiState,
     widthClass: AppWidthClass,
     actions: RequestsActions,
+    gridState: LazyGridState,
 ) {
     val columns = when (widthClass) {
         AppWidthClass.Compact -> 1
@@ -144,11 +186,12 @@ private fun RequestsListContent(
     val visibleRequests = if (state.mode == RequestsMode.Active) activeRequests else closedRequests
 
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Fixed(columns),
         contentPadding = PaddingValues(20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.fillMaxSize().widthIn(max = 1120.dp),
+        modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize(),
     ) {
         item(key = "connection", span = { GridItemSpan(maxLineSpan) }) {
             SimpleOneConnectionCard(state = state, actions = actions)
@@ -172,7 +215,7 @@ private fun RequestsListContent(
             }
         } else {
             items(visibleRequests, key = SimpleOneRequest::id) { request ->
-                RequestCard(request = request, onClick = { actions.onOpenRequest(request) })
+                RequestCard(request = request, selected = request.id == state.selectedRequest?.id, onClick = { actions.onOpenRequest(request) })
             }
         }
     }
@@ -183,22 +226,11 @@ private fun RequestsModeSelector(
     selected: RequestsMode,
     onSelect: (RequestsMode) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        RequestsMode.entries.forEach { mode ->
-            if (mode == selected) {
-                FilledTonalButton(onClick = { onSelect(mode) }, modifier = Modifier.weight(1f)) {
-                    Text(mode.title)
-                }
-            } else {
-                OutlinedButton(onClick = { onSelect(mode) }, modifier = Modifier.weight(1f)) {
-                    Text(mode.title)
-                }
-            }
-        }
-    }
+    AppSegmentedControl(
+        titles = RequestsMode.entries.map { it.title },
+        selectedIndex = RequestsMode.entries.indexOf(selected),
+        onSelect = { onSelect(RequestsMode.entries[it]) },
+    )
 }
 
 @Composable
@@ -207,10 +239,10 @@ private fun RequestsSearchAndFilters(
     actions: RequestsActions,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedTextField(
+        AppTextField(
             value = state.searchQuery,
             onValueChange = actions.onSearchQueryChange,
-            label = { Text("Поиск по заявкам") },
+            label = "Поиск по заявкам", search = true,
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             modifier = Modifier.fillMaxWidth(),
@@ -365,10 +397,10 @@ private fun SimpleOneConnectionCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                OutlinedTextField(
+                AppTextField(
                     value = state.username,
                     onValueChange = actions.onUsernameChange,
-                    label = { Text("Логин") },
+                    label = "Логин",
                     singleLine = true,
                     enabled = !state.isLoading,
                     keyboardOptions = KeyboardOptions(
@@ -377,10 +409,10 @@ private fun SimpleOneConnectionCard(
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                AppTextField(
                     value = state.password,
                     onValueChange = actions.onPasswordChange,
-                    label = { Text("Пароль") },
+                    label = "Пароль",
                     singleLine = true,
                     enabled = !state.isLoading,
                     visualTransformation = PasswordVisualTransformation(),
@@ -419,10 +451,11 @@ private fun SimpleOneConnectionCard(
 }
 
 @Composable
-private fun RequestCard(request: SimpleOneRequest, onClick: () -> Unit) {
+private fun RequestCard(request: SimpleOneRequest, selected: Boolean = false, onClick: () -> Unit) {
     val overdue = request.isOverdue()
     Card(
         onClick = onClick,
+        border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         colors = CardDefaults.cardColors(
             containerColor = if (overdue) {
                 MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.74f)
@@ -512,15 +545,17 @@ fun SimpleOneRequestDetailContent(
     isLoading: Boolean,
     errorMessage: String?,
     onBack: () -> Unit,
+    gridState: LazyGridState = rememberLazyGridState(),
 ) {
     val columns = if (widthClass == AppWidthClass.Compact) 1 else 2
     val fields = remember(request) { request.detailFields() }
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Fixed(columns),
         contentPadding = PaddingValues(20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.fillMaxSize().widthIn(max = 980.dp),
+        modifier = Modifier.widthIn(max = 980.dp).fillMaxSize(),
     ) {
         item(key = "detail-header", span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

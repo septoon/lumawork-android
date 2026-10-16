@@ -2,19 +2,23 @@ package ru.lumastack.lumawork.ui.backpack
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -25,9 +29,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -113,33 +119,54 @@ private fun BackpackScreen(
     val groups = remember(state.snapshot?.items) { backpackGroups(state.snapshot?.items.orEmpty()) }
     val visibleGroups = remember(groups, state.query) { filterBackpackGroups(groups, state.query) }
     val selected = groups.firstOrNull { it.id == state.selectedGroupId }
-    val isDark = isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
     val background = remember(isDark) {
         Brush.verticalGradient(
             if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
             else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
         )
     }
+    val listState = rememberLazyGridState()
+    val detailState = rememberLazyGridState()
+    var displayedDetailId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(selected?.id) {
+        if (displayedDetailId != selected?.id) {
+            detailState.scrollToItem(0)
+            displayedDetailId = selected?.id
+        }
+    }
+    BackHandler(enabled = selected != null, onBack = onBack)
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
-        if (selected == null) {
-            BackpackOverview(
-                state = state,
-                groups = groups,
-                visibleGroups = visibleGroups,
-                widthClass = widthClass,
-                imageRepository = imageRepository,
-                onQueryChange = onQueryChange,
-                onRefresh = onRefresh,
-                onOpenGroup = onOpenGroup,
-            )
+        if (widthClass == AppWidthClass.Expanded) {
+            Row(Modifier.widthIn(max = 1400.dp).fillMaxSize().padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Surface(Modifier.weight(.45f).fillMaxHeight(), shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = .65f)) {
+                    BackpackOverview(state, groups, visibleGroups, AppWidthClass.Compact,
+                        imageRepository, onQueryChange, onRefresh, onOpenGroup, listState)
+                }
+                Surface(Modifier.weight(.55f).fillMaxHeight(), shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = .65f)) {
+                    if (selected != null) {
+                        BackpackDetails(selected, state.photoCatalog, imageRepository,
+                            AppWidthClass.Compact, onBack, detailState, showBackButton = false)
+                    } else {
+                        Column(Modifier.fillMaxSize().padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center) {
+                            Text("Выберите оборудование", style = MaterialTheme.typography.titleLarge)
+                            Text("Экземпляры и серийные номера откроются здесь.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        } else if (selected == null) {
+            BackpackOverview(state, groups, visibleGroups, widthClass, imageRepository,
+                onQueryChange, onRefresh, onOpenGroup, listState)
         } else {
-            BackpackDetails(
-                group = selected,
-                photoCatalog = state.photoCatalog,
-                imageRepository = imageRepository,
-                widthClass = widthClass,
-                onBack = onBack,
-            )
+            BackpackDetails(selected, state.photoCatalog, imageRepository, widthClass,
+                onBack, detailState)
         }
     }
 }
@@ -154,6 +181,7 @@ private fun BackpackOverview(
     onQueryChange: (String) -> Unit,
     onRefresh: () -> Unit,
     onOpenGroup: (String) -> Unit,
+    gridState: LazyGridState,
 ) {
     val columns = when (widthClass) {
         AppWidthClass.Compact -> 2
@@ -161,21 +189,22 @@ private fun BackpackOverview(
         AppWidthClass.Expanded -> 4
     }
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Fixed(columns),
         contentPadding = PaddingValues(16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxSize().widthIn(max = 1120.dp),
+        modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize(),
     ) {
         item(key = "header", span = { GridItemSpan(maxLineSpan) }) {
             BackpackHeader(state, groups, visibleGroups, onRefresh)
         }
         if (groups.isNotEmpty()) {
             item(key = "search", span = { GridItemSpan(maxLineSpan) }) {
-                OutlinedTextField(
+                AppTextField(
                     value = state.query,
                     onValueChange = onQueryChange,
-                    label = { Text("Название, серийный номер или дата") },
+                    label = "Название, серийный номер или дата", search = true,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -200,6 +229,7 @@ private fun BackpackOverview(
                     imageUrl = state.photoCatalog.photoFor(group.name)?.resolvedUrl,
                     imageRepository = imageRepository,
                     onClick = { onOpenGroup(group.id) },
+                    selected = group.id == state.selectedGroupId,
                 )
             }
         }
@@ -268,9 +298,11 @@ private fun BackpackTile(
     imageUrl: String?,
     imageRepository: BackpackImageRepository,
     onClick: () -> Unit,
+    selected: Boolean = false,
 ) {
     Card(
         onClick = onClick,
+        border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
         shape = RoundedCornerShape(20.dp),
     ) {
@@ -301,18 +333,21 @@ private fun BackpackDetails(
     imageRepository: BackpackImageRepository,
     widthClass: AppWidthClass,
     onBack: () -> Unit,
+    gridState: LazyGridState,
+    showBackButton: Boolean = true,
 ) {
     val columns = if (widthClass == AppWidthClass.Compact) 1 else 2
     LazyVerticalGrid(
+        state = gridState,
         columns = GridCells.Fixed(columns),
         contentPadding = PaddingValues(20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.fillMaxSize().widthIn(max = 1050.dp),
+        modifier = Modifier.widthIn(max = 1050.dp).fillMaxSize(),
     ) {
         item(key = "detail-header", span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = onBack) { Text("Назад") }
+                if (showBackButton) OutlinedButton(onClick = onBack) { Text("Назад") }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),

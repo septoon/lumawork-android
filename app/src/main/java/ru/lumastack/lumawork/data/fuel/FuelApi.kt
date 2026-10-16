@@ -29,7 +29,7 @@ interface FuelApi {
 
 sealed class FuelFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Network(cause: IOException) : FuelFailure("Не удалось подключиться к серверу топлива.", cause)
-    data object Unauthorized : FuelFailure("Сессия LumaWork истекла.")
+    data object Unauthorized : FuelFailure("Сессия приложения «Инженер» истекла.")
     class Http(val status: Int) : FuelFailure("Сервер топлива вернул HTTP $status.")
     data object InvalidResponse : FuelFailure("Сервер топлива вернул некорректные данные.")
 }

@@ -25,13 +25,13 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,15 +102,15 @@ private fun WikiScreen(
         )
     }
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
-        if (widthClass == AppWidthClass.Compact) {
+        if (widthClass != AppWidthClass.Expanded) {
             if (state.selectedResult == null) {
-                WikiSearchPanel(state, onQueryChange, onRefresh, onOpen, Modifier.fillMaxSize().widthIn(max = 680.dp))
+                WikiSearchPanel(state, onQueryChange, onRefresh, onOpen, Modifier.widthIn(max = 680.dp).fillMaxSize())
             } else {
-                WikiArticlePanel(state, onCloseArticle, pdfUrl, Modifier.fillMaxSize().widthIn(max = 760.dp))
+                WikiArticlePanel(state, onCloseArticle, pdfUrl, Modifier.widthIn(max = 760.dp).fillMaxSize())
             }
         } else {
             Row(
-                Modifier.fillMaxSize().widthIn(max = 1180.dp).padding(20.dp),
+                Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 WikiSearchPanel(
@@ -148,10 +148,10 @@ private fun WikiSearchPanel(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(key = "search") {
-            OutlinedTextField(
+            AppTextField(
                 value = state.query,
                 onValueChange = onQueryChange,
-                label = { Text("Поиск по инструкциям") },
+                label = "Поиск по инструкциям", search = true,
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 trailingIcon = {

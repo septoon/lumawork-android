@@ -60,7 +60,7 @@ fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, modifier
     val background = remember(dark) { Brush.verticalGradient(if (dark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark) else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight)) }
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
-            Modifier.fillMaxSize().widthIn(max = 1120.dp),
+            Modifier.widthIn(max = 1120.dp).fillMaxSize(),
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {

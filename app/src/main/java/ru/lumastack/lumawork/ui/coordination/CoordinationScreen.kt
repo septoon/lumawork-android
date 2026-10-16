@@ -1,7 +1,6 @@
 package ru.lumastack.lumawork.ui.coordination
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,15 +17,15 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledTonalButton
+import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -114,7 +113,7 @@ private fun CoordinationScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
     val background = remember(isDark) {
         Brush.verticalGradient(
             if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
@@ -168,7 +167,7 @@ private fun CoordinationOverview(
         contentPadding = PaddingValues(20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.fillMaxSize().widthIn(max = 1000.dp),
+        modifier = Modifier.widthIn(max = 1000.dp).fillMaxSize(),
     ) {
         item(key = "sections", span = { GridItemSpan(maxLineSpan) }) {
             SectionSelector(state.section, onSectionChange)
@@ -214,19 +213,11 @@ private fun SectionSelector(
     selected: CoordinationSection,
     onSelect: (CoordinationSection) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        CoordinationSection.entries.forEach { section ->
-            if (selected == section) {
-                FilledTonalButton(onClick = { onSelect(section) }, modifier = Modifier.weight(1f)) {
-                    Text(section.title)
-                }
-            } else {
-                OutlinedButton(onClick = { onSelect(section) }, modifier = Modifier.weight(1f)) {
-                    Text(section.title)
-                }
-            }
-        }
-    }
+    AppSegmentedControl(
+        titles = CoordinationSection.entries.map { it.title },
+        selectedIndex = CoordinationSection.entries.indexOf(selected),
+        onSelect = { onSelect(CoordinationSection.entries[it]) },
+    )
 }
 
 @Composable
@@ -380,7 +371,7 @@ private fun EngineerRequestsContent(
         contentPadding = PaddingValues(20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.fillMaxSize().widthIn(max = 1000.dp),
+        modifier = Modifier.widthIn(max = 1000.dp).fillMaxSize(),
     ) {
         item(key = "engineer-header", span = { GridItemSpan(maxLineSpan) }) {
             Row(

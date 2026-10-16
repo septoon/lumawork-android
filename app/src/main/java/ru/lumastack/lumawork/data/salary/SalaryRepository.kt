@@ -75,7 +75,7 @@ fun validateSalaryDraft(draft: SalaryDraft): String? {
 
 sealed class SalaryFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Network(cause: IOException) : SalaryFailure("Не удалось подключиться к данным зарплаты.", cause)
-    data object Unauthorized : SalaryFailure("Сессия LumaWork истекла.")
+    data object Unauthorized : SalaryFailure("Сессия приложения «Инженер» истекла.")
     class Http(status: Int) : SalaryFailure("Сервер зарплаты вернул HTTP $status.")
     data object InvalidResponse : SalaryFailure("Сервер зарплаты вернул некорректные данные.")
 }

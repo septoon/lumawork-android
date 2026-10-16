@@ -32,7 +32,7 @@ interface AutoApi {
 
 sealed class AutoFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Network(cause: IOException) : AutoFailure("Не удалось подключиться к серверу.", cause)
-    data object Unauthorized : AutoFailure("Сессия LumaWork истекла.")
+    data object Unauthorized : AutoFailure("Сессия приложения «Инженер» истекла.")
     class Http(val status: Int) : AutoFailure("Сервер вернул HTTP $status.")
     data object InvalidResponse : AutoFailure("Сервер вернул некорректные данные раздела «Авто».")
 }

@@ -5,6 +5,25 @@ import org.junit.Test
 
 class AppWidthClassTest {
     @Test
+    fun `short windows keep forms in a single column`() {
+        assertEquals(AppWidthClass.Compact, appContentWidthClass(1000, 479))
+        assertEquals(AppWidthClass.Expanded, appContentWidthClass(1000, 480))
+    }
+
+    @Test
+    fun `larger text reserves enough space for both panes`() {
+        assertEquals(AppWidthClass.Medium, appContentWidthClass(900, 800, 1.3f))
+        assertEquals(AppWidthClass.Expanded, appContentWidthClass(1120, 800, 1.3f))
+        assertEquals(AppWidthClass.Compact, appContentWidthClass(700, 800, 1.5f))
+    }
+
+    @Test
+    fun `content thresholds apply after navigation has taken its width`() {
+        assertEquals(AppWidthClass.Medium, appContentWidthClass(800 - 88, 1200))
+        assertEquals(AppWidthClass.Expanded, appContentWidthClass(1280 - 272, 800))
+    }
+
+    @Test
     fun `phone widths are compact`() {
         assertEquals(AppWidthClass.Compact, appWidthClass(320))
         assertEquals(AppWidthClass.Compact, appWidthClass(599))

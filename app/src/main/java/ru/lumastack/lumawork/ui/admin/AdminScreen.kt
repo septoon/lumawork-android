@@ -23,10 +23,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -302,7 +302,7 @@ private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: Ap
     }
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
-            Modifier.fillMaxSize().widthIn(max = 1100.dp),
+            Modifier.widthIn(max = 1100.dp).fillMaxSize(),
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -391,7 +391,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
                 Box(Modifier.weight(1f)) { AdminMetric("Диск", resources.diskUsagePercent) }
             }
         } }
-        overview.dataStorage?.let { storage -> item { AdminCard("Данные LumaWork", "Всего ${bytes(storage.totalBytes)} · PostgreSQL ${bytes(storage.databaseBytes)} · файлы ${bytes(storage.filesBytes)}") } }
+        overview.dataStorage?.let { storage -> item { AdminCard("Данные приложения «Инженер»", "Всего ${bytes(storage.totalBytes)} · PostgreSQL ${bytes(storage.databaseBytes)} · файлы ${bytes(storage.filesBytes)}") } }
         if (overview.recentActions.isNotEmpty()) item { AdminCard("Последние действия", overview.recentActions.take(8).joinToString("\n") { "${it.actorEmail}: ${it.summary ?: it.action}" }) }
     }
 }
@@ -416,7 +416,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
             }
             if (session.user.can(AdminPermission.BlockUsers) && !user.isProtectedAdmin && user.id != session.user.id) item { OutlinedButton(onClick = model::toggleBlock, modifier = Modifier.fillMaxWidth()) { Text(if (user.isBlocked) "Разблокировать" else "Заблокировать на год") } }
             if (session.user.can(AdminPermission.DeleteUsers) && !user.isProtectedAdmin && user.id != session.user.id) item {
-                OutlinedTextField(state.deleteConfirmation, model::deleteConfirmation, label = { Text("Email для удаления") }, modifier = Modifier.fillMaxWidth())
+                AppTextField(state.deleteConfirmation, model::deleteConfirmation, label = "Email для удаления", modifier = Modifier.fillMaxWidth())
             }
         } },
         confirmButton = {
@@ -433,7 +433,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
         text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Text(report.title, fontWeight = FontWeight.Bold); Text(report.message); Text(report.reporterEmail, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             if (session.user.can(AdminPermission.ManageFeedback)) {
-                item { OutlinedTextField(state.adminNote, model::adminNote, label = { Text("Внутренняя заметка") }, minLines = 2, modifier = Modifier.fillMaxWidth()) }
+                item { AppTextField(state.adminNote, model::adminNote, label = "Внутренняя заметка", minLines = 2, modifier = Modifier.fillMaxWidth()) }
                 item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FeedbackStatus.entries.filterNot { it == FeedbackStatus.Draft }.forEach { status -> OutlinedButton(onClick = { model.updateFeedback(status, report.priority) }) { Text(status.title) } }
                 } }

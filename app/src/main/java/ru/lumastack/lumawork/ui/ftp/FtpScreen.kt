@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.ftp
 
+import androidx.activity.compose.BackHandler
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
@@ -18,10 +19,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -105,6 +106,7 @@ class FtpViewModel(
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { mutableState.update { it.copy(downloadingPath = null, errorMessage = error.userMessage()) } }
     } }
+    fun closeSelected() { mutableState.update { it.copy(selected = null) } }
     fun clearDownloaded() { mutableState.update { it.copy(downloaded = null) } }
     private fun load(path: String, selectPath: Boolean) { viewModelScope.launch {
         if (selectPath) mutableState.update { it.copy(path = path, search = "", selected = null) }
@@ -132,32 +134,61 @@ fun FtpRoute(session: AppSession, startOffline: Boolean, repository: FtpReposito
             model.clearDownloaded()
         }
     }
-    FtpScreen(state, widthClass, model::search, model::open, model::up, model::refresh, model::download, modifier)
+    BackHandler(enabled = state.selected != null || state.path != "/") {
+        if (state.selected != null) model.closeSelected() else model.up()
+    }
+    FtpScreen(state, widthClass, model::search, model::open, model::up, model::refresh,
+        model::download, model::closeSelected, modifier)
 }
 
 @Composable
 private fun FtpScreen(
     state: FtpUiState, widthClass: AppWidthClass, onSearch: (String) -> Unit, onOpen: (FtpItem) -> Unit,
-    onUp: () -> Unit, onRefresh: () -> Unit, onDownload: (FtpItem) -> Unit, modifier: Modifier,
+    onUp: () -> Unit, onRefresh: () -> Unit, onDownload: (FtpItem) -> Unit, onClose: () -> Unit, modifier: Modifier,
 ) {
     val dark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
     val background = remember(dark) { Brush.verticalGradient(if (dark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark) else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight)) }
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
-        if (widthClass == AppWidthClass.Compact) {
-            FtpList(state, onSearch, onOpen, onUp, onRefresh, onDownload, Modifier.fillMaxSize().widthIn(max = 680.dp))
+        if (widthClass != AppWidthClass.Expanded) {
+            val selected = state.selected
+            if (selected != null) FtpFileDetails(selected, state.downloadingPath != null,
+                onDownload, onClose, state.errorMessage, Modifier.widthIn(max = 680.dp).fillMaxSize())
+            else FtpList(state, onSearch, onOpen, onUp, onRefresh, onDownload,
+                Modifier.widthIn(max = 680.dp).fillMaxSize())
         } else {
-            Row(Modifier.fillMaxSize().widthIn(max = 1180.dp).padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 FtpList(state, onSearch, onOpen, onUp, onRefresh, onDownload, Modifier.weight(.48f).fillMaxHeight())
                 Surface(Modifier.weight(.52f).fillMaxHeight(), shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f)) {
                     val selected = state.selected
                     if (selected == null) FtpStatus("Выберите файл", "Для папки доступно скачивание ZIP через кнопку в строке.")
-                    else Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Text(selected.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(selected.path, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(selected.sizeText ?: selected.size?.let(::fileSize).orEmpty())
-                        Button(onClick = { onDownload(selected) }, enabled = state.downloadingPath == null, modifier = Modifier.fillMaxWidth()) { Text("Скачать и открыть") }
-                    }
+                    else FtpFileDetails(selected, state.downloadingPath != null, onDownload, null, state.errorMessage)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FtpFileDetails(
+    item: FtpItem,
+    downloading: Boolean,
+    onDownload: (FtpItem) -> Unit,
+    onBack: (() -> Unit)?,
+    errorMessage: String?,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(modifier, contentPadding = PaddingValues(24.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (onBack != null) item { TextButton(onClick = onBack) { Text("Назад") } }
+        item {
+            Text(item.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(item.path, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item { Text(item.sizeText ?: item.size?.let(::fileSize).orEmpty()) }
+        errorMessage?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
+        item {
+            Button(onClick = { onDownload(item) }, enabled = !downloading, modifier = Modifier.fillMaxWidth()) {
+                Text(if (downloading) "Скачивание…" else "Скачать и открыть")
             }
         }
     }
@@ -170,7 +201,7 @@ private fun FtpScreen(
             Column(Modifier.weight(1f)) { Text(state.path, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Файлы Сервионики", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             TextButton(onClick = onRefresh) { Text("Обновить") }
         } }
-        item { OutlinedTextField(state.search, onSearch, label = { Text("Поиск в папке") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
+        item { AppTextField(state.search, onSearch, label = "Поиск в папке", search = true, singleLine = true, modifier = Modifier.fillMaxWidth()) }
         state.errorMessage?.let { item { FtpStatus("Ошибка", it) } }
         if (state.isLoading && state.items.isEmpty()) item { Row(Modifier.fillMaxWidth().padding(30.dp), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) } }
         if (!state.isLoading && state.items.isEmpty()) item { FtpStatus("Каталог пуст", "Файлы отсутствуют или ничего не найдено.") }

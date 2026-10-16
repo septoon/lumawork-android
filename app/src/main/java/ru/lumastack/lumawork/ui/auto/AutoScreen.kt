@@ -24,15 +24,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -139,7 +139,7 @@ private fun AutoScreen(
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
         if (widthClass == AppWidthClass.Compact) {
             LazyColumn(
-                Modifier.fillMaxSize().widthIn(max = 720.dp),
+                Modifier.widthIn(max = 720.dp).fillMaxSize(),
                 contentPadding = PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -158,7 +158,7 @@ private fun AutoScreen(
             }
         } else {
             Row(
-                Modifier.fillMaxSize().widthIn(max = 1180.dp).padding(20.dp),
+                Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 LazyColumn(
@@ -555,10 +555,10 @@ private fun VehicleTextField(
     onValueChange: (String) -> Unit,
     keyboardType: KeyboardType = KeyboardType.Text,
 ) {
-    OutlinedTextField(
+    AppTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label) },
+        label = label,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         singleLine = true,
         shape = RoundedCornerShape(14.dp),

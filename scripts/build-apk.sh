@@ -8,7 +8,7 @@ if (( $# > 0 )); then shift; fi
 
 usage() {
   printf '%s\n' \
-    "Сборка и публикация LumaWork Android" \
+    "Сборка и публикация «Инженер» для Android" \
     "" \
     "Использование: scripts/build-apk.sh [команда]" \
     "  debug                 — устанавливаемый debug APK (по умолчанию)" \

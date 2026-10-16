@@ -1,7 +1,6 @@
 package ru.lumastack.lumawork.ui.timereport
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,13 +18,13 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -113,7 +112,7 @@ private fun TimeReportScreen(
     val selectedMonth = monthGroups.firstOrNull { it.monthId == state.selectedMonthId }
     var deleteAllPresented by remember { mutableStateOf(false) }
     var deleteRangePresented by remember { mutableStateOf(false) }
-    val isDark = isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
     val background = remember(isDark) {
         Brush.verticalGradient(
             if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
@@ -196,7 +195,7 @@ private fun TimeReportOverview(
         contentPadding = PaddingValues(20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.fillMaxSize().widthIn(max = 1100.dp),
+        modifier = Modifier.widthIn(max = 1100.dp).fillMaxSize(),
     ) {
         item(key = "summary", span = { GridItemSpan(maxLineSpan) }) {
             TimeReportSummary(
@@ -346,7 +345,7 @@ private fun TimeReportMonthDetails(
         contentPadding = PaddingValues(20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.fillMaxSize().widthIn(max = 1100.dp),
+        modifier = Modifier.widthIn(max = 1100.dp).fillMaxSize(),
     ) {
         item(key = "month-header", span = { GridItemSpan(maxLineSpan) }) {
             Row(
@@ -434,17 +433,17 @@ private fun DeleteRangeDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Удаление затронет только локальный архив на устройстве.")
-                OutlinedTextField(
+                AppTextField(
                     value = startText,
                     onValueChange = { startText = it },
-                    label = { Text("Начало, дд.мм.гггг") },
+                    label = "Начало, дд.мм.гггг",
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
-                OutlinedTextField(
+                AppTextField(
                     value = endText,
                     onValueChange = { endText = it },
-                    label = { Text("Конец, дд.мм.гггг") },
+                    label = "Конец, дд.мм.гггг",
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )

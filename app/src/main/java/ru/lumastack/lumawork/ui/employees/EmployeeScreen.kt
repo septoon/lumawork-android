@@ -20,14 +20,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -119,7 +119,7 @@ private fun EmployeeScreen(
         )
     }
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
-        if (widthClass == AppWidthClass.Compact) {
+        if (widthClass != AppWidthClass.Expanded) {
             if (state.selectedEmployee != null) {
                 EmployeeDetail(
                     employee = state.selectedEmployee,
@@ -140,7 +140,7 @@ private fun EmployeeScreen(
             }
         } else {
             Row(
-                modifier = Modifier.fillMaxSize().widthIn(max = 1180.dp).padding(20.dp),
+                modifier = Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 Surface(
@@ -218,10 +218,10 @@ private fun EmployeeDirectoryContent(
             )
         }
         item(key = "search") {
-            OutlinedTextField(
+            AppTextField(
                 value = state.query,
                 onValueChange = onQueryChange,
-                label = { Text("Поиск сотрудников") },
+                label = "Поиск сотрудников", search = true,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -544,10 +544,10 @@ private fun EmployeeAddressDialog(
                     }
                     TextButton(onClick = onDismiss) { Text("Закрыть") }
                 }
-                OutlinedTextField(
+                AppTextField(
                     value = state.addressQuery,
                     onValueChange = onQueryChange,
-                    label = { Text("Например, Алушта") },
+                    label = "Например, Алушта", search = true,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),

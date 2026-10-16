@@ -47,7 +47,7 @@ data class FtpSnapshot(val directories: Map<String, List<FtpItem>> = emptyMap(),
 
 sealed class FtpFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Network(cause: IOException) : FtpFailure("Не удалось подключиться к FTP.", cause)
-    data object Unauthorized : FtpFailure("Сессия LumaWork истекла.")
+    data object Unauthorized : FtpFailure("Сессия приложения «Инженер» истекла.")
     class Http(status: Int) : FtpFailure("FTP вернул HTTP $status.")
     data object InvalidResponse : FtpFailure("FTP вернул некорректные данные.")
 }

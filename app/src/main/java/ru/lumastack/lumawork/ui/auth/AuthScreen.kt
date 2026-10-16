@@ -25,15 +25,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -162,7 +162,7 @@ fun AuthContent(
             }
             Spacer(Modifier.height(18.dp))
             Text(
-                text = if (state.phase == AuthPhase.AccessRevoked) "Доступ отозван" else "Вход в LumaWork",
+                text = if (state.phase == AuthPhase.AccessRevoked) "Доступ отозван" else "Вход в «Инженер»",
                 style = MaterialTheme.typography.headlineLarge,
                 textAlign = TextAlign.Center,
             )
@@ -220,10 +220,10 @@ private fun EmailContent(
     onEmailChange: (String) -> Unit,
     onRequestCode: () -> Unit,
 ) {
-    OutlinedTextField(
+    AppTextField(
         value = state.email,
         onValueChange = onEmailChange,
-        label = { Text("Почта") },
+        label = "Почта",
         singleLine = true,
         enabled = !state.isLoading,
         keyboardOptions = KeyboardOptions(
@@ -249,10 +249,10 @@ private fun CodeContent(
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.primary,
     )
-    OutlinedTextField(
+    AppTextField(
         value = state.code,
         onValueChange = onCodeChange,
-        label = { Text("Код") },
+        label = "Код",
         singleLine = true,
         enabled = !state.isLoading,
         visualTransformation = PasswordVisualTransformation(),

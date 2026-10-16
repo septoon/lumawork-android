@@ -113,7 +113,7 @@ private fun TabletAppShellPreview() {
 }
 
 @Composable
-private fun PreviewShell() {
+internal fun PreviewShell() {
     LumaWorkTheme {
         val context = LocalContext.current
         AppShell(

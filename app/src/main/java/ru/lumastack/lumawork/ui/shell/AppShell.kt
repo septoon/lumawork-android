@@ -1,10 +1,12 @@
 package ru.lumastack.lumawork.ui.shell
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,9 +15,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -24,7 +32,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -39,10 +46,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
+import ru.lumastack.lumawork.R
+import ru.lumastack.lumawork.ui.theme.AppAppearance
+import ru.lumastack.lumawork.ui.theme.LocalAppAppearance
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,6 +87,7 @@ import ru.lumastack.lumawork.ui.adaptive.AppNavigationLayout
 import ru.lumastack.lumawork.ui.backpack.BackpackRoute
 import ru.lumastack.lumawork.ui.adaptive.appNavigationLayout
 import ru.lumastack.lumawork.ui.adaptive.appWidthClass
+import ru.lumastack.lumawork.ui.adaptive.appContentWidthClass
 import ru.lumastack.lumawork.ui.home.HomeScreen
 import ru.lumastack.lumawork.ui.coordination.CoordinationRoute
 import ru.lumastack.lumawork.ui.requests.RequestsActions
@@ -153,6 +170,7 @@ fun AppShell(
         )
     }
 
+    val contentStateHolder = rememberSaveableStateHolder()
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val navigationLayout = remember(maxWidth) {
             appNavigationLayout(maxWidth.value.roundToInt())
@@ -163,9 +181,11 @@ fun AppShell(
         var selectedName by rememberSaveable { mutableStateOf(AppDestination.Home.name) }
         val selected = destinations.firstOrNull { it.name == selectedName } ?: AppDestination.Home
         val onSelect: (AppDestination) -> Unit = { selectedName = it.name }
+        BackHandler(enabled = selected != AppDestination.Home) { onSelect(AppDestination.Home) }
 
         if (navigationLayout == AppNavigationLayout.Drawer) {
             CompactShell(
+                contentStateHolder = contentStateHolder,
                 session = session,
                 isOffline = isOffline,
                 routeRepository = routeRepository,
@@ -193,6 +213,7 @@ fun AppShell(
             )
         } else {
             TabletShell(
+                contentStateHolder = contentStateHolder,
                 session = session,
                 isOffline = isOffline,
                 routeRepository = routeRepository,
@@ -226,6 +247,7 @@ fun AppShell(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CompactShell(
+    contentStateHolder: SaveableStateHolder,
     session: AppSession,
     isOffline: Boolean,
     routeRepository: RouteRepository,
@@ -281,31 +303,33 @@ private fun CompactShell(
                 )
             },
         ) { padding ->
-            DestinationContent(
-                destination = selected,
-                session = session,
-                isOffline = isOffline,
-                routeRepository = routeRepository,
-                simpleOneRepository = simpleOneRepository,
-                coordinationRepository = coordinationRepository,
-                timeReportRepository = timeReportRepository,
-                backpackRepository = backpackRepository,
-                backpackPhotoRepository = backpackPhotoRepository,
-                backpackImageRepository = backpackImageRepository,
-                employeeRepository = employeeRepository,
-                autoRepository = autoRepository,
-                vehicleImageRepository = vehicleImageRepository,
-                fuelRepository = fuelRepository,
-                wikiRepository = wikiRepository,
-                ftpRepository = ftpRepository,
-                salaryRepository = salaryRepository,
-                feedbackRepository = feedbackRepository,
-                adminRepository = adminRepository,
-                simpleOneState = simpleOneState,
-                simpleOneActions = simpleOneActions,
-                onSelect = onSelect,
-                modifier = Modifier.padding(padding),
-            )
+            contentStateHolder.SaveableStateProvider(selected.name) {
+                DestinationContent(
+                    destination = selected,
+                    session = session,
+                    isOffline = isOffline,
+                    routeRepository = routeRepository,
+                    simpleOneRepository = simpleOneRepository,
+                    coordinationRepository = coordinationRepository,
+                    timeReportRepository = timeReportRepository,
+                    backpackRepository = backpackRepository,
+                    backpackPhotoRepository = backpackPhotoRepository,
+                    backpackImageRepository = backpackImageRepository,
+                    employeeRepository = employeeRepository,
+                    autoRepository = autoRepository,
+                    vehicleImageRepository = vehicleImageRepository,
+                    fuelRepository = fuelRepository,
+                    wikiRepository = wikiRepository,
+                    ftpRepository = ftpRepository,
+                    salaryRepository = salaryRepository,
+                    feedbackRepository = feedbackRepository,
+                    adminRepository = adminRepository,
+                    simpleOneState = simpleOneState,
+                    simpleOneActions = simpleOneActions,
+                    onSelect = onSelect,
+                    modifier = Modifier.padding(padding),
+                )
+            }
         }
     }
 }
@@ -313,6 +337,7 @@ private fun CompactShell(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TabletShell(
+    contentStateHolder: SaveableStateHolder,
     session: AppSession,
     isOffline: Boolean,
     routeRepository: RouteRepository,
@@ -375,31 +400,33 @@ private fun TabletShell(
             },
             modifier = Modifier.weight(1f),
         ) { padding ->
-            DestinationContent(
-                destination = selected,
-                session = session,
-                isOffline = isOffline,
-                routeRepository = routeRepository,
-                simpleOneRepository = simpleOneRepository,
-                coordinationRepository = coordinationRepository,
-                timeReportRepository = timeReportRepository,
-                backpackRepository = backpackRepository,
-                backpackPhotoRepository = backpackPhotoRepository,
-                backpackImageRepository = backpackImageRepository,
-                employeeRepository = employeeRepository,
-                autoRepository = autoRepository,
-                vehicleImageRepository = vehicleImageRepository,
-                fuelRepository = fuelRepository,
-                wikiRepository = wikiRepository,
-                ftpRepository = ftpRepository,
-                salaryRepository = salaryRepository,
-                feedbackRepository = feedbackRepository,
-                adminRepository = adminRepository,
-                simpleOneState = simpleOneState,
-                simpleOneActions = simpleOneActions,
-                onSelect = onSelect,
-                modifier = Modifier.padding(padding),
-            )
+            contentStateHolder.SaveableStateProvider(selected.name) {
+                DestinationContent(
+                    destination = selected,
+                    session = session,
+                    isOffline = isOffline,
+                    routeRepository = routeRepository,
+                    simpleOneRepository = simpleOneRepository,
+                    coordinationRepository = coordinationRepository,
+                    timeReportRepository = timeReportRepository,
+                    backpackRepository = backpackRepository,
+                    backpackPhotoRepository = backpackPhotoRepository,
+                    backpackImageRepository = backpackImageRepository,
+                    employeeRepository = employeeRepository,
+                    autoRepository = autoRepository,
+                    vehicleImageRepository = vehicleImageRepository,
+                    fuelRepository = fuelRepository,
+                    wikiRepository = wikiRepository,
+                    ftpRepository = ftpRepository,
+                    salaryRepository = salaryRepository,
+                    feedbackRepository = feedbackRepository,
+                    adminRepository = adminRepository,
+                    simpleOneState = simpleOneState,
+                    simpleOneActions = simpleOneActions,
+                    onSelect = onSelect,
+                    modifier = Modifier.padding(padding),
+                )
+            }
         }
     }
 }
@@ -450,7 +477,7 @@ private fun CompactNavigationRail(
                 NavigationRailItem(
                     selected = destination == selected,
                     onClick = { onSelect(destination) },
-                    icon = { DestinationMark(destination.mark) },
+                    icon = { DestinationMark(destination) },
                     label = {
                         Text(
                             text = destination.title,
@@ -476,6 +503,18 @@ private fun AppTopBar(
     onOpenNavigation: (() -> Unit)?,
     onLogout: () -> Unit,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    var logoutRequested by remember { mutableStateOf(false) }
+    val appearance = LocalAppAppearance.current
+    if (logoutRequested) {
+        AlertDialog(
+            onDismissRequest = { logoutRequested = false },
+            title = { Text("Выйти из приложения?") },
+            text = { Text("Для следующего входа понадобится код с почты.") },
+            confirmButton = { TextButton(onClick = { logoutRequested = false; onLogout() }) { Text("Выйти") } },
+            dismissButton = { TextButton(onClick = { logoutRequested = false }) { Text("Отмена") } },
+        )
+    }
     TopAppBar(
         title = {
             Column {
@@ -502,8 +541,25 @@ private fun AppTopBar(
             }
         },
         actions = {
-            TextButton(onClick = onLogout) {
-                Text("Выйти")
+            IconButton(onClick = { menuExpanded = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Оформление и аккаунт")
+            }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                Text("Оформление", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                AppAppearance.entries.forEach { mode ->
+                    DropdownMenuItem(
+                        text = { Text(mode.title) },
+                        trailingIcon = { if (appearance.mode == mode) Icon(Icons.Default.Check, contentDescription = "Выбрано") },
+                        onClick = { appearance.onChange(mode); menuExpanded = false },
+                    )
+                }
+                HorizontalDivider()
+                DropdownMenuItem(text = { Text("Выйти из аккаунта") }, onClick = {
+                    menuExpanded = false
+                    logoutRequested = true
+                })
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
@@ -532,18 +588,25 @@ private fun NavigationMenu(
             HorizontalDivider(modifier = Modifier.padding(bottom = 8.dp))
         }
         items(destinations, key = { it.name }) { destination ->
-            NavigationDrawerItem(
-                icon = { DestinationMark(destination.mark) },
-                label = {
-                    Text(
-                        destination.title,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                selected = destination == selected,
+            val isSelected = destination == selected
+            Surface(
                 onClick = { onSelect(destination) },
-            )
+                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                    else androidx.compose.ui.graphics.Color.Transparent,
+                contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().semantics { this.selected = isSelected },
+            ) {
+                Row(Modifier.heightIn(min = 46.dp).padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    DestinationMark(destination)
+                    Text(destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium)
+                }
+            }
         }
         item(key = "bottom-space") {
             Spacer(Modifier.size(12.dp))
@@ -581,7 +644,7 @@ private fun AccountHeader(session: AppSession, isOffline: Boolean) {
         }
         Column(Modifier.weight(1f)) {
             Text(
-                text = session.user.profile?.shortDisplayName ?: "LumaWork",
+                text = session.user.profile?.shortDisplayName ?: "Инженер",
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleSmall,
@@ -598,24 +661,24 @@ private fun AccountHeader(session: AppSession, isOffline: Boolean) {
 }
 
 @Composable
-private fun DestinationMark(mark: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
-        shape = CircleShape,
-        modifier = Modifier.size(30.dp),
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                text = mark,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
+private fun DestinationMark(destination: AppDestination) {
+    val icon = when (destination) {
+        AppDestination.Home -> R.drawable.ic_nav_home
+        AppDestination.Backpack -> R.drawable.ic_nav_backpack
+        AppDestination.Employees -> R.drawable.ic_nav_groups
+        AppDestination.Maintenance -> R.drawable.ic_nav_directions_car
+        AppDestination.Fuel -> R.drawable.ic_nav_local_gas_station
+        AppDestination.Wiki -> R.drawable.ic_nav_menu_book
+        AppDestination.Ftp -> R.drawable.ic_nav_folder_open
+        AppDestination.Salary -> R.drawable.ic_nav_account_balance_wallet
+        AppDestination.Requests -> R.drawable.ic_nav_assignment
+        AppDestination.Coordination -> R.drawable.ic_nav_assignment_ind
+        AppDestination.TimeReport -> R.drawable.ic_nav_schedule
+        AppDestination.Analytics -> R.drawable.ic_nav_bar_chart
+        AppDestination.Feedback -> R.drawable.ic_nav_feedback
+        AppDestination.Admin -> R.drawable.ic_nav_admin_panel_settings
     }
+    Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(24.dp))
 }
 
 @Composable
@@ -645,8 +708,9 @@ private fun DestinationContent(
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
-        val contentWidthClass = remember(maxWidth) {
-            appWidthClass(maxWidth.value.roundToInt())
+        val fontScale = LocalDensity.current.fontScale
+        val contentWidthClass = remember(maxWidth, maxHeight, fontScale) {
+            appContentWidthClass(maxWidth.value.roundToInt(), maxHeight.value.roundToInt(), fontScale)
         }
         when (destination) {
             AppDestination.Backpack -> BackpackRoute(

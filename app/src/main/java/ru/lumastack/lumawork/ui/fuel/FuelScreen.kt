@@ -24,14 +24,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -126,7 +126,7 @@ private fun FuelScreen(
     Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
         if (widthClass == AppWidthClass.Compact) {
             LazyColumn(
-                Modifier.fillMaxSize().widthIn(max = 680.dp),
+                Modifier.widthIn(max = 680.dp).fillMaxSize(),
                 contentPadding = PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
@@ -136,7 +136,7 @@ private fun FuelScreen(
             }
         } else {
             Row(
-                Modifier.fillMaxSize().widthIn(max = 1180.dp).padding(20.dp),
+                Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 LazyColumn(
@@ -420,10 +420,10 @@ private fun RowScope.AdjustmentButton(title: String, selected: Boolean, onClick:
 
 @Composable
 private fun FuelField(label: String, value: String, onChange: (String) -> Unit, keyboard: KeyboardType = KeyboardType.Text) {
-    OutlinedTextField(
+    AppTextField(
         value = value,
         onValueChange = onChange,
-        label = { Text(label) },
+        label = label,
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
         singleLine = true,
         shape = RoundedCornerShape(14.dp),

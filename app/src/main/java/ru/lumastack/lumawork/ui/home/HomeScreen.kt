@@ -1,7 +1,6 @@
 package ru.lumastack.lumawork.ui.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,18 +9,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Button
+import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,7 +64,7 @@ fun HomeScreen(
         factory = RouteViewModel.factory(routeRepository, session, isOffline),
     )
     val routeState by routeViewModel.state.collectAsStateWithLifecycle()
-    val isDark = isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
     val background = remember(isDark) {
         Brush.verticalGradient(
             if (isDark) {
@@ -88,8 +89,8 @@ fun HomeScreen(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
                 .widthIn(max = maxContentWidth)
+                .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -101,7 +102,6 @@ fun HomeScreen(
                 )
                 WorkDayCard(
                     state = routeState,
-                    compact = true,
                     onDistanceChange = routeViewModel::updateDistance,
                     onOdometerChange = routeViewModel::updateOdometer,
                     onAddressChange = routeViewModel::updatePrimaryStopAddress,
@@ -112,7 +112,7 @@ fun HomeScreen(
                     },
                     onSend = routeViewModel::send,
                 )
-                ConnectionCard(isOffline)
+                if (isOffline) ConnectionCard(isOffline)
                 AccountCard(session)
                 QuickSectionsCard(
                     widthClass = widthClass,
@@ -133,7 +133,6 @@ fun HomeScreen(
                         )
                         WorkDayCard(
                             state = routeState,
-                            compact = widthClass != AppWidthClass.Expanded,
                             onDistanceChange = routeViewModel::updateDistance,
                             onOdometerChange = routeViewModel::updateOdometer,
                             onAddressChange = routeViewModel::updatePrimaryStopAddress,
@@ -150,7 +149,7 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
                         AccountCard(session)
-                        ConnectionCard(isOffline)
+                        if (isOffline) ConnectionCard(isOffline)
                         QuickSectionsCard(
                             widthClass = if (widthClass == AppWidthClass.Expanded) {
                                 AppWidthClass.Expanded
@@ -169,7 +168,6 @@ fun HomeScreen(
 @Composable
 private fun WorkDayCard(
     state: RouteUiState,
-    compact: Boolean,
     onDistanceChange: (String) -> Unit,
     onOdometerChange: (String) -> Unit,
     onAddressChange: (String) -> Unit,
@@ -224,38 +222,8 @@ private fun WorkDayCard(
                 }
             }
 
-            if (compact) {
-                RouteNumberField(
-                    value = state.distanceText,
-                    label = "Пробег за день, км",
-                    onValueChange = onDistanceChange,
-                )
-                RouteNumberField(
-                    value = state.odometerText,
-                    label = "Одометр на начало месяца",
-                    onValueChange = onOdometerChange,
-                )
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Box(Modifier.weight(1f)) {
-                        RouteNumberField(
-                            value = state.distanceText,
-                            label = "Пробег за день, км",
-                            onValueChange = onDistanceChange,
-                        )
-                    }
-                    Box(Modifier.weight(1f)) {
-                        RouteNumberField(
-                            value = state.odometerText,
-                            label = "Одометр на начало месяца",
-                            onValueChange = onOdometerChange,
-                        )
-                    }
-                }
-            }
+            RouteNumberField(state.distanceText, "Пробег дня", onDistanceChange)
+            RouteNumberField(state.odometerText, "Одометр на начало месяца", onOdometerChange)
 
             HorizontalDivider()
             if (activeRequestsCount > 0) {
@@ -267,17 +235,17 @@ private fun WorkDayCard(
                 }
             }
             Text("Основная точка", style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(
+            AppTextField(
                 value = primaryStop?.address.orEmpty(),
                 onValueChange = onAddressChange,
-                label = { Text("Адрес") },
+                label = "Адрес",
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
+            AppTextField(
                 value = primaryStop?.requestNumber.orEmpty(),
                 onValueChange = onRequestNumberChange,
-                label = { Text("Номер заявки") },
+                label = "Номер заявки",
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -329,14 +297,24 @@ private fun RouteNumberField(
     label: String,
     onValueChange: (String) -> Unit,
 ) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label) },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
-    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        AppTextField(
+            value = value,
+            onValueChange = onValueChange,
+            label = label,
+            placeholder = "0",
+            showLabel = false,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = TextAlign.End,
+                fontWeight = FontWeight.SemiBold),
+            modifier = Modifier.width(112.dp),
+        )
+        Text("км", style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable
@@ -449,7 +427,7 @@ private fun ConnectionCard(isOffline: Boolean) {
                 text = if (isOffline) {
                     "Сохранённая сессия доступна. Обновление продолжится после восстановления связи."
                 } else {
-                    "Учётная запись подтверждена общим сервером LumaWork."
+                    "Учётная запись подтверждена общим сервером приложения «Инженер»."
                 },
                 color = contentColor,
                 style = MaterialTheme.typography.bodyMedium,
