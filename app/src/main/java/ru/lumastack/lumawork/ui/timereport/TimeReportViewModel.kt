@@ -91,7 +91,7 @@ class TimeReportViewModel(
                     )
                 }
             } catch (_: Exception) {
-                mutableState.update { it.copy(isDeleting = false, errorMessage = "Не удалось очистить локальный архив.") }
+                mutableState.update { it.copy(isDeleting = false, errorMessage = "Не удалось очистить архив.") }
             }
         }
     }
@@ -154,7 +154,7 @@ class TimeReportViewModel(
                 it.copy(
                     isAuthorized = false,
                     isLoading = false,
-                    errorMessage = if (showError) "Сессия SimpleOne истекла. Показан локальный архив." else null,
+                    errorMessage = if (showError) "Войдите в SimpleOne, чтобы обновить трудозатраты." else null,
                 )
             }
         } catch (error: Exception) {

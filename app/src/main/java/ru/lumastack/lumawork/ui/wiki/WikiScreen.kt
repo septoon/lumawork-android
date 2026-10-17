@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.wiki
 
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -164,47 +166,48 @@ private fun WikiSearchPanel(
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
-    LazyColumn(
-        modifier,
-        state = listState,
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item(key = "search") {
-            AppTextField(
-                value = state.query,
-                onValueChange = onQueryChange,
-                label = "Поиск по инструкциям", search = true,
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp),
-                trailingIcon = {
-                    if (state.isSearching) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        item(key = "quick") {
-            WikiQuickSearch(state.query, onQueryChange)
-        }
-        item(key = "summary") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Результаты", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(
-                        if (state.results.isEmpty()) "База знаний VTB Wiki" else "${state.results.size} по запросу «${state.query.trim()}»",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                TextButton(onClick = onRefresh, enabled = !state.isSearching) { Text("Обновить") }
+    AppRefreshContainer(modifier, isRefreshing = state.isSearching, onRefresh = onRefresh, enabled = state.query.isNotBlank()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "search") {
+                AppTextField(
+                    value = state.query,
+                    onValueChange = onQueryChange,
+                    label = "Поиск по инструкциям", search = true,
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    trailingIcon = {
+                        if (state.isSearching) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-        }
-        state.errorMessage?.let { item(key = "error") { WikiMessage(it, true) } }
-        if (state.results.isEmpty() && !state.isSearching && state.errorMessage == null) {
-            item(key = "empty") { WikiMessage("Ничего не найдено. Измените запрос или выберите быстрый фильтр.") }
-        }
-        items(state.results, key = WikiSearchResult::id) { result ->
-            WikiResultCard(result, state.selectedResult?.id == result.id) { onOpen(result) }
+            item(key = "quick") {
+                WikiQuickSearch(state.query, onQueryChange)
+            }
+            item(key = "summary") {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Результаты", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (state.results.isEmpty()) "База знаний VTB Wiki" else "${state.results.size} по запросу «${state.query.trim()}»",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+            state.errorMessage?.let { item(key = "error") { WikiMessage(it, true) } }
+            if (state.results.isEmpty() && !state.isSearching && state.errorMessage == null) {
+                item(key = "empty") { WikiMessage("Ничего не найдено. Измените запрос или выберите быстрый фильтр.") }
+            }
+            items(state.results, key = WikiSearchResult::id) { result ->
+                WikiResultCard(result, state.selectedResult?.id == result.id) { onOpen(result) }
+            }
         }
     }
 }
@@ -218,7 +221,7 @@ private fun WikiQuickSearch(query: String, onQueryChange: (String) -> Unit) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("216 материалов", fontWeight = FontWeight.Bold)
             Text(
-                "Статьи, инструкции и OCR-текст из PDF.",
+                "Статьи и инструкции.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -251,7 +254,6 @@ private fun WikiResultCard(result: WikiSearchResult, selected: Boolean, onClick:
                 maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text("Совпадение ${result.score} · PDF/OCR", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -290,7 +292,7 @@ private fun WikiArticlePanel(
         }
         state.articleErrorMessage?.let { item(key = "article-error") { WikiMessage(it, true) } }
         state.article?.takeIf { it.truncated == true }?.let {
-            item(key = "truncated") { WikiMessage("Статья обрезана сервером. Уточните запрос или откройте источник.") }
+            item(key = "truncated") { WikiMessage("Статья показана не полностью. Уточните запрос или откройте источник.") }
         }
         state.article?.let { article ->
             item(key = "actions") {

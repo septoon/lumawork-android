@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.admin
 
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -300,7 +302,8 @@ private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: Ap
         if (session.user.can(AdminPermission.ViewGsmTemplate)) add(AdminSection.GsmTemplate)
         if (session.user.can(AdminPermission.ViewFeedback)) add(AdminSection.Feedback)
     }
-    Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
+    AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.loading, onRefresh = model::refresh,
+        enabled = !state.saving, contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             Modifier.widthIn(max = 1100.dp).fillMaxSize(),
             contentPadding = PaddingValues(20.dp),
@@ -309,7 +312,6 @@ private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: Ap
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Управление", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    TextButton(onClick = model::refresh) { Text("Обновить") }
                 }
             }
             if (sections.isNotEmpty()) item {
@@ -342,7 +344,7 @@ private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: Ap
                     }
                 }
                 AdminSection.Images -> {
-                    if (state.snapshot.images.isEmpty()) item { AdminCard("Изображений нет", "Сервер не вернул доступных изображений.") }
+                    if (state.snapshot.images.isEmpty()) item { AdminCard("Изображений нет", "Доступных изображений пока нет.") }
                     items(state.snapshot.images, key = { "${it.kind}-${it.id}" }) { image ->
                         Surface(Modifier.fillMaxWidth().clickable { model.openImage(image) }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f)) {
                             Column(Modifier.padding(15.dp)) {

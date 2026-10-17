@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.coordination
 
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -120,7 +122,8 @@ private fun CoordinationScreen(
             else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
         )
     }
-    Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
+    AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
+        enabled = state.isAuthorized && state.selectedRequest == null, contentAlignment = Alignment.TopCenter) {
         when {
             state.selectedRequest != null -> SimpleOneRequestDetailContent(
                 request = state.selectedRequest,
@@ -133,7 +136,6 @@ private fun CoordinationScreen(
                 state = state,
                 widthClass = widthClass,
                 onBack = onBack,
-                onRefresh = onRefresh,
                 onOpenRequest = onOpenRequest,
             )
             else -> CoordinationOverview(
@@ -141,7 +143,6 @@ private fun CoordinationScreen(
                 widthClass = widthClass,
                 onSectionChange = onSectionChange,
                 onRegionChange = onRegionChange,
-                onRefresh = onRefresh,
                 onOpenEngineer = onOpenEngineer,
                 onOpenRequest = onOpenRequest,
             )
@@ -155,7 +156,6 @@ private fun CoordinationOverview(
     widthClass: AppWidthClass,
     onSectionChange: (CoordinationSection) -> Unit,
     onRegionChange: (CoordinationRegion) -> Unit,
-    onRefresh: () -> Unit,
     onOpenEngineer: (String) -> Unit,
     onOpenRequest: (SimpleOneRequest) -> Unit,
 ) {
@@ -178,7 +178,6 @@ private fun CoordinationOverview(
                 group = group,
                 engineers = engineers,
                 onRegionChange = onRegionChange,
-                onRefresh = onRefresh,
             )
         }
         if (!state.isAuthorized && state.simpleOneUserId.isBlank()) {
@@ -192,7 +191,7 @@ private fun CoordinationOverview(
                     state.errorMessage ?: if (state.isAuthorized) {
                         "В текущем разделе ничего не найдено."
                     } else {
-                        "Нет локальной копии. Подключите SimpleOne и обновите раздел."
+                        "Войдите в SimpleOne и обновите раздел."
                     },
                 )
             }
@@ -226,7 +225,6 @@ private fun CoordinationSummary(
     group: CoordinationRequestGroup,
     engineers: List<CoordinationEngineer>,
     onRegionChange: (CoordinationRegion) -> Unit,
-    onRefresh: () -> Unit,
 ) {
     var regionMenuExpanded by remember { mutableStateOf(false) }
     Card(
@@ -269,8 +267,6 @@ private fun CoordinationSummary(
                 }
                 if (state.isLoading) {
                     CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                } else {
-                    OutlinedButton(onClick = onRefresh, enabled = state.isAuthorized) { Text("Обновить") }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -356,7 +352,6 @@ private fun EngineerRequestsContent(
     state: CoordinationUiState,
     widthClass: AppWidthClass,
     onBack: () -> Unit,
-    onRefresh: () -> Unit,
     onOpenRequest: (SimpleOneRequest) -> Unit,
 ) {
     val columns = if (widthClass == AppWidthClass.Compact) 1 else 2
@@ -388,7 +383,6 @@ private fun EngineerRequestsContent(
                     )
                 }
                 if (state.isLoading) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                else OutlinedButton(onClick = onRefresh, enabled = state.isAuthorized) { Text("Обновить") }
             }
         }
         items(requests, key = SimpleOneRequest::id) { request ->

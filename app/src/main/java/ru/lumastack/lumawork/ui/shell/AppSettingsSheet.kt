@@ -52,6 +52,7 @@ internal fun AppSettingsSheet(session: AppSession, onDismiss: () -> Unit, onOpen
     var appearanceOpen by rememberSaveable { mutableStateOf(false) }
     var logoutRequested by rememberSaveable { mutableStateOf(false) }
     val appearance = LocalAppAppearance.current
+    val checkUpdates = ru.lumastack.lumawork.ui.update.LocalUpdateCheck.current
     ModalBottomSheet(onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), modifier = Modifier.fillMaxHeight(.94f)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -76,6 +77,7 @@ internal fun AppSettingsSheet(session: AppSession, onDismiss: () -> Unit, onOpen
                 item { TextButton(onClick = onOpenProfile, modifier = Modifier.fillMaxWidth()) { Text("Профиль", modifier = Modifier.weight(1f)) } }
                 item { SettingsSectionLabel("Приложение") }
                 item { TextButton(onClick = { appearanceOpen = true }, modifier = Modifier.fillMaxWidth()) { Text("Оформление", modifier = Modifier.weight(1f)) } }
+                item { TextButton(onClick = checkUpdates, modifier = Modifier.fillMaxWidth()) { Text("Проверить обновления", modifier = Modifier.weight(1f)) } }
                 item { SettingsSectionLabel("Аккаунт") }
                 item {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

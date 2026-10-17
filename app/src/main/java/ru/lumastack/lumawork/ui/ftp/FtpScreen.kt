@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.ftp
 
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+
 import androidx.activity.compose.BackHandler
 import android.content.Context
 import android.content.Intent
@@ -195,23 +197,24 @@ private fun FtpFileDetails(
 }
 
 @Composable private fun FtpList(state: FtpUiState, onSearch: (String) -> Unit, onOpen: (FtpItem) -> Unit, onUp: () -> Unit, onRefresh: () -> Unit, onDownload: (FtpItem) -> Unit, modifier: Modifier) {
-    LazyColumn(modifier, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (state.path != "/") TextButton(onClick = onUp) { Text("Назад") }
-            Column(Modifier.weight(1f)) { Text(state.path, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Файлы Сервионики", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            TextButton(onClick = onRefresh) { Text("Обновить") }
-        } }
-        item { AppTextField(state.search, onSearch, label = "Поиск в папке", search = true, singleLine = true, modifier = Modifier.fillMaxWidth()) }
-        state.errorMessage?.let { item { FtpStatus("Ошибка", it) } }
-        if (state.isLoading && state.items.isEmpty()) item { Row(Modifier.fillMaxWidth().padding(30.dp), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) } }
-        if (!state.isLoading && state.items.isEmpty()) item { FtpStatus("Каталог пуст", "Файлы отсутствуют или ничего не найдено.") }
-        items(state.items, key = FtpItem::path) { item -> Surface(Modifier.fillMaxWidth().clickable { onOpen(item) }, shape = RoundedCornerShape(17.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f)) {
-            Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (item.isDirectory) "П" else "Ф", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 12.dp))
-                Column(Modifier.weight(1f)) { Text(item.name, fontWeight = FontWeight.SemiBold, maxLines = 2); Text(item.sizeText ?: item.modifiedAt.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
-                if (item.isDirectory) TextButton(onClick = { onDownload(item) }, enabled = state.downloadingPath == null) { Text(if (state.downloadingPath == item.path) "…" else "ZIP") }
-            }
-        } }
+    AppRefreshContainer(modifier, isRefreshing = state.isLoading, onRefresh = onRefresh, enabled = state.downloadingPath == null) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            item { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (state.path != "/") TextButton(onClick = onUp) { Text("Назад") }
+                Column(Modifier.weight(1f)) { Text(state.path, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Файлы Сервионики", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            } }
+            item { AppTextField(state.search, onSearch, label = "Поиск в папке", search = true, singleLine = true, modifier = Modifier.fillMaxWidth()) }
+            state.errorMessage?.let { item { FtpStatus("Ошибка", it) } }
+            if (state.isLoading && state.items.isEmpty()) item { Row(Modifier.fillMaxWidth().padding(30.dp), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) } }
+            if (!state.isLoading && state.items.isEmpty()) item { FtpStatus("Каталог пуст", "Файлы отсутствуют или ничего не найдено.") }
+            items(state.items, key = FtpItem::path) { item -> Surface(Modifier.fillMaxWidth().clickable { onOpen(item) }, shape = RoundedCornerShape(17.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f)) {
+                Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (item.isDirectory) "П" else "Ф", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 12.dp))
+                    Column(Modifier.weight(1f)) { Text(item.name, fontWeight = FontWeight.SemiBold, maxLines = 2); Text(item.sizeText ?: item.modifiedAt.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
+                    if (item.isDirectory) TextButton(onClick = { onDownload(item) }, enabled = state.downloadingPath == null) { Text(if (state.downloadingPath == item.path) "…" else "ZIP") }
+                }
+            } }
+        }
     }
 }
 @Composable private fun FtpStatus(title: String, message: String) { Column(Modifier.fillMaxSize().padding(26.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Text(title, fontWeight = FontWeight.Bold); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) } }

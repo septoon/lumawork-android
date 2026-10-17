@@ -8,12 +8,6 @@ enum class AppWidthClass {
     Expanded,
 }
 
-enum class AppNavigationLayout {
-    Drawer,
-    Rail,
-    Sidebar,
-}
-
 fun appWidthClass(widthDp: Int): AppWidthClass = when {
     widthDp < MEDIUM_WIDTH_DP -> AppWidthClass.Compact
     widthDp < EXPANDED_WIDTH_DP -> AppWidthClass.Medium
@@ -31,13 +25,6 @@ fun appFormHasPinnedActions(availableHeightDp: Int, fontScale: Float = 1f): Bool
     return availableHeightDp >= MIN_PINNED_FORM_HEIGHT_DP * textScale
 }
 
-fun appNavigationLayout(widthDp: Int): AppNavigationLayout = when {
-    widthDp < MEDIUM_WIDTH_DP -> AppNavigationLayout.Drawer
-    widthDp < WIDE_SIDEBAR_WIDTH_DP -> AppNavigationLayout.Rail
-    else -> AppNavigationLayout.Sidebar
-}
-
 private const val MEDIUM_WIDTH_DP = 600
 private const val EXPANDED_WIDTH_DP = 840
-private const val WIDE_SIDEBAR_WIDTH_DP = 1100
 private const val MIN_PINNED_FORM_HEIGHT_DP = 360

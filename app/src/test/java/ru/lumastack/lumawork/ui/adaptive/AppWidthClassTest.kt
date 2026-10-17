@@ -41,12 +41,6 @@ class AppWidthClassTest {
     }
 
     @Test
-    fun `content thresholds apply after navigation has taken its width`() {
-        assertEquals(AppWidthClass.Medium, appContentWidthClass(800 - 88, 1200))
-        assertEquals(AppWidthClass.Expanded, appContentWidthClass(1280 - 272, 800))
-    }
-
-    @Test
     fun `phone widths are compact`() {
         assertEquals(AppWidthClass.Compact, appWidthClass(320))
         assertEquals(AppWidthClass.Compact, appWidthClass(599))
@@ -64,11 +58,4 @@ class AppWidthClassTest {
         assertEquals(AppWidthClass.Expanded, appWidthClass(1200))
     }
 
-    @Test
-    fun `navigation changes independently from content width class`() {
-        assertEquals(AppNavigationLayout.Drawer, appNavigationLayout(599))
-        assertEquals(AppNavigationLayout.Rail, appNavigationLayout(600))
-        assertEquals(AppNavigationLayout.Rail, appNavigationLayout(1099))
-        assertEquals(AppNavigationLayout.Sidebar, appNavigationLayout(1100))
-    }
 }

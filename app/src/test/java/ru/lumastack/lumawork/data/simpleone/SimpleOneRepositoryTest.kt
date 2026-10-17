@@ -1,5 +1,8 @@
 package ru.lumastack.lumawork.data.simpleone
 
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.cancel
+import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -330,8 +333,11 @@ private fun request() = SimpleOneRequest(
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RequestsBootstrapTest {
-    private suspend fun settled(model: SimpleOneViewModel) = withContext(Dispatchers.Default) {
-        withTimeout(5_000) { model.state.first { !it.isInitializing && !it.isLoading && !it.isClosedLoading } }
+    private val models = mutableListOf<SimpleOneViewModel>()
+    private fun model(repository: SimpleOneRepository, offline: Boolean = false) =
+        SimpleOneViewModel(repository, "owner", offline).also(models::add)
+    private suspend fun settled(model: SimpleOneViewModel, complete: (SimpleOneUiState) -> Boolean = { true }) = withContext(Dispatchers.Default) {
+        withTimeout(5_000) { model.state.first { !it.isInitializing && !it.isLoading && !it.isClosedLoading && complete(it) } }
     }
     private fun session() = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "key", "engineer")) }
 
@@ -339,7 +345,7 @@ class RequestsBootstrapTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val api = FakeSimpleOneApi()
-            val model = SimpleOneViewModel(SimpleOneRepository(api, session(), FakeSimpleOneCache()), "owner", false)
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache()))
             settled(model)
             assertFalse(model.state.value.isInitializing)
             assertFalse(model.state.value.initialArchiveReady)
@@ -347,43 +353,43 @@ class RequestsBootstrapTest {
             assertEquals(0, api.activeCalls)
             assertEquals(0, api.archiveCalls)
             assertEquals(0, api.exportCalls)
-        } finally { Dispatchers.resetMain() }
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
     }
 
     @Test fun `only explicit click downloads archive then unlocks and refreshes active`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val api = FakeSimpleOneApi(closed = listOf(request()))
-            val model = SimpleOneViewModel(SimpleOneRepository(api, session(), FakeSimpleOneCache(), FakeSimpleOneSupplementalCache()), "owner", false)
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), FakeSimpleOneSupplementalCache()))
             settled(model)
             model.initialLoad(); model.initialLoad()
             assertTrue(model.state.value.isClosedLoading)
-            settled(model)
+            settled(model) { it.initialArchiveReady && it.activeRequests.isNotEmpty() }
             assertEquals(1, api.exportCalls)
             assertEquals(1, api.archiveCalls)
             assertEquals(1, api.activeCalls)
             assertTrue(model.state.value.initialArchiveReady)
             assertEquals(1, model.state.value.closedArchive.requests.size)
-        } finally { Dispatchers.resetMain() }
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
     }
 
     @Test fun `login starts only after button and archive failure keeps the gate`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val api = FakeSimpleOneApi(error = SimpleOneFailure.Http(500, "Unavailable"))
-            val model = SimpleOneViewModel(SimpleOneRepository(api, FakeSimpleOneSessionStore(), FakeSimpleOneCache()), "owner", false)
+            val model = model(SimpleOneRepository(api, FakeSimpleOneSessionStore(), FakeSimpleOneCache()))
             settled(model)
             assertFalse(model.state.value.showConnection)
             model.initialLoad()
             assertTrue(model.state.value.showConnection)
             model.updateUsername("engineer"); model.updatePassword("password"); model.signIn()
-            settled(model)
+            settled(model) { it.errorMessage != null }
             assertFalse(model.state.value.initialArchiveReady)
             assertFalse(model.state.value.isLoading)
             assertFalse(model.state.value.isClosedLoading)
             assertEquals(0, api.activeCalls)
             assertTrue(model.state.value.errorMessage != null)
-        } finally { Dispatchers.resetMain() }
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
     }
 
     @Test fun `trusted complete empty archive unlocks repeat entry offline without network`() = runTest {
@@ -391,13 +397,13 @@ class RequestsBootstrapTest {
         try {
             val api = FakeSimpleOneApi()
             val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = ClosedSimpleOneArchive(isComplete = true, queryRevision = 2) }
-            val model = SimpleOneViewModel(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache), "owner", true)
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache), offline = true)
             settled(model)
             assertTrue(model.state.value.initialArchiveReady)
             model.initialLoad(); model.refreshClosedRequests()
             settled(model)
             assertEquals(0, api.activeCalls + api.exportCalls + api.currentUserCalls)
-        } finally { Dispatchers.resetMain() }
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
     }
 
     @Test fun `old capped archive is not accepted as a complete baseline`() = runTest {
@@ -405,11 +411,11 @@ class RequestsBootstrapTest {
         try {
             val api = FakeSimpleOneApi()
             val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true) }
-            val model = SimpleOneViewModel(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache), "owner", false)
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
             settled(model)
             assertFalse(model.state.value.initialArchiveReady)
             assertEquals(0, api.activeCalls + api.exportCalls + api.currentUserCalls)
-        } finally { Dispatchers.resetMain() }
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
     }
 
     @Test fun `local import export and inclusive cleanup preserve undated requests and never call API`() = runBlocking {

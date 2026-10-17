@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.timereport
 
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,7 +54,6 @@ import ru.lumastack.lumawork.data.timereport.TimeReportRepository
 import ru.lumastack.lumawork.domain.timereport.TimeReportDaySummary
 import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.timereport.TimeReportMonthGroup
-import ru.lumastack.lumawork.domain.timereport.TimeReportSource
 import ru.lumastack.lumawork.domain.timereport.TimeReportSnapshot
 import ru.lumastack.lumawork.domain.timereport.timeReportMonthGroups
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
@@ -120,13 +121,13 @@ private fun TimeReportScreen(
         )
     }
 
-    Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
+    AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
+        enabled = state.isAuthorized && !state.isDeleting, contentAlignment = Alignment.TopCenter) {
         if (selectedMonth == null) {
             TimeReportOverview(
                 state = state,
                 widthClass = widthClass,
                 monthGroups = monthGroups,
-                onRefresh = onRefresh,
                 onOpenMonth = onOpenMonth,
                 onDeleteRange = { deleteRangePresented = true },
                 onDeleteAll = { deleteAllPresented = true },
@@ -141,7 +142,7 @@ private fun TimeReportScreen(
             onDismissRequest = { deleteAllPresented = false },
             title = { Text("Удалить все трудозатраты?") },
             text = {
-                Text("Локальный архив (${entries.size} строк) будет удалён. Данные в SimpleOne не изменятся.")
+                Text("Архив на этом устройстве (${entries.size} записей) будет удалён. Данные в SimpleOne не изменятся.")
             },
             confirmButton = {
                 TextButton(
@@ -173,7 +174,6 @@ private fun TimeReportOverview(
     state: TimeReportUiState,
     widthClass: AppWidthClass,
     monthGroups: List<TimeReportMonthGroup>,
-    onRefresh: () -> Unit,
     onOpenMonth: (String) -> Unit,
     onDeleteRange: () -> Unit,
     onDeleteAll: () -> Unit,
@@ -204,7 +204,6 @@ private fun TimeReportOverview(
                 dayCount = dayCount,
                 workMinutes = totals.first,
                 travelMinutes = totals.second,
-                onRefresh = onRefresh,
                 onDeleteRange = onDeleteRange,
                 onDeleteAll = onDeleteAll,
             )
@@ -217,9 +216,9 @@ private fun TimeReportOverview(
                 MessageCard(
                     if (state.isLoading) "Загружаю трудозатраты…" else "Трудозатраты не загружены",
                     state.errorMessage ?: if (state.isAuthorized) {
-                        "Обновите данные из SimpleOne."
+                        "Трудозатрат пока нет."
                     } else {
-                        "Локальной копии нет. Подключите SimpleOne и обновите экран."
+                        "Войдите в SimpleOne и обновите экран."
                     },
                 )
             }
@@ -237,7 +236,6 @@ private fun TimeReportSummary(
     dayCount: Int,
     workMinutes: Int,
     travelMinutes: Int,
-    onRefresh: () -> Unit,
     onDeleteRange: () -> Unit,
     onDeleteAll: () -> Unit,
 ) {
@@ -255,15 +253,12 @@ private fun TimeReportSummary(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text("Сводка", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                     Text(
-                        state.snapshot?.summaryCaption().orEmpty().ifBlank { "Локальный архив не загружен" },
+                        state.snapshot?.summaryCaption().orEmpty().ifBlank { "Трудозатраты не загружены" },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 if (state.isLoading) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                else OutlinedButton(onClick = onRefresh, enabled = state.isAuthorized && !state.isDeleting) {
-                    Text("Обновить")
-                }
             }
             if (widthClass == AppWidthClass.Compact) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -432,7 +427,7 @@ private fun DeleteRangeDialog(
         title = { Text("Удалить трудозатраты за период") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Удаление затронет только локальный архив на устройстве.")
+                Text("Записи за выбранный период будут удалены только с этого устройства.")
                 AppTextField(
                     value = startText,
                     onValueChange = { startText = it },
@@ -476,18 +471,16 @@ private fun MessageCard(title: String, message: String) {
 
 private fun timeReportSnapshotCaption(
     updatedAtEpochMillis: Long?,
-    source: TimeReportSource,
     entryCount: Int,
 ): String {
     val updated = updatedAtEpochMillis?.let {
         UPDATED_FORMATTER.format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))
     } ?: "дата неизвестна"
-    val sourceTitle = if (source == TimeReportSource.Xlsx) "XLSX" else "список API"
-    return "$sourceTitle · $entryCount строк · $updated"
+    return "$entryCount записей · $updated"
 }
 
 private fun TimeReportSnapshot.summaryCaption(): String =
-    timeReportSnapshotCaption(updatedAtEpochMillis, source, entries.size)
+    timeReportSnapshotCaption(updatedAtEpochMillis, entries.size)
 
 private fun formatMinutes(minutes: Int): String {
     val safe = minutes.coerceAtLeast(0)

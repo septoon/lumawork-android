@@ -21,7 +21,7 @@ internal object TimeReportParser {
     fun parseXlsx(bytes: ByteArray): List<TimeReportEntry> = SimpleOneXlsxParser.readRows(bytes)
         .mapNotNull(::entryFromRow)
         .deduplicatedAndSorted()
-        .ifEmpty { throw SimpleOneXlsxException("В XLSX не найдены строки трудозатрат.") }
+        .ifEmpty { throw SimpleOneXlsxException("В файле не найдены трудозатраты.") }
 
     fun parseRecord(item: JsonObject): TimeReportEntry? {
         val activity = item.value(

@@ -17,7 +17,7 @@ usage() {
     "  release               — подписанные release APK и AAB" \
     "  all                   — debug APK, release APK и AAB" \
     "  verify                — unit-тесты, lint и все артефакты" \
-    "  publish [описание]    — release APK/AAB и публикация APK на app.lumastack.ru" \
+    "  publish [описание]    — release APK и публикация на app.lumastack.ru" \
     "  clean                 — удалить только Gradle/.build артефакты" \
     "  help                  — показать эту справку"
 }
@@ -78,7 +78,8 @@ if (( needs_release )); then
   fi
 fi
 
-GRADLE_OPTIONS=(--project-dir "$PROJECT_DIR" --no-daemon)
+GRADLE_OPTIONS=(--project-dir "$PROJECT_DIR" --no-daemon --max-workers=1)
+if [[ "${GRADLE_OFFLINE:-0}" == "1" ]]; then GRADLE_OPTIONS+=(--offline); fi
 if [[ -n "${RELEASE_VERSION_NAME:-}" ]]; then
   GRADLE_OPTIONS+=("-PreleaseVersionName=$RELEASE_VERSION_NAME")
 fi

@@ -39,3 +39,7 @@ captures/
 *.apk
 *.aab
 *.log
+
+# Python publisher cache
+__pycache__/
+*.pyc

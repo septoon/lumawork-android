@@ -24,9 +24,9 @@ interface WikiApi {
 }
 
 sealed class WikiFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
-    data object NotConfigured : WikiFailure("Не задан WIKI_API_TOKEN.")
+    data object NotConfigured : WikiFailure("Вики временно недоступна.")
     class Network(cause: IOException) : WikiFailure("Вики временно недоступна.", cause)
-    class Http(status: Int) : WikiFailure("Ошибка Вики. HTTP $status.")
+    class Http(status: Int) : WikiFailure("Не удалось загрузить Вики. Попробуйте ещё раз.")
     data object InvalidResponse : WikiFailure("Вики вернула некорректные данные.")
 }
 
