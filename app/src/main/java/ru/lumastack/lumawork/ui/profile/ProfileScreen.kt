@@ -36,9 +36,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.Json
+import ru.lumastack.lumawork.BuildConfig
+import ru.lumastack.lumawork.data.profile.WorkDocumentsRepository
+import ru.lumastack.lumawork.data.profile.OkHttpWorkDocumentsApi
+import ru.lumastack.lumawork.data.profile.FileWorkDocumentsCache
+import ru.lumastack.lumawork.data.simpleone.SimpleOneRepository
+import ru.lumastack.lumawork.domain.simpleone.ClosedSimpleOneArchive
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -69,6 +78,9 @@ fun ProfileRoute(
     auth: AuthRepository,
     auto: AutoRepository,
     images: VehicleImageRepository,
+    simpleOne: SimpleOneRepository,
+    liveArchive: ClosedSimpleOneArchive,
+    isArchiveLoading: Boolean,
     onDismiss: () -> Unit,
     startInEditor: Boolean = false,
 ) {
@@ -77,13 +89,38 @@ fun ProfileRoute(
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("profile-preferences", android.content.Context.MODE_PRIVATE) }
     var showVehicle by rememberSaveable { mutableStateOf(preferences.getBoolean("show-vehicle", true)) }
-    var editing by rememberSaveable { mutableStateOf(startInEditor) }
+    var editing by rememberSaveable(session.user.id) { mutableStateOf(startInEditor) }
+    val json = remember { Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true } }
+    val documents = remember(context.applicationContext) {
+        WorkDocumentsRepository(OkHttpWorkDocumentsApi(BuildConfig.API_ORIGIN, json), FileWorkDocumentsCache(context.applicationContext, json))
+    }
+    var documentsOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    var documentCount by remember(session.user.id) { mutableStateOf(0) }
+    var cachedArchive by remember(session.user.id) { mutableStateOf<ClosedSimpleOneArchive?>(null) }
+    var readingArchive by remember(session.user.id) { mutableStateOf(true) }
+    val archive = liveArchive.takeIf { it.updatedAtEpochMillis != null || it.isComplete || it.requests.isNotEmpty() } ?: cachedArchive
+    LaunchedEffect(simpleOne, session.user.id) {
+        try { cachedArchive = simpleOne.readClosedArchive(session.user.id) }
+        catch (error: CancellationException) { throw error }
+        catch (_: Exception) { cachedArchive = null }
+        finally { readingArchive = false }
+    }
+    LaunchedEffect(documents, session.user.id, session.token, offline) {
+        documentCount = documents.read(session.user.id).size
+        if (!offline) try { documentCount = documents.refresh(session).size }
+        catch (error: CancellationException) { throw error }
+        catch (_: Exception) { /* The document screen exposes retry and the cached list. */ }
+    }
+    LaunchedEffect(documents, session.user.id) {
+        documents.changes.collect { (owner, items) -> if (owner == session.user.id) documentCount = items.size }
+    }
     var avatarMenu by remember { mutableStateOf(false) }
     var removeAvatar by remember { mutableStateOf(false) }
     var cameraPath by rememberSaveable { mutableStateOf<String?>(null) }
     val close = {
         if (!state.busy) {
-            if (editing && !startInEditor) { editing = false; vm.close(); vm.open(session, offline) }
+            if (documentsOpen) documentsOpen = false
+            else if (editing && !startInEditor) { editing = false; vm.close(); vm.open(session, offline) }
             else { vm.close(); onDismiss() }
         }
     }
@@ -97,7 +134,10 @@ fun ProfileRoute(
             try { readAvatarJpeg(context, Uri.fromFile(file)) } finally { file.delete() }
         } else file?.delete()
     }
-    LaunchedEffect(Unit) { vm.open(session, offline) }
+    LaunchedEffect(session, offline) { vm.open(session, offline) }
+    DisposableEffect(vm, context) {
+        onDispose { if ((context as? android.app.Activity)?.isChangingConfigurations != true) vm.close() }
+    }
     LaunchedEffect(state.saved) {
         if (state.saved) {
             preferences.edit().putBoolean("show-vehicle", showVehicle).apply()
@@ -106,26 +146,31 @@ fun ProfileRoute(
         }
     }
 
-    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Scaffold(
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !state.busy, dismissOnClickOutside = !state.busy)) {
+        if (documentsOpen) WorkDocumentsScreen(session, offline, editing, onDismiss = { documentsOpen = false }, repository = documents)
+        else Scaffold(
             modifier = Modifier.fillMaxSize().imePadding(),
             topBar = {
                 TopAppBar(title = { Text("Профиль") }, navigationIcon = {
                     IconButton(onClick = close, enabled = !state.busy) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Закрыть профиль") }
                 }, actions = {
                     if (state.busy) CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
-                    else if (editing) TextButton(onClick = vm::save, enabled = profileValidationError(state.draft) == null) { Text("Сохранить") }
+                    else if (editing) TextButton(onClick = vm::save, enabled = !offline && profileValidationError(state.draft) == null) { Text("Сохранить") }
                 })
             },
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                if (!editing) ProfileOverview(session.user, state, images, showVehicle)
+                if (!editing) ProfileOverview(session.user, state, images, showVehicle,
+                    completedRecords = archive?.requests.orEmpty(),
+                    statisticsLoading = (readingArchive || isArchiveLoading) && archive?.requests.isNullOrEmpty(),
+                    hasArchive = archive != null, documentCount = documentCount,
+                    onOpenDocuments = { documentsOpen = true })
                 else LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     item(key = "avatar") {
                         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                             ProfileAvatar(session.user, images, 80.dp)
                             Box {
-                                TextButton(onClick = { avatarMenu = true }, enabled = !state.busy) { Text("Изменить фото") }
+                                TextButton(onClick = { avatarMenu = true }, enabled = !state.busy && !offline) { Text("Изменить фото") }
                                 DropdownMenu(avatarMenu, { avatarMenu = false }) {
                                     DropdownMenuItem(text = { Text("Фотогалерея") }, onClick = {
                                         avatarMenu = false
@@ -150,6 +195,7 @@ fun ProfileRoute(
                             Text(session.user.email, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                    if (offline) item(key = "offline") { Text("Подключитесь к интернету, чтобы сохранить профиль.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     state.error?.let { message -> item(key = "error") { Text(message, color = MaterialTheme.colorScheme.error) } }
                     item(key = "about-title") { ProfileHeading("О вас", "Все поля необязательные") }
                     item(key = "about") {
@@ -161,6 +207,10 @@ fun ProfileRoute(
                             ProfileField("Город", state.draft.city, state.busy) { vm.edit(state.draft.copy(city = it)) }
                         }
                     }
+                    item(key = "documents-title") { ProfileHeading("Документы для работы", "Справки, договоры, положения и другие файлы") }
+                    item(key = "documents") {
+                        ProfileDocumentsLink(documentCount, canManage = true, onClick = { documentsOpen = true })
+                    }
                     item(key = "contacts-title") { ProfileHeading("Контакты", "Для связи и автозаполнения") }
                     item(key = "contacts") {
                         ProfileCard {
@@ -169,7 +219,7 @@ fun ProfileRoute(
                             profileValidationError(state.draft)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                         }
                     }
-                    item(key = "vehicle-title") { ProfileHeading("Основной автомобиль") }
+                    item(key = "vehicle-title") { ProfileHeading("Основной автомобиль", "Синхронизируется с экраном «Авто»") }
                     item(key = "vehicle") {
                         ProfileCard {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -182,6 +232,7 @@ fun ProfileRoute(
                             state.vehicleError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                             if (showVehicle && state.vehicleReady) VehicleEditorFields(state.vehicle, vm::editVehicle, showPrimaryToggle = false, enabled = !state.busy)
                             else if (showVehicle && state.vehicleError == null) CircularProgressIndicator(Modifier.size(24.dp))
+                            if (showVehicle && state.vehicleError != null) TextButton(onClick = { vm.retryVehicles() }, enabled = !state.busy && !offline) { Text("Повторить") }
                         }
                     }
 

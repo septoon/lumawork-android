@@ -43,7 +43,7 @@ fun ProfileAvatar(user: AppUser, images: VehicleImageRepository, size: Dp = 36.d
         Box(contentAlignment = Alignment.Center) {
             val loaded = bitmap
             if (loaded != null) Image(loaded.asImageBitmap(), contentDescription = null,
-                modifier = Modifier.size(size).clip(CircleShape), contentScale = ContentScale.Crop)
+                modifier = Modifier.size(size).clip(CircleShape), contentScale = ContentScale.Fit)
             else Icon(Icons.Default.Person, contentDescription = null,
                 modifier = Modifier.size(size * .62f), tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }

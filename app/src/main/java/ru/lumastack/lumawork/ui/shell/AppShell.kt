@@ -221,6 +221,9 @@ fun AppShell(
         auth = authRepository,
         auto = autoRepository,
         images = vehicleImageRepository,
+        simpleOne = simpleOneRepository,
+        liveArchive = simpleOneState.closedArchive,
+        isArchiveLoading = simpleOneState.isClosedLoading,
         startInEditor = profileEditing,
         onDismiss = { profileOpen = false },
     )

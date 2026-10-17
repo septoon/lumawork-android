@@ -21,13 +21,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.lumastack.lumawork.data.auto.VehicleImageRepository
 import ru.lumastack.lumawork.domain.model.AppUser
 
 @Composable
-internal fun ProfileOverview(user: AppUser, state: ProfileUiState, images: VehicleImageRepository, showVehicle: Boolean) {
+internal fun ProfileOverview(
+    user: AppUser, state: ProfileUiState, images: VehicleImageRepository, showVehicle: Boolean,
+    completedRecords: List<SimpleOneRequest>, statisticsLoading: Boolean, hasArchive: Boolean,
+    documentCount: Int, onOpenDocuments: () -> Unit,
+) {
     val profile = user.profile
     val fullName = listOf(profile?.lastName, profile?.firstName, profile?.middleName)
         .mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }.joinToString(" ")
@@ -58,6 +65,11 @@ internal fun ProfileOverview(user: AppUser, state: ProfileUiState, images: Vehic
                 }
             }
         }
+        item(key = "statistics") {
+            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+                ProfileCompletedWorkSection(completedRecords, statisticsLoading, hasArchive, Modifier.padding(12.dp))
+            }
+        }
         item(key = "contacts") {
             ProfileInfoSection("Контакты", contacts, emptyText = "Телефон и почта пока не добавлены")
         }
@@ -67,12 +79,19 @@ internal fun ProfileOverview(user: AppUser, state: ProfileUiState, images: Vehic
         if (showVehicle && vehicle.isNotEmpty()) item(key = "vehicle") {
             ProfileInfoSection("Автомобиль", vehicle, copyValues = true)
         }
+        item(key = "documents") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Документы для работы", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                ProfileDocumentsLink(documentCount, canManage = false, onClick = onOpenDocuments)
+            }
+        }
     }
 }
 
 @Composable
 private fun ProfileInfoSection(title: String, values: List<Pair<String, String>>, emptyText: String = "", copyValues: Boolean = false) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
@@ -86,6 +105,7 @@ private fun ProfileInfoSection(title: String, values: List<Pair<String, String>>
                         }
                     }
                     if (copyValues) Surface(onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText(label, value))
                     }, color = MaterialTheme.colorScheme.surface, content = row)
                     else SelectionContainer { row() }
@@ -100,3 +120,17 @@ private fun List<Pair<String, String?>>.populated(): List<Pair<String, String>> 
     value?.trim()?.takeIf(String::isNotEmpty)?.let { label to it }
 }
 private fun String?.withUnit(unit: String): String? = this?.trim()?.takeIf(String::isNotEmpty)?.let { "$it $unit" }
+
+@Composable
+internal fun ProfileDocumentsLink(count: Int, canManage: Boolean, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+        Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(if (canManage) "Управление документами" else "Открыть документы", fontWeight = FontWeight.SemiBold)
+                Text(if (canManage) { if (count == 0) "Документы не прикреплены" else "Прикреплено: $count" }
+                    else if (count == 0) "Нет документов" else "$count", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("›", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}

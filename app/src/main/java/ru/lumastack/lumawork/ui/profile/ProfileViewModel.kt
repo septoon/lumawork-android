@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -35,10 +37,35 @@ class ProfileViewModel(private val auth: AuthRepository, private val auto: AutoR
     private val mutable = MutableStateFlow(ProfileUiState())
     val state = mutable.asStateFlow()
     private var loadJob: Job? = null
+    private var mutationJob: Job? = null
+    private var changesJob: Job? = null
+    private var session: AppSession? = null
+    private var offline = false
+    private var generation = 0L
 
     fun open(session: AppSession, offline: Boolean) {
-        if (state.value.isOpen) return
-        mutable.value = ProfileUiState(isOpen = true, draft = session.user.profile ?: UserProfile())
+        if (state.value.isOpen && this.session?.token == session.token && this.session?.user?.id == session.user.id) {
+            val wasOffline = this.offline
+            this.session = session
+            this.offline = offline
+            if (wasOffline && !offline) loadVehicles(session, offline)
+            return
+        }
+        close()
+        this.session = session
+        this.offline = offline
+        val profile = session.user.profile ?: UserProfile()
+        mutable.value = ProfileUiState(isOpen = true, draft = profile, vehicle = profile.vehicleDraft())
+        changesJob = viewModelScope.launch {
+            auto.changes.collect { (owner, snapshot) -> if (owner == session.user.id) applyVehicle(snapshot) }
+        }
+        loadVehicles(session, offline)
+    }
+
+    fun retryVehicles() { session?.let { if (!offline && !state.value.busy) loadVehicles(it, false) } }
+
+    private fun loadVehicles(session: AppSession, offline: Boolean) {
+        loadJob?.cancel()
         loadJob = viewModelScope.launch {
             try {
                 val cached = auto.read(session.user.id)
@@ -59,35 +86,41 @@ class ProfileViewModel(private val auth: AuthRepository, private val auto: AutoR
             ?: snapshot.vehicles.firstOrNull()
         mutable.update {
             if (it.vehicleEdited) it else it.copy(
-                vehicle = vehicle?.let(::VehicleDraft)?.copy(isPrimary = true) ?: VehicleDraft(isPrimary = true),
+                vehicle = vehicle?.let(::VehicleDraft)?.copy(isPrimary = true) ?: it.draft.vehicleDraft(),
                 vehicleId = vehicle?.id, vehicleReady = true, vehicleError = null,
             )
         }
     }
 
     fun edit(profile: UserProfile) { if (!state.value.busy) mutable.update { it.copy(draft = profile, error = null) } }
-    fun editVehicle(draft: VehicleDraft) { if (!state.value.busy) mutable.update { it.copy(vehicle = draft.copy(isPrimary = true), vehicleEdited = true, error = null) } }
+    fun editVehicle(draft: VehicleDraft) { if (!state.value.busy && state.value.vehicleReady) mutable.update { it.copy(vehicle = draft.copy(isPrimary = true), vehicleEdited = true, error = null) } }
     fun showError(message: String) = mutable.update { it.copy(error = message) }
-    fun close() { loadJob?.cancel(); mutable.value = ProfileUiState() }
+    fun close() {
+        generation++
+        loadJob?.cancel(); mutationJob?.cancel(); changesJob?.cancel()
+        session = null
+        mutable.value = ProfileUiState()
+    }
 
     fun save() {
         val current = state.value
-        if (current.busy) return
+        if (current.busy || !current.isOpen) return
+        if (offline) { showError("Подключитесь к интернету, чтобы сохранить профиль."); return }
         profileValidationError(current.draft)?.let { showError(it); return }
         if (current.vehicleEdited) {
             val draft = current.vehicle
-            val error = VehicleInputValidation.plateError(draft.licensePlate)
+            val error = draft.licensePlate.takeIf(String::isNotBlank)?.let(VehicleInputValidation::plateError)
                 ?: VehicleInputValidation.vinError(draft.vin)
-                ?: if (draft.make.isBlank() || draft.model.isBlank()) "Укажите марку и модель автомобиля." else null
             if (error != null) { showError(error); return }
         }
-        mutate {
+        mutate { session ->
             val profile = current.draft.copy(
                 personalPhone = current.draft.personalPhone?.trim(),
                 workEmail = current.draft.workEmail?.trim(),
             ).let { if (current.vehicleEdited) it.withVehicle(current.vehicle) else it }
-            val session = auth.updateProfile(profile)
-            if (current.vehicleEdited) {
+            auth.updateProfile(profile)
+            currentCoroutineContext().ensureActive()
+            if (current.vehicleEdited && (current.vehicleId != null || current.vehicle.hasData())) {
                 if (current.vehicleId == null) auto.createVehicle(session, current.vehicle)
                 else auto.updateVehicle(session, current.vehicleId, current.vehicle)
             }
@@ -95,18 +128,30 @@ class ProfileViewModel(private val auth: AuthRepository, private val auto: AutoR
         }
     }
 
-    fun uploadAvatar(readImage: suspend () -> ByteArray) = mutate { auth.uploadAvatar(readImage()) }
+    fun uploadAvatar(readImage: suspend () -> ByteArray) = mutate {
+        val bytes = readImage()
+        currentCoroutineContext().ensureActive()
+        checkSession(it)
+        auth.uploadAvatar(bytes)
+    }
     fun deleteAvatar() = mutate { auth.deleteAvatar() }
 
-    private fun mutate(action: suspend () -> Unit) {
-        if (state.value.busy) return
+    private fun mutate(action: suspend (AppSession) -> Unit) {
+        if (state.value.busy || !state.value.isOpen) return
+        if (offline) { showError("Подключитесь к интернету, чтобы сохранить профиль."); return }
+        val session = session ?: return
+        val activeGeneration = generation
         mutable.update { it.copy(busy = true, error = null) }
-        viewModelScope.launch {
-            try { action() }
+        mutationJob = viewModelScope.launch {
+            try { checkSession(session); action(session) }
             catch (error: CancellationException) { throw error }
-            catch (error: Exception) { showError(if (error is AuthFailure) error.message.orEmpty() else error.message ?: "Не удалось сохранить профиль.") }
-            finally { mutable.update { it.copy(busy = false) } }
+            catch (error: Exception) { if (generation == activeGeneration) showError(if (error is AuthFailure) error.message.orEmpty() else error.message ?: "Не удалось сохранить профиль.") }
+            finally { if (generation == activeGeneration) mutable.update { it.copy(busy = false) } }
         }
+    }
+
+    private fun checkSession(expected: AppSession) {
+        check(auth.session?.token == expected.token && auth.session?.user?.id == expected.user.id) { "Сессия изменилась. Войдите заново." }
     }
 
     companion object {
@@ -127,3 +172,15 @@ private fun UserProfile.withVehicle(vehicle: VehicleDraft): UserProfile = copy(
     vehiclePts = vehicle.pts.trim(), vehicleColor = vehicle.colorName.trim(), engineVolumeCm3 = vehicle.engineVolumeCm3.trim(),
     enginePowerHp = vehicle.enginePowerHp.trim(), initialMileageKm = vehicle.currentMileageKm.trim(),
 )
+
+private fun UserProfile.vehicleDraft() = VehicleDraft(
+    licensePlate = vehiclePlate.orEmpty().trim(), vin = vehicleVin.orEmpty().trim(),
+    sts = vehicleSts.orEmpty().trim(), pts = vehiclePts.orEmpty().trim(),
+    model = vehicleModel.orEmpty().trim(), customName = vehicleModel.orEmpty().trim(),
+    colorName = vehicleColor.orEmpty().trim(), currentMileageKm = initialMileageKm.orEmpty().filter(Char::isDigit),
+    engineVolumeCm3 = engineVolumeCm3.orEmpty().filter(Char::isDigit),
+    enginePowerHp = enginePowerHp.orEmpty().filter(Char::isDigit), isPrimary = true,
+)
+
+private fun VehicleDraft.hasData() = listOf(licensePlate, vin, sts, pts, make, model, generation, year, bodyType,
+    colorName, currentMileageKm, engineVolumeCm3, enginePowerHp, customName).any(String::isNotBlank)
