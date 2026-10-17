@@ -4,4 +4,5 @@
     <cache-path name="feedback_images" path="." />
     <files-path name="salary_slips" path="salary-slips/" />
     <cache-path name="app_updates" path="updates/" />
+    <external-files-path name="ftp_saved_downloads" path="Download/ftp-downloads/" />
 </paths>

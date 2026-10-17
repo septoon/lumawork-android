@@ -1,6 +1,8 @@
 package ru.lumastack.lumawork
 
 import android.app.Application
+import kotlinx.coroutines.*
+import ru.lumastack.lumawork.data.ftp.FtpTransferJobService
 import kotlinx.serialization.json.Json
 import ru.lumastack.lumawork.data.auth.AuthRepository
 import ru.lumastack.lumawork.data.auth.OkHttpAuthApi
@@ -38,6 +40,9 @@ import ru.lumastack.lumawork.data.wiki.FileWikiCache
 import ru.lumastack.lumawork.data.wiki.OkHttpWikiApi
 import ru.lumastack.lumawork.data.wiki.WikiRepository
 import ru.lumastack.lumawork.data.ftp.FileFtpCache
+import ru.lumastack.lumawork.data.ftp.FtpTransfers
+import ru.lumastack.lumawork.data.ftp.FileFtpTransferStore
+import ru.lumastack.lumawork.data.ftp.AndroidFtpTransferGateway
 import ru.lumastack.lumawork.data.ftp.FtpRepository
 import ru.lumastack.lumawork.data.ftp.OkHttpFtpApi
 import ru.lumastack.lumawork.data.salary.FileSalaryCache
@@ -57,6 +62,10 @@ class LumaWorkApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try { if (container.ftpTransfers.hasPendingFolderCopies()) FtpTransferJobService.schedule(this@LumaWorkApplication) }
+            catch (_: Exception) { /* The FTP screen reports cache errors when opened. */ }
+        }
     }
 }
 
@@ -94,9 +103,12 @@ class AppContainer(application: Application) {
         cache = FileWikiCache(application, json),
     )
 
+    internal val ftpTransferGateway = AndroidFtpTransferGateway(application, BuildConfig.API_ORIGIN)
+    val ftpTransfers = FtpTransfers(FileFtpTransferStore(application, json), ftpTransferGateway)
     val ftpRepository = FtpRepository(
-        api = OkHttpFtpApi(BuildConfig.API_ORIGIN, json, application),
+        api = OkHttpFtpApi(BuildConfig.API_ORIGIN, json),
         cache = FileFtpCache(application, json),
+        transfers = ftpTransfers,
     )
 
     val salaryRepository = SalaryRepository(

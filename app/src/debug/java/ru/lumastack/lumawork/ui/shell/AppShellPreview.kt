@@ -421,7 +421,6 @@ private val previewWikiRepository = WikiRepository(
 private val previewFtpRepository = FtpRepository(
     api = object : FtpApi {
         override suspend fun files(token: String, path: String) = FtpDirectoryResponse(path).also { previewRefresh("ftp") }
-        override suspend fun download(token: String, item: FtpItem): java.io.File = error("unused")
     },
     cache = object : FtpCache {
         override suspend fun read(ownerUserId: String): FtpSnapshot? = null

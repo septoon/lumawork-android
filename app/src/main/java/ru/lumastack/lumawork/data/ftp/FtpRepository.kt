@@ -10,6 +10,8 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -43,50 +45,33 @@ data class FtpItem(
 data class FtpDirectoryResponse(val path: String, val items: List<FtpItem> = emptyList())
 
 @Serializable
-data class FtpSnapshot(val directories: Map<String, List<FtpItem>> = emptyMap(), val updatedAtEpochMillis: Long? = null)
+data class FtpSnapshot(val directories: Map<String, List<FtpItem>> = emptyMap(), val updatedAtEpochMillis: Long? = null, val favoritePaths: List<String> = emptyList(), val revision: Long = 0)
 
 sealed class FtpFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Network(cause: IOException) : FtpFailure("Не удалось подключиться к FTP.", cause)
     data object Unauthorized : FtpFailure("Сессия приложения «Инженер» истекла.")
-    class Http(status: Int) : FtpFailure("Не удалось выполнить действие с файлом. Попробуйте ещё раз.")
+    class Http(val status: Int) : FtpFailure(when (status) { 401, 403 -> "Сессия приложения «Инженер» истекла. Войдите снова."; 404 -> "Файл или папка больше не находятся по этому пути. Обновите каталог."; else -> "Не удалось выполнить действие с файлом. Попробуйте ещё раз." })
     data object InvalidResponse : FtpFailure("FTP вернул некорректные данные.")
 }
 
 interface FtpApi {
     suspend fun files(token: String, path: String): FtpDirectoryResponse
-    suspend fun download(token: String, item: FtpItem): File
 }
 
 class OkHttpFtpApi(
     origin: String,
     private val json: Json,
-    context: Context,
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS).readTimeout(15, TimeUnit.MINUTES)
+        .connectTimeout(15, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true).build(),
 ) : FtpApi {
     private val base = origin.trimEnd('/').toHttpUrl()
-    private val downloads = File(context.cacheDir, "ftp-downloads")
 
-    override suspend fun files(token: String, path: String): FtpDirectoryResponse {
+    override suspend fun files(token: String, path: String): FtpDirectoryResponse = withContext(Dispatchers.IO) {
         val url = base.newBuilder().addPathSegments("api/v2/ftp/files").addQueryParameter("path", path).build()
-        return execute(request(url.toString(), token)).use { response ->
+        execute(request(url.toString(), token)).use { response ->
             runCatching { json.decodeFromString<FtpDirectoryResponse>(response.body.string()) }
                 .getOrElse { throw FtpFailure.InvalidResponse }
-        }
-    }
-
-    override suspend fun download(token: String, item: FtpItem): File = withContext(Dispatchers.IO) {
-        val endpoint = if (item.isDirectory) "api/v2/ftp/download-folder" else "api/v2/ftp/download"
-        val url = base.newBuilder().addPathSegments(endpoint).addQueryParameter("path", item.path).build()
-        val response = execute(request(url.toString(), token))
-        response.use {
-            downloads.mkdirs()
-            val suffix = if (item.isDirectory && !item.name.endsWith(".zip", true)) ".zip" else ""
-            val name = (item.name.ifBlank { "ftp-download" } + suffix).replace(Regex("[/\\\\:*?\"<>|]"), "_")
-            val destination = File(downloads, name)
-            destination.outputStream().use { output -> it.body.byteStream().use { input -> input.copyTo(output) } }
-            destination
         }
     }
 
@@ -116,7 +101,7 @@ class FileFtpCache(context: Context, private val json: Json) : FtpCache {
     override suspend fun save(ownerUserId: String, snapshot: FtpSnapshot) = withContext(Dispatchers.IO) {
         val file = file(ownerUserId); file.parentFile?.mkdirs()
         val tmp = File(file.parentFile, "${file.name}.tmp"); tmp.writeText(json.encodeToString(snapshot))
-        if (!tmp.renameTo(file)) { file.writeText(tmp.readText()); tmp.delete() }
+        if (!tmp.renameTo(file)) { tmp.delete(); throw IOException("Не удалось сохранить каталог FTP.") }
     }
     private fun file(id: String) = File(directory, "${id.sha256()}.json")
     private fun String.sha256() = MessageDigest.getInstance("SHA-256").digest(toByteArray()).joinToString("") { "%02x".format(it) }
@@ -125,18 +110,28 @@ class FileFtpCache(context: Context, private val json: Json) : FtpCache {
 class FtpRepository(
     private val api: FtpApi,
     private val cache: FtpCache,
+    val transfers: FtpTransfers? = null,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun read(ownerUserId: String): FtpSnapshot? = cache.read(ownerUserId)
+    private val mutex = Mutex()
     suspend fun load(ownerUserId: String, token: String, path: String): FtpSnapshot {
-        val previous = read(ownerUserId) ?: FtpSnapshot()
-        val response = api.files(token, path)
-        return previous.copy(
-            directories = previous.directories + (path to response.items.sortedWith(compareByDescending<FtpItem> { it.isDirectory }.thenBy { it.name.lowercase() })),
-            updatedAtEpochMillis = nowEpochMillis(),
-        ).also { cache.save(ownerUserId, it) }
+        val normalized = normalizeFtpPath(path)
+        val response = api.files(token, normalized)
+        return mutex.withLock {
+            val previous = read(ownerUserId) ?: FtpSnapshot()
+            previous.copy(directories = previous.directories + (normalized to response.items), updatedAtEpochMillis = nowEpochMillis(), revision = previous.revision + 1)
+                .also { cache.save(ownerUserId, it) }
+        }
     }
-    suspend fun download(token: String, item: FtpItem): File = api.download(token, item)
+    suspend fun toggleFavorite(owner: String, path: String): FtpSnapshot = mutex.withLock {
+        val normalized = normalizeFtpPath(path)
+        val previous = read(owner) ?: FtpSnapshot()
+        if (normalized == "/") return@withLock previous
+        val paths = if (normalized in previous.favoritePaths) previous.favoritePaths - normalized else previous.favoritePaths + normalized
+        previous.copy(favoritePaths = paths.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER), revision = previous.revision + 1).also { cache.save(owner, it) }
+    }
+
 }
 
 private suspend fun Call.awaitFtp(): Response = suspendCancellableCoroutine { continuation ->
