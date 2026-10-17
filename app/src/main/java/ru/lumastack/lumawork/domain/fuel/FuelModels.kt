@@ -2,7 +2,6 @@ package ru.lumastack.lumawork.domain.fuel
 
 import java.time.LocalDate
 import java.time.YearMonth
-import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 import kotlinx.serialization.SerialName
@@ -34,12 +33,15 @@ data class FuelRecord(
     val liters: Double? = null,
     val fuelCost: Double? = null,
     val fuelType: String? = null,
+    val fuelConsumptionRate: Double? = null,
+    val source: String? = null,
+    val sourceImportId: String? = null,
 ) {
     val stableId: String
-        get() = id ?: "${recordType.name}|${adjustmentKind?.name}|$monthKey|$date|$mileage|$liters|$fuelCost|$amount"
+        get() = id ?: "${recordType.name}|${adjustmentKind?.name}|$monthKey|$date|$mileage|$liters|$fuelCost|$fuelType|$amount"
 
     val resolvedMonthKey: String
-        get() = monthKey?.takeIf { MONTH_KEY_REGEX.matches(it) } ?: date.trim().take(7)
+        get() = monthKey?.takeIf { recordType == FuelRecordType.Adjustment && it.length == 7 } ?: date.trim().take(7)
 }
 
 @Serializable
@@ -81,6 +83,8 @@ data class FuelDraft(
 data class FuelSnapshot(
     val records: List<FuelRecord> = emptyList(),
     val updatedAtEpochMillis: Long? = null,
+    val fuelTypes: List<String> = emptyList(),
+    val pendingMileageMonths: Set<String> = emptySet(),
 )
 
 data class FuelSummaryMonth(
@@ -101,6 +105,14 @@ data class FuelSummaryMonth(
     val projectedPayout: Double,
     val compensationStatusLabel: String,
     val adjustments: List<FuelRecord>,
+    val debtDeductionAmount: Double = 0.0,
+    val debtDeductionLiters: Double = 0.0,
+    val effectiveAppliedCompensation: Double = paidCompensation + effectiveDebtDeductionAmount,
+    val remainingCompensation: Double = projectedPayout,
+    val incomingCarryoverDebtLiters: Double = incomingCarryoverDebtRub / FuelSummaryCalculator.APPROXIMATE_FUEL_PRICE,
+    val monthCarryoverDebtLiters: Double = monthCarryoverDebtRub / FuelSummaryCalculator.APPROXIMATE_FUEL_PRICE,
+    val projectedDebtDeductionFromCarryover: Double = compensation - paidCompensation - projectedPayout,
+    val isCompensationClosed: Boolean = effectiveAppliedCompensation >= compensation && compensation > 0,
 ) {
     val diffLabel: String get() = fuelDiff.diffLabel()
 }
@@ -118,7 +130,13 @@ data class FuelSummaryTotals(
     val netCompensation: Double = 0.0,
     val fuelDiff: Double = 0.0,
     val adjustedFuelDiff: Double = 0.0,
+    val totalDebtDeductionAmount: Double = 0.0,
+    val totalDebtDeductionLiters: Double = 0.0,
+    val hasEstimatedDebtDeductionAmount: Boolean = false,
+    val hasEstimatedDebtDeductionLiters: Boolean = false,
+    val carryoverDebtLiters: Double = carryoverDebtRub / FuelSummaryCalculator.APPROXIMATE_FUEL_PRICE,
 ) {
+    val diffLabel: String get() = fuelDiff.diffLabel()
     val adjustedDiffLabel: String get() = adjustedFuelDiff.diffLabel()
 }
 
@@ -142,12 +160,13 @@ object FuelSummaryCalculator {
         val monthly = mutableMapOf<String, MutableFuelMonth>()
 
         fuelRecords.sortedBy(FuelRecord::date).forEach { record ->
-            val key = record.date.trim().take(7).takeIf(MONTH_KEY_REGEX::matches) ?: "unknown"
+            val parts = record.date.trim().split("-").filter(String::isNotEmpty)
+            val key = if (parts.size >= 2) "${parts[0]}-${parts[1]}" else "unknown"
             val month = monthly.getOrPut(key) { MutableFuelMonth(key.monthLabel()) }
             val mileage = record.mileage ?: 0.0
             month.mileage += mileage
             month.liters += record.liters ?: 0.0
-            month.norm += if (mileage > 0) mileage * fuelRate(record.date) / 100 else 0.0
+            month.norm += if (mileage > 0) mileage * (record.fuelConsumptionRate ?: fuelRate(record.date)) / 100 else 0.0
             month.cost += record.fuelCost ?: 0.0
         }
         adjustments.forEach { record -> monthly.getOrPut(record.resolvedMonthKey) { MutableFuelMonth(record.resolvedMonthKey.monthLabel()) } }
@@ -196,6 +215,8 @@ object FuelSummaryCalculator {
                 projectedPayout = payout,
                 compensationStatusLabel = status,
                 adjustments = monthAdjustments,
+                debtDeductionAmount = debt.sumOf { it.amount ?: 0.0 },
+                debtDeductionLiters = debt.sumOf { it.liters ?: 0.0 },
             )
         }
 
@@ -230,6 +251,10 @@ object FuelSummaryCalculator {
                 netCompensation = totalCompensation - totalPaid - totalDebtAmount,
                 fuelDiff = rawDiff,
                 adjustedFuelDiff = adjustedDiff,
+                totalDebtDeductionAmount = adjustments.filter { it.adjustmentKind == FuelAdjustmentKind.DebtDeduction }.sumOf { it.amount ?: 0.0 },
+                totalDebtDeductionLiters = adjustments.filter { it.adjustmentKind == FuelAdjustmentKind.DebtDeduction }.sumOf { it.liters ?: 0.0 },
+                hasEstimatedDebtDeductionAmount = adjustments.any { it.adjustmentKind == FuelAdjustmentKind.DebtDeduction && it.amount == null && it.liters != null },
+                hasEstimatedDebtDeductionLiters = adjustments.any { it.adjustmentKind == FuelAdjustmentKind.DebtDeduction && it.liters == null && it.amount != null },
             ),
             explanation = explanation,
             hasData = result.isNotEmpty() || adjustments.isNotEmpty(),
@@ -260,7 +285,10 @@ fun validateRefuelingDraft(draft: FuelDraft): String? {
 
 fun validateFuelDraft(draft: FuelDraft): String? {
     if (draft.recordType == FuelRecordType.Fuel) {
-        if (runCatching { LocalDate.parse(draft.date) }.isFailure) return "Укажите дату в формате ГГГГ-ММ-ДД."
+        if (runCatching { LocalDate.parse(draft.date.trim()) }.isFailure) return "Укажите дату в формате ГГГГ-ММ-ДД."
+        if (listOf(draft.mileage, draft.liters, draft.fuelCost).any { it.isNotBlank() && it.number()?.isFinite() != true }) {
+            return "Укажите корректные числовые значения."
+        }
         if (draft.mileageValue == null && draft.litersValue == null && draft.fuelCostValue == null) {
             return "Укажите пробег, бензин или стоимость."
         }
@@ -272,7 +300,10 @@ fun validateFuelDraft(draft: FuelDraft): String? {
         if (draft.date >= "2026-04-01" && hasRefueling && draft.fuelCostValue == null) return "Укажите сумму заправки для Excel-отчёта."
         return null
     }
-    if (!MONTH_KEY_REGEX.matches(draft.monthKey)) return "Укажите месяц в формате ГГГГ-ММ."
+    if (!MONTH_KEY_REGEX.matches(draft.monthKey) || runCatching { YearMonth.parse(draft.monthKey) }.isFailure) return "Укажите месяц в формате ГГГГ-ММ."
+    if (listOf(draft.amount, draft.liters, draft.carryoverDebtRub).any { it.isNotBlank() && it.number()?.isFinite() != true }) {
+        return "Укажите корректные числовые значения."
+    }
     if (listOf(draft.amountValue, draft.litersValue, draft.carryoverDebtValue).filterNotNull().any { it < 0 }) {
         return "Числовые значения должны быть неотрицательными."
     }
@@ -298,7 +329,7 @@ private fun String.monthLabel(): String = runCatching {
 }.getOrDefault("Без даты")
 private fun Double.diffLabel(): String = "${if (this > 0) "+" else if (this < 0) "-" else ""}${formatNumber(kotlin.math.abs(this))} л"
 private fun String.number(): Double? = trim().replace(',', '.').takeIf(String::isNotEmpty)?.toDoubleOrNull()
-private fun Double?.numberString(): String = this?.let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }.orEmpty()
+private fun Double?.numberString(): String = this?.let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() }.orEmpty()
 private fun formatNumber(value: Double): String = NUMBER_FORMATTER.format(value)
 
 private val MONTH_KEY_REGEX = Regex("^\\d{4}-\\d{2}$")

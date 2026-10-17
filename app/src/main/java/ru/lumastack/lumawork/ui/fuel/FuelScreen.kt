@@ -42,6 +42,24 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import kotlinx.coroutines.delay
+import ru.lumastack.lumawork.BuildConfig
+import ru.lumastack.lumawork.domain.fuel.FuelArchivePolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -77,11 +95,18 @@ fun FuelRoute(
     modifier: Modifier = Modifier,
 ) {
     val fuelViewModel: FuelViewModel = viewModel(
-        key = "fuel-${session.user.id}-$startOffline",
+        key = "fuel-${session.user.id}-${session.token.hashCode()}-$startOffline",
         factory = FuelViewModel.factory(repository, routeRepository, session, startOffline),
     )
     val state by fuelViewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(fuelViewModel) { fuelViewModel.reloadCached() }
+    LaunchedEffect(state.notice, state.errorMessage) {
+        if (state.notice != null || state.errorMessage != null) { delay(5000); fuelViewModel.dismissMessages() }
+    }
+    var archiveOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    var analyticsOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    var importOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    val archiveAvailable = FuelArchivePolicy.isAvailable(session.user.email, BuildConfig.FUEL_ARCHIVE_OWNER_EMAIL)
     FuelScreen(
         state = state,
         widthClass = widthClass,
@@ -97,8 +122,30 @@ fun FuelRoute(
         onRequestDelete = fuelViewModel::requestDelete,
         onCancelDelete = fuelViewModel::cancelDelete,
         onConfirmDelete = fuelViewModel::confirmDelete,
+        archiveAvailable = archiveAvailable,
+        onOpenArchive = { archiveOpen = true },
+        onOpenAnalytics = { analyticsOpen = true },
+        onOpenImport = { importOpen = true },
         modifier = modifier,
     )
+    if (analyticsOpen) Dialog(onDismissRequest = { analyticsOpen = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        FuelAnalyticsScreen(state.snapshot.records, onDismiss = { analyticsOpen = false })
+    }
+    if (archiveOpen && archiveAvailable) Dialog(onDismissRequest = { if (!state.isSaving) archiveOpen = false }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !state.isSaving)) {
+        FuelArchiveScreen(state, onDismiss = { archiveOpen = false }, onEdit = fuelViewModel::edit, onDelete = fuelViewModel::requestDelete)
+    }
+    if (importOpen) Dialog(onDismissRequest = {}, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = false, dismissOnClickOutside = false)) {
+        FuelImportScreen(session, startOffline, onDismiss = { importOpen = false }, onCommitted = { result -> importOpen = false; fuelViewModel.importsCommitted(result.notice) })
+    }
+    state.editorDraft?.let { draft ->
+        FuelEditorDialog(draft, state.editingRecord != null, state.isSaving, state.editorErrorMessage,
+            state.snapshot.fuelTypes, startOffline, fuelViewModel::updateDraft, fuelViewModel::closeEditor, fuelViewModel::save)
+    }
+    state.pendingDelete?.let {
+        AlertDialog(onDismissRequest = fuelViewModel::cancelDelete, title = { Text("Удалить запись?") },
+            confirmButton = { TextButton(onClick = fuelViewModel::confirmDelete, enabled = !state.isSaving && !startOffline) { Text("Удалить") } },
+            dismissButton = { TextButton(onClick = fuelViewModel::cancelDelete, enabled = !state.isSaving) { Text("Отмена") } })
+    }
 }
 
 @Composable
@@ -117,6 +164,10 @@ private fun FuelScreen(
     onRequestDelete: (FuelRecord) -> Unit,
     onCancelDelete: () -> Unit,
     onConfirmDelete: () -> Unit,
+    archiveAvailable: Boolean,
+    onOpenArchive: () -> Unit,
+    onOpenAnalytics: () -> Unit,
+    onOpenImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
@@ -127,16 +178,17 @@ private fun FuelScreen(
         )
     }
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
-        enabled = !state.isSaving, contentAlignment = Alignment.TopCenter) {
+        enabled = !state.isSaving && !state.isOffline, contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
             LazyColumn(
                 Modifier.widthIn(max = 680.dp).fillMaxSize(),
                 contentPadding = PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                fuelHeader(state, onAddFuel, onAddAdjustment, onSelectYear)
+                fuelHeader(state, onAddFuel, onAddAdjustment, onSelectYear, onOpenImport, onOpenAnalytics)
                 fuelMessages(state)
                 fuelMonths(state, onToggleMonth, onEdit, onRequestDelete)
+                if (archiveAvailable) item(key = "archive") { ArchivePanel(state.archivedCount, onOpenArchive) }
             }
         } else {
             Row(
@@ -147,9 +199,9 @@ private fun FuelScreen(
                     Modifier.weight(0.42f).fillMaxHeight().widthIn(max = 470.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    fuelHeader(state, onAddFuel, onAddAdjustment, onSelectYear)
+                    fuelHeader(state, onAddFuel, onAddAdjustment, onSelectYear, onOpenImport, onOpenAnalytics)
                     fuelMessages(state)
-                    item(key = "archive") { ArchivePanel(state.archivedCount) }
+                    if (archiveAvailable) item(key = "archive") { ArchivePanel(state.archivedCount, onOpenArchive) }
                 }
                 Surface(
                     Modifier.weight(0.58f).fillMaxHeight(),
@@ -167,33 +219,13 @@ private fun FuelScreen(
                                 Text("Расчёт и записи", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        fuelMonths(state, onToggleMonth, onEdit, onRequestDelete, includeArchive = false)
+                        fuelMonths(state, onToggleMonth, onEdit, onRequestDelete)
                     }
                 }
             }
         }
     }
 
-    state.editorDraft?.let { draft ->
-        FuelEditorDialog(
-            draft = draft,
-            isEditing = state.editingRecordId != null,
-            isSaving = state.isSaving,
-            errorMessage = state.editorErrorMessage,
-            onChange = onUpdateDraft,
-            onDismiss = onCloseEditor,
-            onSave = onSave,
-        )
-    }
-    if (state.pendingDelete != null) {
-        AlertDialog(
-            onDismissRequest = onCancelDelete,
-            title = { Text("Удалить запись?") },
-            text = { Text("Запись будет удалена. Отменить это действие нельзя.") },
-            confirmButton = { TextButton(onClick = onConfirmDelete) { Text("Удалить") } },
-            dismissButton = { TextButton(onClick = onCancelDelete) { Text("Отмена") } },
-        )
-    }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.fuelHeader(
@@ -201,16 +233,32 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelHeader(
     onAddFuel: () -> Unit,
     onAddAdjustment: (FuelAdjustmentKind) -> Unit,
     onSelectYear: (String) -> Unit,
+    onOpenImport: () -> Unit,
+    onOpenAnalytics: () -> Unit,
 ) {
     item(key = "balance") {
         FuelBalancePanel(state)
     }
     item(key = "actions") {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onAddFuel, modifier = Modifier.fillMaxWidth()) { Text("Добавить заправку") }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onAddAdjustment(FuelAdjustmentKind.CompensationPayment) }, modifier = Modifier.weight(1f)) { Text("Выплата") }
-                OutlinedButton(onClick = { onAddAdjustment(FuelAdjustmentKind.DebtDeduction) }, modifier = Modifier.weight(1f)) { Text("Вычет долга") }
+        var menu by remember { mutableStateOf(false) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = onAddFuel, enabled = !state.isSaving && !state.isOffline, modifier = Modifier.weight(1f)) { Text("Добавить заправку") }
+            Box {
+                IconButton(onClick = { menu = true }, enabled = !state.isSaving && !state.isOffline) { Icon(Icons.Default.MoreVert, "Другие действия с топливом") }
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text("Добавить выплату") }, onClick = { menu = false; onAddAdjustment(FuelAdjustmentKind.CompensationPayment) })
+                    DropdownMenuItem(text = { Text("Добавить вычет долга") }, onClick = { menu = false; onAddAdjustment(FuelAdjustmentKind.DebtDeduction) })
+                    HorizontalDivider()
+                    DropdownMenuItem(text = { Text("Импортировать отчёты") }, onClick = { menu = false; onOpenImport() })
+                }
+            }
+        }
+    }
+    if (state.snapshot.records.isNotEmpty()) item(key = "analytics") {
+        Surface(onClick = onOpenAnalytics, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Аналитика  ›", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Цена литра, расходы и динамика по месяцам", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -246,7 +294,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelMonths(
     onToggleMonth: (String) -> Unit,
     onEdit: (FuelRecord) -> Unit,
     onDelete: (FuelRecord) -> Unit,
-    includeArchive: Boolean = true,
 ) {
     if (state.visibleMonths.isEmpty() && !state.isLoading) {
         item(key = "empty") { FuelMessage("Данных пока нет", "Добавьте пробег, заправку или корректировку.") }
@@ -254,14 +301,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelMonths(
     items(state.visibleMonths, key = FuelSummaryMonth::key) { month ->
         FuelMonthPanel(
             month = month,
-            records = state.currentRecords.filter { it.resolvedMonthKey == month.key },
+            records = state.currentRecords.filter { it.recordType == FuelRecordType.Fuel && it.resolvedMonthKey == month.key },
+            enabled = !state.isSaving && !state.isOffline,
             expanded = state.expandedMonthKey == month.key,
             onToggle = { onToggleMonth(month.key) },
             onEdit = onEdit,
             onDelete = onDelete,
         )
     }
-    if (includeArchive) item(key = "archive") { ArchivePanel(state.archivedCount) }
 }
 
 @Composable
@@ -282,20 +329,17 @@ private fun FuelBalancePanel(state: FuelUiState) {
                 Text("Пока нет данных.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Text(
-                    totals.adjustedDiffLabel,
+                    when {
+                        totals.adjustedFuelDiff < 0 -> "Перерасход ${number(-totals.adjustedFuelDiff)} л"
+                        totals.adjustedFuelDiff > 0 -> "Остаток ${number(totals.adjustedFuelDiff)} л"
+                        else -> "Баланс соблюдён"
+                    },
                     color = if (totals.adjustedFuelDiff < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.headlineLarge,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(state.summary.explanation, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FuelMetric("Пробег", "${number(totals.totalMileage)} км", Modifier.weight(1f))
-                    FuelMetric("Заправлено", "${number(totals.totalLiters)} л", Modifier.weight(1f))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FuelMetric("Компенсация", rubles(totals.totalCompensation), Modifier.weight(1f))
-                    FuelMetric("К выплате", rubles(totals.netCompensation), Modifier.weight(1f))
-                }
+
             }
         }
     }
@@ -305,18 +349,21 @@ private fun FuelBalancePanel(state: FuelUiState) {
 private fun FuelMonthPanel(
     month: FuelSummaryMonth,
     records: List<FuelRecord>,
+    enabled: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
     onEdit: (FuelRecord) -> Unit,
     onDelete: (FuelRecord) -> Unit,
 ) {
+    var inRubles by rememberSaveable(month.key) { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
     Surface(
-        Modifier.fillMaxWidth().clickable(onClick = onToggle),
+        Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(19.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
     ) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth().clickable { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onToggle() }, horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
                     Text(month.label, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                     Text("${number(month.totalMileage)} км · ${number(month.totalLiters)} л · ${rubles(month.fuelCost)}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
@@ -325,17 +372,34 @@ private fun FuelMonthPanel(
                     Text(month.diffLabel, color = if (month.fuelDiff < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Text(month.compensationStatusLabel, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 }
+                Icon(if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (expanded) "Свернуть месяц" else "Раскрыть месяц", modifier = Modifier.padding(start = 8.dp))
             }
             if (expanded) {
                 HorizontalDivider()
+                FuelLine("Пройдено км", "${number(month.totalMileage)} км")
                 FuelLine("Норма топлива", "${number(month.fuelNorm)} л")
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Заправлено", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); inRubles = !inRubles }) {
+                        Text(if (inRubles) rubles(month.fuelCost) else "${number(month.totalLiters)} л")
+                    }
+                }
+                FuelLine("Разница", month.diffLabel)
                 FuelLine("Компенсация", rubles(month.compensation))
-                FuelLine("Выплачено", rubles(month.paidCompensation))
-                FuelLine("Вычет долга", "${rubles(month.effectiveDebtDeductionAmount)} · ${number(month.effectiveDebtDeductionLiters)} л")
-                FuelLine("Ожидаемая выплата", rubles(month.projectedPayout))
+                if (month.paidCompensation > 0) FuelLine("Выплачено", rubles(month.paidCompensation))
+                if (month.effectiveDebtDeductionAmount > 0) FuelLine("Списано", rubles(month.effectiveDebtDeductionAmount))
+                if (month.incomingCarryoverDebtRub > 0) FuelLine("Долг из прошлого месяца", rubles(month.incomingCarryoverDebtRub))
+                if (month.monthCarryoverDebtRub > 0) FuelLine("Перенос на след. месяц", rubles(month.monthCarryoverDebtRub))
+                if (records.isNotEmpty()) Text("Записи топлива", style = MaterialTheme.typography.labelLarge)
                 records.sortedByDescending(FuelRecord::date).forEach { record ->
                     HorizontalDivider()
-                    FuelRecordRow(record, onEdit = { onEdit(record) }, onDelete = { onDelete(record) })
+                    FuelRecordRow(record, enabled = enabled, onEdit = { onEdit(record) }, onDelete = { onDelete(record) })
+                }
+                if (month.adjustments.isNotEmpty()) Text("Корректировки месяца", style = MaterialTheme.typography.labelLarge)
+                month.adjustments.forEach { record ->
+                    HorizontalDivider()
+                    FuelRecordRow(record, enabled = enabled, onEdit = { onEdit(record) }, onDelete = { onDelete(record) })
                 }
             }
         }
@@ -343,101 +407,32 @@ private fun FuelMonthPanel(
 }
 
 @Composable
-private fun FuelRecordRow(record: FuelRecord, onEdit: () -> Unit, onDelete: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
+internal fun FuelRecordRow(record: FuelRecord, enabled: Boolean = true, onEdit: () -> Unit, onDelete: () -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column {
             Text(if (record.recordType == FuelRecordType.Fuel) record.date else adjustmentTitle(record), fontWeight = FontWeight.SemiBold)
+            record.fuelType?.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+            if (record.source.equals("XLSX_IMPORT", ignoreCase = true)) Text("XLSX", style = MaterialTheme.typography.labelSmall)
             Text(recordDescription(record), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        TextButton(onClick = onEdit) { Text("Изменить") }
-        if (record.id != null) TextButton(onClick = onDelete) { Text("Удалить") }
-    }
-}
-
-@Composable
-private fun FuelEditorDialog(
-    draft: FuelDraft,
-    isEditing: Boolean,
-    isSaving: Boolean,
-    errorMessage: String?,
-    onChange: (FuelDraft) -> Unit,
-    onDismiss: () -> Unit,
-    onSave: () -> Unit,
-) {
-    AppFormDialog(
-        title = if (isEditing) "Редактирование" else if (draft.recordType == FuelRecordType.Fuel) "Новая запись" else "Новая корректировка",
-        onDismiss = onDismiss,
-        confirmLabel = "Сохранить",
-        onConfirm = onSave,
-        isBusy = isSaving,
-        maxWidth = 680.dp,
-        errorMessage = errorMessage,
-        errorTitle = "Проверьте данные",
-    ) {
-        item(key = "fields") {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (draft.recordType == FuelRecordType.Fuel) {
-                    FuelField("Дата, ГГГГ-ММ-ДД", draft.date, { onChange(draft.copy(date = it)) })
-                    FuelField("Пробег, км", draft.mileage, { onChange(draft.copy(mileage = it)) }, KeyboardType.Decimal)
-                    FuelField("Литры", draft.liters, { onChange(draft.copy(liters = it)) }, KeyboardType.Decimal)
-                    FuelField("Сумма заправки", draft.fuelCost, { onChange(draft.copy(fuelCost = it)) }, KeyboardType.Decimal)
-                    FuelField("Комментарий", draft.comment, { onChange(draft.copy(comment = it)) })
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AdjustmentButton("Выплата", draft.adjustmentKind == FuelAdjustmentKind.CompensationPayment) { onChange(draft.copy(adjustmentKind = FuelAdjustmentKind.CompensationPayment)) }
-                        AdjustmentButton("Вычет долга", draft.adjustmentKind == FuelAdjustmentKind.DebtDeduction) { onChange(draft.copy(adjustmentKind = FuelAdjustmentKind.DebtDeduction)) }
-                    }
-                    FuelField("Месяц, ГГГГ-ММ", draft.monthKey, { onChange(draft.copy(monthKey = it)) })
-                    FuelField("Сумма", draft.amount, { onChange(draft.copy(amount = it)) }, KeyboardType.Decimal)
-                    FuelField("Литры", draft.liters, { onChange(draft.copy(liters = it)) }, KeyboardType.Decimal)
-                    if (draft.adjustmentKind == FuelAdjustmentKind.DebtDeduction) {
-                        FuelField("Остаток долга", draft.carryoverDebtRub, { onChange(draft.copy(carryoverDebtRub = it)) }, KeyboardType.Decimal)
-                    }
-                    FuelField("Комментарий", draft.comment, { onChange(draft.copy(comment = it)) })
-                }
-            }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onEdit, enabled = enabled && !record.id.isNullOrBlank()) { Text("Изменить") }
+            if (!record.id.isNullOrBlank()) TextButton(onClick = onDelete, enabled = enabled) { Text("Удалить") }
         }
-    }
-}
-
-@Composable
-private fun RowScope.AdjustmentButton(title: String, selected: Boolean, onClick: () -> Unit) {
-    if (selected) Button(onClick = onClick, modifier = Modifier.weight(1f)) { Text(title) }
-    else OutlinedButton(onClick = onClick, modifier = Modifier.weight(1f)) { Text(title) }
-}
-
-@Composable
-private fun FuelField(label: String, value: String, onChange: (String) -> Unit, keyboard: KeyboardType = KeyboardType.Text) {
-    AppTextField(
-        value = value,
-        onValueChange = onChange,
-        label = label,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-        singleLine = true,
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-@Composable
-private fun FuelMetric(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f), RoundedCornerShape(14.dp)).padding(11.dp)) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-        Text(value, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
 private fun FuelLine(label: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
-private fun ArchivePanel(count: Int) {
-    Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f), shape = RoundedCornerShape(18.dp)) {
+private fun ArchivePanel(count: Int, onClick: () -> Unit) {
+    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f), shape = RoundedCornerShape(18.dp)) {
         Row(Modifier.fillMaxWidth().padding(15.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Архив до 13 мая 2026", fontWeight = FontWeight.SemiBold)
             Text("$count записей", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -466,8 +461,8 @@ private fun adjustmentTitle(record: FuelRecord): String = when (record.adjustmen
 private fun recordDescription(record: FuelRecord): String = if (record.recordType == FuelRecordType.Fuel) {
     listOfNotNull(record.mileage?.let { "${number(it)} км" }, record.liters?.let { "${number(it)} л" }, record.fuelCost?.let(::rubles)).joinToString(" · ")
 } else listOfNotNull(record.amount?.let(::rubles), record.liters?.let { "${number(it)} л" }, record.comment).joinToString(" · ")
-private fun number(value: Double): String = NUMBER_FORMAT.format(value)
-private fun rubles(value: Double): String = CURRENCY_FORMAT.format(value)
+internal fun number(value: Double): String = NUMBER_FORMAT.format(value)
+internal fun rubles(value: Double): String = CURRENCY_FORMAT.format(value)
 private val RU_LOCALE = Locale.forLanguageTag("ru-RU")
 private val NUMBER_FORMAT = NumberFormat.getNumberInstance(RU_LOCALE).apply { maximumFractionDigits = 2 }
-private val CURRENCY_FORMAT = NumberFormat.getCurrencyInstance(RU_LOCALE).apply { maximumFractionDigits = 0 }
+private val CURRENCY_FORMAT = NumberFormat.getCurrencyInstance(RU_LOCALE).apply { maximumFractionDigits = 2 }

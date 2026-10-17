@@ -24,6 +24,10 @@ val wikiApiToken = providers.gradleProperty("WIKI_API_TOKEN").orNull
     ?: localProperties.getProperty("WIKI_API_TOKEN")
     ?: xcconfigValue("WIKI_API_TOKEN")
     ?: ""
+val fuelArchiveOwnerEmail = providers.gradleProperty("FUEL_ARCHIVE_OWNER_EMAIL").orNull
+    ?: localProperties.getProperty("FUEL_ARCHIVE_OWNER_EMAIL")
+    ?: xcconfigValue("FUEL_ARCHIVE_OWNER_EMAIL")
+    ?: ""
 val releaseVersionCode = providers.gradleProperty("releaseVersionCode").orNull?.toIntOrNull() ?: 1
 val releaseVersionName = providers.gradleProperty("releaseVersionName").orNull ?: "0.1.0"
 val releaseStoreFile = signingProperties.getProperty("storeFile")?.takeIf(String::isNotBlank)
@@ -48,6 +52,7 @@ android {
         versionCode = releaseVersionCode
         versionName = releaseVersionName
 
+        buildConfigField("String", "FUEL_ARCHIVE_OWNER_EMAIL", buildConfigString(fuelArchiveOwnerEmail))
         buildConfigField("String", "API_ORIGIN", "\"https://api.work.lumastack.ru\"")
         buildConfigField("String", "SIMPLEONE_API_ORIGIN", "\"https://sd.servionica.ru/v1\"")
         buildConfigField("String", "WIKI_API_ORIGIN", "\"https://wiki.lumastack.ru\"")

@@ -74,4 +74,86 @@ class FuelModelsTest {
             ),
         )
     }
+    @Test fun `record norm override takes precedence over the seasonal fallback including zero`() {
+        val summary = FuelSummaryCalculator.build(listOf(
+            FuelRecord(date = "2026-03-31", mileage = 100.0, fuelConsumptionRate = 12.0),
+            FuelRecord(date = "2026-03-31", mileage = 100.0, fuelConsumptionRate = 0.0),
+        ))
+        assertEquals(12.0, summary.totals.fuelNorm, 0.0001)
+        assertEquals(6.0, summary.monthly.single().approvedRate, 0.0001)
+    }
+
+    @Test fun `debt conversions respect explicit zeros and both supplied units`() {
+        val summary = FuelSummaryCalculator.build(listOf(
+            FuelRecord(date = "2026-06-10", mileage = 100.0),
+            adjustment("2026-06-01", "2026-06", amount = 0.0, liters = 10.0),
+            adjustment("2026-06-02", "2026-06", amount = 152.0),
+            adjustment("2026-06-03", "2026-06", liters = 1.0),
+        ))
+        assertEquals(228.0, summary.totals.effectiveDebtDeductionAmount, 0.0001)
+        assertEquals(13.0, summary.totals.effectiveDebtDeductionLiters, 0.0001)
+        assertEquals(152.0, summary.totals.totalDebtDeductionAmount, 0.0001)
+        assertEquals(11.0, summary.totals.totalDebtDeductionLiters, 0.0001)
+        org.junit.Assert.assertTrue(summary.totals.hasEstimatedDebtDeductionAmount)
+        org.junit.Assert.assertTrue(summary.totals.hasEstimatedDebtDeductionLiters)
+        assertEquals(272.0, summary.monthly.single().projectedPayout, 0.0001)
+    }
+
+    @Test fun `monthly carryover retains incoming record order but total uses month and date order`() {
+        val summary = FuelSummaryCalculator.build(listOf(
+            adjustment("2026-06-30", "2026-06", amount = 0.0, carryover = 200.0),
+            adjustment("2026-06-01", "2026-06", amount = 0.0, carryover = 50.0),
+            FuelRecord(date = "2026-07-12", mileage = 100.0),
+        ))
+        assertEquals(200.0, summary.totals.carryoverDebtRub, 0.0001)
+        assertEquals(50.0, summary.monthly.last().incomingCarryoverDebtRub, 0.0001)
+        assertEquals(450.0, summary.monthly.last().projectedPayout, 0.0001)
+        assertEquals("Удержание", summary.monthly.last().compensationStatusLabel)
+    }
+
+    @Test fun `carryover does not jump a missing calendar month and paid excess stays negative`() {
+        val records = listOf(
+            adjustment("2026-05-31", "2026-05", amount = 0.0, carryover = 300.0),
+            FuelRecord(date = "2026-07-12", mileage = 100.0),
+            FuelRecord(date = "2026-07-01", recordType = FuelRecordType.Adjustment, monthKey = "2026-07",
+                adjustmentKind = FuelAdjustmentKind.CompensationPayment, amount = 600.0),
+        )
+        val july = FuelSummaryCalculator.build(records).monthly.last()
+        assertEquals(0.0, july.incomingCarryoverDebtRub, 0.0001)
+        assertEquals(-100.0, july.projectedPayout, 0.0001)
+        assertEquals(600.0, july.effectiveAppliedCompensation, 0.0001)
+        org.junit.Assert.assertTrue(july.isCompensationClosed)
+        assertEquals("Закрыто", july.compensationStatusLabel)
+    }
+
+    @Test fun `draft validation rejects malformed supplied values and impossible months`() {
+        val mileage = FuelDraft(date = "2026-08-01", mileage = "100")
+        for (value in listOf("NaN", "Infinity", "-Infinity", "nope")) {
+            org.junit.Assert.assertNotNull(validateFuelDraft(mileage.copy(mileage = value)))
+            org.junit.Assert.assertNotNull(validateFuelDraft(mileage.copy(liters = value, fuelCost = "100")))
+            org.junit.Assert.assertNotNull(validateFuelDraft(FuelDraft(recordType = FuelRecordType.Adjustment,
+                monthKey = "2026-08", amount = "100", carryoverDebtRub = value)))
+        }
+        for (month in listOf("2026-00", "2026-13", "bad")) {
+            org.junit.Assert.assertNotNull(validateFuelDraft(FuelDraft(recordType = FuelRecordType.Adjustment,
+                monthKey = month, amount = "100")))
+        }
+        assertNull(validateFuelDraft(mileage.copy(mileage = " 100,5 ")))
+        assertNull(validateFuelDraft(FuelDraft(recordType = FuelRecordType.Adjustment, monthKey = "2026-08", amount = "0")))
+    }
+
+    @Test fun `fuel month comes from date while adjustment month preserves explicit legacy key`() {
+        val fuel = FuelRecord(date = " 2026-06-10 ", monthKey = "2025-12", mileage = 100.0)
+        assertEquals("2026-06", fuel.resolvedMonthKey)
+        val adjustment = adjustment(" 2026-06-10 ", "2025-12", amount = 50.0)
+        assertEquals("2025-12", adjustment.resolvedMonthKey)
+        val summary = FuelSummaryCalculator.build(listOf(fuel, adjustment))
+        assertEquals(listOf("2025-12", "2026-06"), summary.monthly.map { it.key })
+        assertEquals(100.0, summary.monthly.last().totalMileage, 0.0001)
+    }
+
+    private fun adjustment(date: String, month: String, amount: Double? = null, liters: Double? = null, carryover: Double? = null) =
+        FuelRecord(date = date, recordType = FuelRecordType.Adjustment, adjustmentKind = FuelAdjustmentKind.DebtDeduction,
+            monthKey = month, amount = amount, liters = liters, carryoverDebtRub = carryover)
+
 }

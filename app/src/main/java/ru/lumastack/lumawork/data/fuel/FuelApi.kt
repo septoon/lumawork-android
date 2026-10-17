@@ -6,6 +6,9 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.Call
@@ -29,6 +32,7 @@ interface FuelApi {
 }
 
 sealed class FuelFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    class Message(message: String) : FuelFailure(message)
     class Network(cause: IOException) : FuelFailure("Не удалось загрузить данные топлива. Проверьте подключение к интернету.", cause)
     data object Unauthorized : FuelFailure("Сессия приложения «Инженер» истекла.")
     class Http(val status: Int) : FuelFailure("Не удалось выполнить действие с топливом. Попробуйте ещё раз.")
@@ -59,11 +63,13 @@ class OkHttpFuelApi(
         execute(request("/api/v2/fuel", token, "POST", draft.payload(UUID.randomUUID().toString())))
 
     override suspend fun update(token: String, recordId: String, draft: FuelDraft): FuelRecord =
-        execute(request("/api/v2/fuel/$recordId", token, "PUT", draft.payload(recordId)))
+        execute(request(recordPath(recordId), token, "PUT", draft.payload(recordId)))
 
     override suspend fun delete(token: String, recordId: String) {
-        executeEmpty(request("/api/v2/fuel/$recordId", token, "DELETE"))
+        executeEmpty(request(recordPath(recordId), token, "DELETE"))
     }
+
+    private fun recordPath(id: String) = "/api/v2/fuel/" + origin.toHttpUrl().newBuilder().addPathSegment(id).build().encodedPath.substringAfterLast('/')
 
     private fun request(path: String, token: String, method: String = "GET", body: String? = null): Request {
         val builder = Request.Builder().url("$origin$path")
@@ -78,9 +84,9 @@ class OkHttpFuelApi(
         }
     }
 
-    private suspend inline fun <reified Value> execute(request: Request): Value {
+    private suspend inline fun <reified Value> execute(request: Request): Value = withContext(Dispatchers.IO) {
         val response = executeResponse(request)
-        return response.use {
+        response.use {
             runCatching { json.decodeFromString<Value>(it.body.string()) }.getOrElse { throw FuelFailure.InvalidResponse }
         }
     }
