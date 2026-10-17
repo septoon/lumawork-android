@@ -28,6 +28,14 @@ val fuelArchiveOwnerEmail = providers.gradleProperty("FUEL_ARCHIVE_OWNER_EMAIL")
     ?: localProperties.getProperty("FUEL_ARCHIVE_OWNER_EMAIL")
     ?: xcconfigValue("FUEL_ARCHIVE_OWNER_EMAIL")
     ?: ""
+val requestsConfigKeys = listOf(
+    "DION_CHAT_URL",
+    "TELEGRAM_APP_URL",
+    "TELEGRAM_WEB_URL",
+    "SIMPLEONE_CURRENT_USER_DYNAMIC_ID",
+    "SIMPLEONE_ASSIGNED_USER_DYNAMIC_ID",
+    "SIMPLEONE_RESOLVED_DATE_OPTION_ID",
+)
 val releaseVersionCode = providers.gradleProperty("releaseVersionCode").orNull?.toIntOrNull() ?: 1
 val releaseVersionName = providers.gradleProperty("releaseVersionName").orNull ?: "0.1.0"
 val releaseStoreFile = signingProperties.getProperty("storeFile")?.takeIf(String::isNotBlank)
@@ -55,6 +63,13 @@ android {
         buildConfigField("String", "FUEL_ARCHIVE_OWNER_EMAIL", buildConfigString(fuelArchiveOwnerEmail))
         buildConfigField("String", "API_ORIGIN", "\"https://api.work.lumastack.ru\"")
         buildConfigField("String", "SIMPLEONE_API_ORIGIN", "\"https://sd.servionica.ru/v1\"")
+        requestsConfigKeys.forEach { key ->
+            val value = providers.gradleProperty(key).orNull
+                ?: localProperties.getProperty(key)
+                ?: xcconfigValue(key)
+                ?: ""
+            buildConfigField("String", key, buildConfigString(value))
+        }
         buildConfigField("String", "WIKI_API_ORIGIN", "\"https://wiki.lumastack.ru\"")
         buildConfigField("String", "WIKI_API_TOKEN", buildConfigString(wikiApiToken))
     }

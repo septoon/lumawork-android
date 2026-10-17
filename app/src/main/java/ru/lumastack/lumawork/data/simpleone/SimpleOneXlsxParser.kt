@@ -16,28 +16,27 @@ import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 
 internal object SimpleOneXlsxParser {
     fun parse(bytes: ByteArray): List<SimpleOneRequest> {
-        return readRows(bytes)
+        return readRows(bytes, requiredHeader = "Номер заявки")
             .asSequence()
             .mapNotNull(::makeRequest)
             .filter { isIncludedStatus(it.state) || isReturnEquipment(it.requestType) }
             .sortedByDescending { it.resolvedDateTime() ?: LocalDateTime.MIN }
-            .take(MAX_RECORDS)
             .toList()
     }
 
-    internal fun readRows(bytes: ByteArray): List<Map<String, String>> {
+    internal fun readRows(bytes: ByteArray, requiredHeader: String? = null): List<Map<String, String>> {
         val parts = readParts(bytes)
         val worksheet = parts.entries
             .filter { it.key.startsWith("xl/worksheets/") && it.key.endsWith(".xml") }
             .minByOrNull { it.key }
             ?.value
-            ?: throw SimpleOneXlsxException("В XLSX не найден лист с данными.")
+            ?: throw SimpleOneXlsxException("В файле не найдены данные.")
         val sharedStrings = parts["xl/sharedStrings.xml"]?.let(::parseSharedStrings).orEmpty()
-        return parseWorksheet(worksheet, sharedStrings)
+        return parseWorksheet(worksheet, sharedStrings, requiredHeader)
     }
 
     private fun readParts(bytes: ByteArray): Map<String, ByteArray> {
-        if (bytes.size > MAX_ARCHIVE_BYTES) throw SimpleOneXlsxException("XLSX превышает 30 МиБ.")
+        if (bytes.size > MAX_ARCHIVE_BYTES) throw SimpleOneXlsxException("Размер файла превышает 30 МиБ.")
         val parts = linkedMapOf<String, ByteArray>()
         var totalUncompressed = 0
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
@@ -46,13 +45,18 @@ internal object SimpleOneXlsxParser {
                 val path = entry.name.replace('\\', '/')
                 val isNeeded = path == "xl/sharedStrings.xml" ||
                     (path.startsWith("xl/worksheets/") && path.endsWith(".xml") && !path.contains("/_rels/"))
-                if (isNeeded) {
-                    val data = readLimited(zip, MAX_PART_BYTES)
+                val data = if (isNeeded) readLimited(zip, minOf(MAX_PART_BYTES, MAX_UNCOMPRESSED_BYTES - totalUncompressed)) else null
+                if (data != null) {
                     totalUncompressed += data.size
-                    if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) {
-                        throw SimpleOneXlsxException("Распакованный XLSX слишком большой.")
+                    if (parts.put(path, data) != null) throw SimpleOneXlsxException("В файле повторяются разделы.")
+                } else {
+                    val buffer = ByteArray(8 * 1024)
+                    while (true) {
+                        val count = zip.read(buffer)
+                        if (count < 0) break
+                        totalUncompressed += count
+                        if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) throw SimpleOneXlsxException("Файл содержит слишком много данных.")
                     }
-                    parts[path] = data
                 }
                 zip.closeEntry()
                 entry = zip.nextEntry
@@ -67,7 +71,7 @@ internal object SimpleOneXlsxParser {
         while (true) {
             val count = zip.read(buffer)
             if (count < 0) break
-            if (output.size() + count > limit) throw SimpleOneXlsxException("Часть XLSX слишком большая.")
+            if (output.size() + count > limit) throw SimpleOneXlsxException("Файл содержит слишком много данных.")
             output.write(buffer, 0, count)
         }
         return output.toByteArray()
@@ -79,9 +83,12 @@ internal object SimpleOneXlsxParser {
         return handler.values
     }
 
-    private fun parseWorksheet(bytes: ByteArray, sharedStrings: List<String>): List<Map<String, String>> {
+    private fun parseWorksheet(bytes: ByteArray, sharedStrings: List<String>, requiredHeader: String?): List<Map<String, String>> {
         val handler = WorksheetHandler(sharedStrings)
         parseXml(bytes, handler)
+        if (requiredHeader != null && handler.headers.values.none { normalizeHeader(it) == normalizeHeader(requiredHeader) }) {
+            throw SimpleOneXlsxException("В файле не найдена колонка «Номер заявки».")
+        }
         return handler.rows
     }
 
@@ -99,7 +106,7 @@ internal object SimpleOneXlsxParser {
         } catch (error: SimpleOneXlsxException) {
             throw error
         } catch (error: Exception) {
-            throw SimpleOneXlsxException("Не удалось прочитать XML внутри XLSX.", error)
+            throw SimpleOneXlsxException("Не удалось прочитать файл.", error)
         }
     }
 
@@ -124,7 +131,7 @@ internal object SimpleOneXlsxParser {
         )
         return SimpleOneRequest(
             source = SimpleOneRequestSource.Closed,
-            sysId = "",
+            sysId = row.value("sys_id"),
             number = number,
             incomingNumber = firstNonEmpty(
                 row.value("Входящий номер"),
@@ -134,8 +141,13 @@ internal object SimpleOneXlsxParser {
             registeredAt = registeredAt,
             state = row.value("Статус").ifBlank { "Закрыта" },
             stateRaw = row.value("Код статуса"),
-            multicardState = info.value("МК Статус", "Статус заявки Мультикарта"),
+            multicardState = firstNonEmpty(row.value("МК Статус"), info.value("МК Статус", "Статус заявки Мультикарта")),
+            waitingReason = row.value("Причина ожидания"),
             shortDescription = row.value("Краткое описание"),
+            initiator = row.value("Инициатор"),
+            priority = row.value("Приоритет"),
+            clientServiceParent = row.value("Родительская услуга"),
+            clientService = row.value("Услуга"),
             assignmentGroup = row.firstValue("Рабочая группа", "Группа назначения"),
             requestType = row.value("Тип заявки"),
             address = firstNonEmpty(
@@ -147,10 +159,11 @@ internal object SimpleOneXlsxParser {
                 info.value("Заказчик", "Наименование юр.лица", "Наименование юр. лица", "Клиент"),
             ),
             deadline = normalizeExcelDate(row.firstValue("Предельный срок СУТС", "Предельный срок")),
-            resolvedAt = completedAt.ifBlank { closedAt },
+            resolvedAt = normalizeExcelDate(row.value("Дата выполнения")).ifBlank { completedAt.ifBlank { closedAt } },
             completedAt = completedAt,
             closedAt = closedAt,
             assignedUser = row.firstValue("Исполнитель.Имя Фамилия", "Исполнитель"),
+            assignedUserId = row.value("ID исполнителя"),
             terminalModel = firstNonEmpty(
                 row.value("Модель POS-терминала"),
                 info.value("Модель POS-терминала", "Модель POS", "Модель терминала"),
@@ -172,13 +185,13 @@ internal object SimpleOneXlsxParser {
             resolution = firstNonEmpty(row.value("Решение"), info.value("Решение")),
             additionalInformation = information,
             description = description,
-            installedFiscalStorageSerialNumber = info.value(
-                "Серийный номер установленного ФН",
-                "Cерийный номер установленного ФН",
+            installedFiscalStorageSerialNumber = firstNonEmpty(
+                row.value("Серийный номер установленного ФН"),
+                info.value("Серийный номер установленного ФН", "Cерийный номер установленного ФН"),
             ),
-            ofdTariffActivationCode = info.value("Использованный код активации тарифа ОФД"),
-            usedSimCard = info.value("Использованная SIM карта"),
-            tableFields = row.filterValues(String::isNotBlank),
+            ofdTariffActivationCode = firstNonEmpty(row.value("Использованный код активации тарифа ОФД"), info.value("Использованный код активации тарифа ОФД")),
+            usedSimCard = firstNonEmpty(row.value("Использованная SIM карта"), info.value("Использованная SIM карта")),
+            tableFields = row,
         )
     }
 
@@ -246,7 +259,10 @@ internal object SimpleOneXlsxParser {
         }
 
         override fun characters(ch: CharArray, start: Int, length: Int) {
-            if (insideText) current.append(ch, start, length)
+            if (insideText) {
+                if (current.length + length > MAX_CELL_CHARACTERS) throw SimpleOneXlsxException("Слишком длинное значение ячейки.")
+                current.append(ch, start, length)
+            }
         }
 
         override fun endElement(uri: String?, localName: String?, qName: String?) {
@@ -254,7 +270,7 @@ internal object SimpleOneXlsxParser {
                 "t" -> insideText = false
                 "si" -> {
                     if (values.size >= MAX_SHARED_STRINGS) {
-                        throw SimpleOneXlsxException("В XLSX слишком много строк.")
+                        throw SimpleOneXlsxException("В файле слишком много записей.")
                     }
                     values += current.toString()
                     insideItem = false
@@ -265,7 +281,7 @@ internal object SimpleOneXlsxParser {
 
     private class WorksheetHandler(private val sharedStrings: List<String>) : DefaultHandler() {
         val rows = mutableListOf<Map<String, String>>()
-        private val headers = mutableMapOf<Int, String>()
+        val headers = mutableMapOf<Int, String>()
         private var rowIndex = 0
         private var currentRow = mutableMapOf<String, String>()
         private var cellReference = ""
@@ -289,7 +305,10 @@ internal object SimpleOneXlsxParser {
         }
 
         override fun characters(ch: CharArray, start: Int, length: Int) {
-            if (readingValue) currentValue.append(ch, start, length)
+            if (readingValue) {
+                if (currentValue.length + length > MAX_CELL_CHARACTERS) throw SimpleOneXlsxException("Слишком длинное значение ячейки.")
+                currentValue.append(ch, start, length)
+            }
         }
 
         override fun endElement(uri: String?, localName: String?, qName: String?) {
@@ -297,7 +316,7 @@ internal object SimpleOneXlsxParser {
                 "v", "t" -> readingValue = false
                 "c" -> commitCell()
                 "row" -> if (rowIndex > 1 && currentRow.isNotEmpty()) {
-                    if (rows.size >= MAX_RECORDS) throw SimpleOneXlsxException("В XLSX больше 5000 строк.")
+                    if (rows.size >= MAX_RECORDS) throw SimpleOneXlsxException("В файле больше 100000 записей. Загрузка не сохранена.")
                     rows += currentRow
                 }
             }
@@ -322,12 +341,13 @@ internal object SimpleOneXlsxParser {
     private fun elementName(localName: String?, qName: String?): String =
         localName?.takeIf(String::isNotBlank) ?: qName.orEmpty().substringAfter(':')
 
-    private val NORMALIZED_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+    private val NORMALIZED_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss")
     private const val MAX_ARCHIVE_BYTES = 30 * 1024 * 1024
-    private const val MAX_PART_BYTES = 24 * 1024 * 1024
-    private const val MAX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024
-    private const val MAX_SHARED_STRINGS = 100_000
-    private const val MAX_RECORDS = 5_000
+    private const val MAX_PART_BYTES = 96 * 1024 * 1024
+    private const val MAX_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
+    private const val MAX_SHARED_STRINGS = 1_000_000
+    private const val MAX_RECORDS = 100_000
+    private const val MAX_CELL_CHARACTERS = 1_000_000
 }
 
 internal class SimpleOneXlsxException(message: String, cause: Throwable? = null) : Exception(message, cause)

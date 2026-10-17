@@ -12,6 +12,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -53,6 +55,7 @@ import ru.lumastack.lumawork.data.workschedule.WorkScheduleParser
 
 interface SimpleOneApi {
     suspend fun login(username: String, password: String): String
+    suspend fun warehouseRequests(terminalId: String, authKey: String): List<SimpleOneRequest> = emptyList()
     suspend fun currentUser(authKey: String): SimpleOneUser
     suspend fun activeRequests(userId: String, authKey: String): List<SimpleOneRequest>
     suspend fun closedRequests(userId: String, authKey: String): List<SimpleOneRequest>
@@ -90,9 +93,10 @@ class OkHttpSimpleOneApi(
     baseOrigin: String,
     private val client: OkHttpClient = defaultClient(),
     private val json: Json = Json { ignoreUnknownKeys = true },
+    private val closedArchiveCondition: () -> String = { ClosedRequestsArchiveQuery().condition() },
 ) : SimpleOneApi {
     private val origin = baseOrigin.trimEnd('/')
-    private val exportClient = SimpleOneExportClient(origin, client, json)
+    private val exportClient = SimpleOneExportClient(origin, client, json, closedArchiveCondition)
 
     override suspend fun login(username: String, password: String): String {
         val payload = buildJsonObject {
@@ -135,11 +139,11 @@ class OkHttpSimpleOneApi(
 
     override suspend fun closedRequests(userId: String, authKey: String): List<SimpleOneRequest> =
         fetchAllRequests(
-            condition = closedCondition(userId),
+            condition = closedArchiveCondition() + "^ORDERBYsys_id",
             source = SimpleOneRequestSource.Closed,
             authKey = authKey,
             columns = CLOSED_COLUMNS,
-            maxPages = MAX_CLOSED_PAGES,
+            maxPages = null,
         )
 
     override suspend fun exportClosedRequests(userId: String, authKey: String): ByteArray =
@@ -281,6 +285,19 @@ class OkHttpSimpleOneApi(
         maxPages = MAX_COORDINATION_PAGES,
     ).filter { isReturnEquipmentRequest(it.requestType) }
 
+    override suspend fun warehouseRequests(terminalId: String, authKey: String): List<SimpleOneRequest> {
+        val terminal = terminalId.trim()
+        require(terminal.isNotBlank() && terminal.length <= 100 && terminal.all { it.isLetterOrDigit() || it in " -_/." }) { "Некорректный ID терминала." }
+        val url = "$origin/list/itsm_request".toHttpUrl().newBuilder()
+            .addQueryParameter("condition", "(keywordsARE$terminal)")
+            .addQueryParameter("page", "1").addQueryParameter("per_page", "10")
+            .addQueryParameter("columns", (ACTIVE_COLUMNS + CLOSED_COLUMNS).distinct().joinToString(",")).build()
+        val response = request(authenticatedRequest(url.toString(), authKey))
+        val listed = (simpleOneListItems(response) ?: throw SimpleOneFailure.InvalidResponse)
+            .map { parseSimpleOneRequest(it, SimpleOneRequestSource.Active) }
+        return coroutineScope { listed.map { async { requestDetails(it, authKey) } }.awaitAll() }
+    }
+
     override suspend fun workScheduleJournals(authKey: String): List<WorkScheduleJournal> {
         val journals = linkedMapOf<String, WorkScheduleJournal>()
         var page = 1
@@ -380,13 +397,15 @@ class OkHttpSimpleOneApi(
         source: SimpleOneRequestSource,
         authKey: String,
         columns: List<String>,
-        maxPages: Int,
+        maxPages: Int?,
     ): List<SimpleOneRequest> {
         val records = mutableListOf<SimpleOneRequest>()
         val seenIds = mutableSetOf<String>()
         var page = 1
 
-        while (page <= maxPages) {
+        var receivedCount = 0
+        var expectedTotal: Int? = null
+        while (maxPages == null || page <= maxPages) {
             val url = "$origin/list/itsm_request".toHttpUrl().newBuilder()
                 .addQueryParameter("condition", condition)
                 .addQueryParameter("page", page.toString())
@@ -397,14 +416,36 @@ class OkHttpSimpleOneApi(
             val items = simpleOneListItems(response) ?: throw serverFailure(response)
                 ?: SimpleOneFailure.InvalidResponse
             val previousCount = records.size
-            items.map { parseSimpleOneRequest(it, source) }
-                .filter { it.number.isNotBlank() }
-                .forEach { record ->
-                    if (record.id.isBlank() || seenIds.add(record.id)) records += record
-                }
             val total = simpleOneTotalCount(response)
-            val hasMore = total?.let { page * PAGE_SIZE < it } ?: (items.size == PAGE_SIZE)
-            if (!hasMore || records.size == previousCount) break
+            if (source == SimpleOneRequestSource.Closed) {
+                if (total != null && expectedTotal != null && total != expectedTotal) {
+                    throw SimpleOneFailure.Http(409, "Список заявок изменился во время выгрузки. Повторите загрузку.")
+                }
+                if (total != null) expectedTotal = total
+                if ((total ?: 0) > MAX_ARCHIVE_REQUESTS || receivedCount + items.size > MAX_ARCHIVE_REQUESTS) {
+                    throw SimpleOneFailure.Http(413, "Архив слишком велик. Загрузка не сохранена.")
+                }
+            }
+            items.map { parseSimpleOneRequest(it, source) }.forEach { record ->
+                if (record.number.isBlank()) {
+                    if (source == SimpleOneRequestSource.Closed) throw SimpleOneFailure.InvalidResponse
+                } else if (seenIds.add(record.id)) records += record
+            }
+            receivedCount += items.size
+            if (source == SimpleOneRequestSource.Closed && records.size - previousCount != items.size) {
+                throw SimpleOneFailure.Http(409, "SimpleOne вернул повторяющуюся страницу. Повторите загрузку.")
+            }
+            val hasMore = total?.let { receivedCount < it } ?: (items.size == PAGE_SIZE)
+            if (!hasMore) {
+                if (source == SimpleOneRequestSource.Closed && expectedTotal != null && receivedCount != expectedTotal) {
+                    throw SimpleOneFailure.Http(409, "SimpleOne вернул неполный архив. Повторите загрузку.")
+                }
+                break
+            }
+            if (records.size == previousCount) {
+                if (source == SimpleOneRequestSource.Closed) throw SimpleOneFailure.InvalidResponse
+                break
+            }
             page += 1
         }
 
@@ -422,7 +463,7 @@ class OkHttpSimpleOneApi(
         .get()
         .build()
 
-    private suspend fun request(request: Request): JsonObject {
+    private suspend fun request(request: Request): JsonObject = withContext(Dispatchers.IO) {
         val prepared = request.newBuilder()
             .header("Accept", "application/json")
             .header("Cache-Control", "no-cache")
@@ -434,13 +475,13 @@ class OkHttpSimpleOneApi(
         } catch (error: IOException) {
             throw SimpleOneFailure.Network(error)
         }
-        return response.use { httpResponse ->
+        response.use { httpResponse ->
             val body = httpResponse.body.string()
             if (httpResponse.code == 401 || httpResponse.code == 403) throw SimpleOneFailure.Unauthorized
             if (!httpResponse.isSuccessful) {
                 throw SimpleOneFailure.Http(
                     httpResponse.code,
-                    "SimpleOne вернул HTTP ${httpResponse.code}.",
+                    "Не удалось выполнить действие в SimpleOne. Попробуйте ещё раз.",
                 )
             }
             val payload = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
@@ -470,7 +511,7 @@ class OkHttpSimpleOneApi(
     companion object {
         private const val PAGE_SIZE = 100
         private const val MAX_ACTIVE_PAGES = 10
-        private const val MAX_CLOSED_PAGES = 50
+        private const val MAX_ARCHIVE_REQUESTS = 100_000
         private const val MAX_COORDINATION_PAGES = 30
         private const val MAX_TIME_REPORT_PAGES = 100
         private const val MAX_BACKPACK_PAGES = 50
@@ -542,10 +583,6 @@ class OkHttpSimpleOneApi(
             "^stateNOT INcancelled@closed@escalated@completed",
             "^assigned_user=$userId)",
         ).joinToString("")
-
-        private fun closedCondition(userId: String): String =
-            "((multicard_engineer=$userId^ORassigned_user=$userId^ORengineer_schedule.employee=$userId)" +
-                "^(resolved_atONopt:167638634011265859^ORresolved_atONopt:167638599011967439))"
 
         private fun coordinationCondition(region: CoordinationRegion): String = listOf(
             "((assignment_group=171871931206710051^ORassignment_group=${region.assignmentGroupId})",

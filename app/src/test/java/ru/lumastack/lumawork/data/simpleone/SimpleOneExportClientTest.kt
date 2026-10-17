@@ -54,6 +54,7 @@ class SimpleOneExportClientTest {
             origin = "https://sd.test/v1",
             client = client,
             json = Json { ignoreUnknownKeys = true },
+            closedArchiveCondition = { ClosedRequestsArchiveQuery("111", "222", "333").condition() },
         )
 
         val result = exportClient.exportClosedRequests("user-1", "auth-key")
@@ -110,6 +111,7 @@ class SimpleOneExportClientTest {
             origin = "https://sd.test/v1",
             client = client,
             json = Json { ignoreUnknownKeys = true },
+            closedArchiveCondition = { ClosedRequestsArchiveQuery("111", "222", "333").condition() },
         )
 
         val result = exportClient.exportTimeReport("user-1", "auth-key")

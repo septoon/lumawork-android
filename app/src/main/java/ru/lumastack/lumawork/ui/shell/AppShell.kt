@@ -88,7 +88,7 @@ import ru.lumastack.lumawork.ui.home.RouteViewModel
 import ru.lumastack.lumawork.domain.route.RouteWorkType
 import ru.lumastack.lumawork.ui.coordination.CoordinationRoute
 import ru.lumastack.lumawork.ui.requests.RequestsActions
-import ru.lumastack.lumawork.ui.requests.RequestsScreen
+import ru.lumastack.lumawork.ui.requests.RequestsRoute
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneViewModel
 import ru.lumastack.lumawork.ui.timereport.TimeReportRoute
@@ -168,6 +168,13 @@ fun AppShell(
             onModeChange = simpleOneViewModel::updateMode,
             onOpenRequest = simpleOneViewModel::openRequest,
             onCloseRequest = simpleOneViewModel::closeRequest,
+            onInitialLoad = simpleOneViewModel::initialLoad,
+            onDismissConnection = simpleOneViewModel::dismissConnection,
+            onRefreshClosed = simpleOneViewModel::refreshClosedRequests,
+            onImportArchive = simpleOneViewModel::importArchive,
+            onExportArchive = simpleOneViewModel::exportArchive,
+            onCleanupArchive = simpleOneViewModel::cleanupArchive,
+            browserAuthKey = simpleOneViewModel::browserAuthKey,
         )
     }
 
@@ -393,7 +400,8 @@ private fun AppTopBar(
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
-        if (destination == AppDestination.Requests && requestsState.selectedRequest == null) {
+        if (destination == AppDestination.Requests && requestsState.initialArchiveReady &&
+            (requestsState.isAuthorized || requestsState.isOffline) && requestsState.selectedRequest == null) {
             AppSegmentedControl(
                 titles = RequestsMode.entries.map { it.title },
                 selectedIndex = RequestsMode.entries.indexOf(requestsState.mode),
@@ -533,7 +541,9 @@ private fun DestinationContent(
                 simpleOneRepository = simpleOneRepository,
                 requestsActions = simpleOneActions,
             )
-            AppDestination.Requests -> RequestsScreen(
+            AppDestination.Requests -> RequestsRoute(
+                session = session,
+                repository = simpleOneRepository,
                 state = simpleOneState,
                 widthClass = contentWidthClass,
                 actions = simpleOneActions,

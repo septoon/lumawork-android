@@ -1,6 +1,10 @@
 package ru.lumastack.lumawork.data.simpleone
 
 import java.io.IOException
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -31,6 +35,7 @@ internal class SimpleOneExportClient(
     private val origin: String,
     private val client: OkHttpClient,
     private val json: Json,
+    private val closedArchiveCondition: () -> String = { ClosedRequestsArchiveQuery().condition() },
 ) {
     suspend fun exportClosedRequests(userId: String, authKey: String): ByteArray = export(
         userId = userId,
@@ -38,7 +43,7 @@ internal class SimpleOneExportClient(
         payload = exportPayload(
             userId = userId,
             tableName = "itsm_request",
-            condition = closedCondition(userId),
+            condition = closedArchiveCondition(),
             columns = CLOSED_EXPORT_COLUMNS,
         ),
     )
@@ -107,12 +112,12 @@ internal class SimpleOneExportClient(
                 } catch (_: Exception) {
                     null
                 }
-                if (downloadUrl != null) return download(downloadUrl)
+                if (downloadUrl != null) return download(downloadUrl, authKey)
             }
 
             delay(if (attempt < 8) 500L else 1_000L)
         }
-        throw SimpleOneFailure.Http(408, "SimpleOne не подготовил XLSX-выгрузку.")
+        throw SimpleOneFailure.Http(408, "Не удалось подготовить данные. Попробуйте ещё раз.")
     }
 
     private suspend fun availableExportIds(userId: String, authKey: String): List<String> =
@@ -134,37 +139,50 @@ internal class SimpleOneExportClient(
             ?.firstOrNull(String::isNotBlank)
     }
 
-    private suspend fun download(url: String): ByteArray {
-        val request = Request.Builder()
-            .url(url)
+    private suspend fun download(url: String, authKey: String): ByteArray = withContext(Dispatchers.IO) {
+        val resolvedUrl = origin.toHttpUrl().resolve(url) ?: throw SimpleOneFailure.InvalidResponse
+        val requestBuilder = Request.Builder()
+            .url(resolvedUrl)
             .get()
             .header("Accept", XLSX_ACCEPT)
             .header("Cache-Control", "no-cache")
-            .build()
-        val call = client.newCall(request)
+        val sourceUrl = origin.toHttpUrl()
+        val sameOrigin = resolvedUrl.scheme == sourceUrl.scheme && resolvedUrl.host == sourceUrl.host && resolvedUrl.port == sourceUrl.port
+        if (sameOrigin) requestBuilder.header("Cookie", "auth=$authKey")
+        val call = client.newCall(requestBuilder.build())
         call.timeout().timeout(45, TimeUnit.SECONDS)
         val response = try {
             call.awaitExport()
         } catch (error: IOException) {
             throw SimpleOneFailure.Network(error)
         }
-        return response.use { httpResponse ->
+        response.use { httpResponse ->
+            if (sameOrigin && (httpResponse.code == 401 || httpResponse.code == 403)) throw SimpleOneFailure.Unauthorized
             if (!httpResponse.isSuccessful) {
                 throw SimpleOneFailure.Http(
                     httpResponse.code,
-                    "Не удалось скачать XLSX: HTTP ${httpResponse.code}.",
+                    "Не удалось загрузить данные. Попробуйте ещё раз.",
                 )
             }
             val contentLength = httpResponse.body.contentLength()
             if (contentLength > MAX_XLSX_BYTES) {
-                throw SimpleOneFailure.Http(413, "XLSX-выгрузка превышает 30 МиБ.")
+                throw SimpleOneFailure.Http(413, "Размер файла превышает 30 МиБ.")
             }
-            httpResponse.body.bytes().also { bytes ->
-                if (bytes.isEmpty()) throw SimpleOneFailure.InvalidResponse
-                if (bytes.size > MAX_XLSX_BYTES) {
-                    throw SimpleOneFailure.Http(413, "XLSX-выгрузка превышает 30 МиБ.")
+            val output = ByteArrayOutputStream()
+            httpResponse.body.byteStream().use { input ->
+                val buffer = ByteArray(8 * 1024)
+                while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > MAX_XLSX_BYTES) {
+                        throw SimpleOneFailure.Http(413, "Размер файла превышает 30 МиБ.")
+                    }
+                    output.write(buffer, 0, count)
                 }
             }
+            if (output.size() == 0) throw SimpleOneFailure.InvalidResponse
+            output.toByteArray()
         }
     }
 
@@ -199,7 +217,7 @@ internal class SimpleOneExportClient(
             val raw = httpResponse.body.string()
             if (httpResponse.code == 401 || httpResponse.code == 403) throw SimpleOneFailure.Unauthorized
             if (!httpResponse.isSuccessful) {
-                throw SimpleOneFailure.Http(httpResponse.code, "SimpleOne вернул HTTP ${httpResponse.code}.")
+                throw SimpleOneFailure.Http(httpResponse.code, "Не удалось загрузить данные из SimpleOne. Попробуйте ещё раз.")
             }
             val payload = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
                 ?: throw SimpleOneFailure.InvalidResponse
@@ -326,9 +344,7 @@ internal class SimpleOneExportClient(
         private const val TIME_REPORT_CONDITION =
             "(personDYNAMIC156957141416138823)^ORDERBYDESCdate_of_work"
 
-        private fun closedCondition(userId: String): String =
-            "(((multicard_engineer=$userId^ORassigned_user=$userId^ORengineer_schedule.employee=$userId)" +
-                "^(resolved_atONopt:167638634011265859^ORresolved_atONopt:167638599011967439)))"
+
     }
 }
 

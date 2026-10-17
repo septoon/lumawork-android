@@ -153,7 +153,10 @@ data class ClosedSimpleOneArchive(
     val updatedAtEpochMillis: Long? = null,
     val isComplete: Boolean = false,
     val source: ClosedArchiveSource = ClosedArchiveSource.ListApi,
-)
+    val queryRevision: Int? = null,
+) {
+    val isReady: Boolean get() = isComplete && queryRevision == 2
+}
 
 @Serializable
 enum class ClosedArchiveSource {
@@ -163,7 +166,7 @@ enum class ClosedArchiveSource {
 
 enum class RequestsMode(val title: String) {
     Active("Активные"),
-    Closed("Закрытые SO"),
+    Closed("Закрытые"),
 }
 
 enum class ActiveRequestsStatusFilter(val title: String) {

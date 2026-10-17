@@ -48,7 +48,7 @@ class SimpleOneXlsxParserTest {
         assertEquals("REQ001", record.number)
         assertEquals("+7 999 100-20-30", record.contactPhone)
         assertEquals("T-42", record.terminalId)
-        assertEquals("2026-08-12 12:00:00", record.closedAt)
+        assertEquals("12.08.2026 12:00:00", record.closedAt)
         assertEquals("RETURN-POS-1", record.tableFields["Номер принятого оборудования POS"])
         assertEquals("RETURN-PIN-1", record.tableFields["Номер принятого оборудования PIN"])
         assertEquals(25, record.tableFields.size)
