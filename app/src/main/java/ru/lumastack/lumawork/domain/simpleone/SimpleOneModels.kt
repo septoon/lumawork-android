@@ -64,6 +64,7 @@ data class SimpleOneRequest(
     val ofdTariffActivationCode: String = "",
     val usedSimCard: String = "",
     val tableFields: Map<String, String> = emptyMap(),
+    val sysUpdatedAt: String = "",
 ) {
     val id: String
         get() = sysId.ifBlank { number }
@@ -145,6 +146,7 @@ data class SimpleOneSnapshot(
     val currentUser: SimpleOneUser? = null,
     val activeRequests: List<SimpleOneRequest> = emptyList(),
     val updatedAtEpochMillis: Long? = null,
+    val sessionFingerprint: String = "",
 )
 
 @Serializable

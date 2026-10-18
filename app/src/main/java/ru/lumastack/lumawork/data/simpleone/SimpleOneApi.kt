@@ -70,6 +70,7 @@ interface SimpleOneApi {
     suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest
     suspend fun coordinationRequests(region: CoordinationRegion, authKey: String): List<SimpleOneRequest>
     suspend fun returnEquipmentRequests(userId: String, authKey: String): List<SimpleOneRequest>
+    suspend fun groupClosedRequestsPage(page: Int, authKey: String, perPage: Int = 100, newestFirst: Boolean = false): GroupClosedRequestsPage = throw SimpleOneFailure.InvalidResponse
     suspend fun employeeAddresses(query: String, authKey: String): List<EmployeeAddress> = emptyList()
     suspend fun employees(
         address: EmployeeAddress,
@@ -80,6 +81,12 @@ interface SimpleOneApi {
     suspend fun workScheduleJournals(authKey: String): List<WorkScheduleJournal> = throw SimpleOneFailure.InvalidResponse
     suspend fun workSchedule(journal: WorkScheduleJournal, authKey: String): WorkSchedule = throw SimpleOneFailure.InvalidResponse
 }
+
+data class GroupClosedRequestsPage(
+    val records: List<SimpleOneRequest>,
+    val totalCount: Int? = null,
+    val hasMore: Boolean,
+)
 
 sealed class SimpleOneFailure(message: String, cause: Throwable? = null) : Exception(message, cause) {
     class Network(cause: IOException) : SimpleOneFailure("Не удалось подключиться к SimpleOne.", cause)
@@ -284,6 +291,33 @@ class OkHttpSimpleOneApi(
         columns = COORDINATION_COLUMNS,
         maxPages = MAX_COORDINATION_PAGES,
     ).filter { isReturnEquipmentRequest(it.requestType) }
+
+    override suspend fun groupClosedRequestsPage(
+        page: Int,
+        authKey: String,
+        perPage: Int,
+        newestFirst: Boolean,
+    ): GroupClosedRequestsPage {
+        require(page > 0 && perPage > 0)
+        val order = if (newestFirst) "^ORDERBYDESCsys_updated_at^ORDERBYDESCsys_id" else ""
+        val condition = "(company_location=171878330004108924^resolved_atNOTONopt:167653141215593053" +
+            "^stateNOT INon_hold@assigned@in_progress@escalated@returned_to_work@3@6@update_received)" + order
+        val url = "$origin/list/itsm_request".toHttpUrl().newBuilder()
+            .addQueryParameter("condition", condition)
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("per_page", perPage.toString())
+            .addQueryParameter("columns", COORDINATION_COLUMNS.joinToString(","))
+            .build()
+        val response = request(authenticatedRequest(url.toString(), authKey))
+        val items = simpleOneListItems(response) ?: throw serverFailure(response)
+            ?: SimpleOneFailure.InvalidResponse
+        val total = simpleOneTotalCount(response)?.takeIf { it >= 0 }
+        return GroupClosedRequestsPage(
+            records = items.map { parseSimpleOneRequest(it, SimpleOneRequestSource.Closed) },
+            totalCount = total,
+            hasMore = total?.let { page.toLong() * perPage < it } ?: (items.size == perPage),
+        )
+    }
 
     override suspend fun warehouseRequests(terminalId: String, authKey: String): List<SimpleOneRequest> {
         val terminal = terminalId.trim()
@@ -533,6 +567,7 @@ class OkHttpSimpleOneApi(
             "registered_at",
             "opened_at",
             "sys_created_at",
+            "sys_updated_at",
             "state",
             "multicard_state",
             "short_description",
@@ -621,6 +656,7 @@ internal fun parseSimpleOneRequest(
     return SimpleOneRequest(
         source = source,
         sysId = item.field("sys_id"),
+        sysUpdatedAt = item.field("sys_updated_at"),
         number = item.field("number", "__display_value"),
         incomingNumber = firstNonEmpty(
             item.field(

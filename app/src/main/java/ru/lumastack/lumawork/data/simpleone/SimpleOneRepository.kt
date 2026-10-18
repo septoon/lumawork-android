@@ -34,7 +34,26 @@ class SimpleOneRepository(
         sessionStore.readUsername(ownerUserId)
     }
 
-    suspend fun readSnapshot(ownerUserId: String): SimpleOneSnapshot? = cache.read(ownerUserId)
+    suspend fun readSnapshot(ownerUserId: String): SimpleOneSnapshot? {
+        val session = storedSession(ownerUserId) ?: return null
+        return cache.read(ownerUserId)?.takeIf { it.sessionFingerprint == simpleOneSessionFingerprint(session) }
+    }
+
+    /** Resolves identity for Coordination without fetching active or closed request lists. */
+    suspend fun resolveCurrentUser(ownerUserId: String): SimpleOneSnapshot {
+        val session = storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials
+        try {
+            val user = api.currentUser(session.authKey)
+            return withCurrentSession(ownerUserId, session) {
+                val previous = cache.read(ownerUserId)?.takeIf { it.sessionFingerprint == simpleOneSessionFingerprint(session) }
+                (previous ?: SimpleOneSnapshot()).copy(currentUser = user, sessionFingerprint = simpleOneSessionFingerprint(session))
+                    .also { cache.save(ownerUserId, it) }
+            }
+        } catch (error: SimpleOneFailure.Unauthorized) {
+            sessionMutex.withLock { if (storedSession(ownerUserId) == session) withContext(Dispatchers.IO) { sessionStore.clear(ownerUserId) } }
+            throw error
+        }
+    }
 
     suspend fun readClosedArchive(ownerUserId: String): ClosedSimpleOneArchive? =
         supplementalCache.readClosedArchive(ownerUserId)
@@ -70,7 +89,7 @@ class SimpleOneRepository(
     suspend fun refresh(ownerUserId: String, cached: SimpleOneSnapshot?): SimpleOneSnapshot {
         val session = storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials
         return try {
-            val currentUser = cached?.currentUser ?: api.currentUser(session.authKey)
+            val currentUser = cached?.takeIf { it.sessionFingerprint == simpleOneSessionFingerprint(session) }?.currentUser ?: api.currentUser(session.authKey)
             val listed = api.activeRequests(currentUser.sysId, session.authKey)
             val requests = listed.chunked(4).flatMap { chunk -> coroutineScope {
                 chunk.map { request -> async {
@@ -84,6 +103,7 @@ class SimpleOneRepository(
                 currentUser = currentUser,
                 activeRequests = requests,
                 updatedAtEpochMillis = nowEpochMillis(),
+                sessionFingerprint = simpleOneSessionFingerprint(session),
             ).also { snapshot -> withCurrentSession(ownerUserId, session) { cache.save(ownerUserId, snapshot) } }
         } catch (error: SimpleOneFailure.Unauthorized) {
             sessionMutex.withLock {
@@ -100,7 +120,7 @@ class SimpleOneRepository(
     ): ClosedSimpleOneArchive = archiveMutex.withLock {
         val session = storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials
         try {
-            val currentUser = cachedSnapshot?.currentUser ?: api.currentUser(session.authKey)
+            val currentUser = cachedSnapshot?.takeIf { it.sessionFingerprint == simpleOneSessionFingerprint(session) }?.currentUser ?: api.currentUser(session.authKey)
             onProgress("Подготовка полного архива SimpleOne…")
             val archive = try {
                 val xlsx = api.exportClosedRequests(currentUser.sysId, session.authKey)
@@ -163,8 +183,10 @@ class SimpleOneRepository(
         }.distinctBy { it.id }.sortedByDescending { it.registeredAt }
     }
 
-    suspend fun requestDetails(ownerUserId: String, request: SimpleOneRequest, force: Boolean = false): SimpleOneRequest {
-        val cached = supplementalCache.readDetail(ownerUserId, request.id)
+    suspend fun requestDetails(ownerUserId: String, request: SimpleOneRequest, force: Boolean = false, requiresCurrentVersion: Boolean = false): SimpleOneRequest {
+        val requiredSession = if (requiresCurrentVersion) storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials else null
+        val stored = supplementalCache.readDetail(ownerUserId, request.id)
+        val cached = stored?.takeIf { !requiresCurrentVersion || (request.sysUpdatedAt.isNotBlank() && request.sysUpdatedAt == it.request.sysUpdatedAt) }
         if (!force && cached != null && nowEpochMillis() - cached.cachedAtEpochMillis < DETAIL_CACHE_LIFETIME_MILLIS &&
             cached.request.state == request.state && cached.request.stateRaw == request.stateRaw &&
             (request.multicardState.isBlank() || cached.request.multicardState == request.multicardState) &&
@@ -172,7 +194,7 @@ class SimpleOneRepository(
             return cached.request
         }
 
-        val session = storedSession(ownerUserId) ?: return cached?.request ?: request
+        val session = requiredSession ?: storedSession(ownerUserId) ?: return cached?.request ?: request
         return try {
             api.requestDetails(request, session.authKey).also { detailed ->
                 withCurrentSession(ownerUserId, session) {
@@ -201,3 +223,6 @@ class SimpleOneRepository(
         private const val DETAIL_CACHE_LIFETIME_MILLIS = 24L * 60 * 60 * 1_000
     }
 }
+
+internal fun simpleOneSessionFingerprint(session: StoredSimpleOneSession): String = java.security.MessageDigest.getInstance("SHA-256")
+    .digest("${session.ownerUserId.length}:${session.ownerUserId}${session.authKey}".toByteArray()).joinToString("") { "%02x".format(it) }

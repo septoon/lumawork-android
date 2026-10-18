@@ -59,6 +59,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlin.math.roundToInt
@@ -153,6 +154,22 @@ fun AppShell(
         factory = SimpleOneViewModel.factory(simpleOneRepository, session.user.id, isOffline),
     )
     val simpleOneState by simpleOneViewModel.state.collectAsStateWithLifecycle()
+    val groupClosed = coordinationRepository.groupClosedRepository
+    androidx.compose.runtime.LaunchedEffect(session.user.id, simpleOneState.snapshot.currentUser?.sysId, simpleOneState.isAuthorized, simpleOneState.isInitializing, isOffline) {
+        if (!simpleOneState.isInitializing && groupClosed != null) {
+            if (!simpleOneState.isAuthorized || simpleOneState.snapshot.currentUser?.sysId == null) groupClosed.deactivate()
+            else if (groupClosed.state.value.didLoadCache) groupClosed.activate(session.user.id,
+                simpleOneState.snapshot.currentUser!!.sysId, true, isOffline)
+        }
+    }
+    val shellLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.LaunchedEffect(groupClosed, shellLifecycle, isOffline, simpleOneState.isAuthorized) {
+        shellLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            if (!isOffline && simpleOneState.isAuthorized && groupClosed?.state?.value?.didLoadCache == true) groupClosed.refresh()
+            kotlinx.coroutines.awaitCancellation()
+        }
+    }
+
     val simpleOneActions = remember(simpleOneViewModel) {
         RequestsActions(
             onUsernameChange = simpleOneViewModel::updateUsername,
@@ -175,6 +192,7 @@ fun AppShell(
             onExportArchive = simpleOneViewModel::exportArchive,
             onCleanupArchive = simpleOneViewModel::cleanupArchive,
             browserAuthKey = simpleOneViewModel::browserAuthKey,
+            onResolveCurrentUser = simpleOneViewModel::ensureCurrentUser,
         )
     }
 
@@ -284,6 +302,7 @@ private fun AppDrawerShell(
     androidx.compose.runtime.LaunchedEffect(selected, simpleOneState.isAuthorized) {
         if (selected != AppDestination.Employees || !simpleOneState.isAuthorized) workScheduleOpen = false
     }
+    val groupProgress = coordinationRepository.groupClosedRepository?.state?.collectAsStateWithLifecycle()?.value
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
@@ -292,6 +311,7 @@ private fun AppDrawerShell(
         drawerContent = {
             ModalDrawerSheet(modifier = Modifier.width(320.dp)) {
                 NavigationMenu(
+                    groupArchiveLoading = groupProgress?.isLoading == true && groupProgress.ownerUserId == session.user.id && groupProgress.simpleOneUserId == simpleOneState.snapshot.currentUser?.sysId,
                     onOpenSettings = { scope.launch { drawerState.close(); onOpenSettings() } },
                     onOpenFeedback = { scope.launch { drawerState.close(); onOpenFeedback() } },
                     destinations = destinations,
@@ -420,6 +440,7 @@ private fun NavigationMenu(
     onOpenSettings: () -> Unit,
     onOpenFeedback: () -> Unit,
     modifier: Modifier = Modifier,
+    groupArchiveLoading: Boolean = false,
 ) {
     Column(modifier.padding(horizontal = 18.dp, vertical = 28.dp)) {
         Text("Инженер", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold,
@@ -443,6 +464,11 @@ private fun NavigationMenu(
                     }
                 }
             }
+        }
+        if (groupArchiveLoading) Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            Text("Загрузка заявок группы", style = MaterialTheme.typography.bodySmall)
         }
         Row(Modifier.fillMaxWidth().padding(top = 22.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onClick = onOpenSettings,
@@ -550,6 +576,8 @@ private fun DestinationContent(
             )
             AppDestination.Coordination -> CoordinationRoute(
                 ownerUserId = session.user.id,
+                session = session,
+                requestsActions = simpleOneActions,
                 startOffline = isOffline,
                 simpleOneState = simpleOneState,
                 coordinationRepository = coordinationRepository,

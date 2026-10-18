@@ -7,7 +7,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import ru.lumastack.lumawork.domain.coordination.CoordinationRequestGroup
 import ru.lumastack.lumawork.domain.coordination.CoordinationSnapshot
 
 interface CoordinationCache {
@@ -28,23 +27,16 @@ class FileCoordinationCache(
     }
 
     override suspend fun save(ownerUserId: String, snapshot: CoordinationSnapshot) = withContext(Dispatchers.IO) {
-        val bounded = snapshot.copy(
-            regions = snapshot.regions.mapValues { (_, group) -> group.bounded() },
-            returnEquipment = snapshot.returnEquipment?.bounded(),
-        )
         val destination = file(ownerUserId)
         destination.parentFile?.mkdirs()
         val temporary = File(destination.parentFile, "${destination.name}.tmp")
-        val encoded = json.encodeToString(bounded)
+        val encoded = json.encodeToString(snapshot)
         temporary.writeText(encoded)
         if (!temporary.renameTo(destination)) {
-            destination.writeText(encoded)
             temporary.delete()
+            throw java.io.IOException("Не удалось сохранить координацию.")
         }
     }
-
-    private fun CoordinationRequestGroup.bounded(): CoordinationRequestGroup =
-        copy(requests = requests.take(MAX_REQUESTS_PER_GROUP))
 
     private fun file(ownerUserId: String): File = File(directory, "${ownerUserId.sha256()}.json")
 
@@ -52,7 +44,4 @@ class FileCoordinationCache(
         .digest(toByteArray())
         .joinToString("") { "%02x".format(it) }
 
-    companion object {
-        private const val MAX_REQUESTS_PER_GROUP = 3_000
-    }
 }

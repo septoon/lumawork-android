@@ -31,6 +31,7 @@ data class SimpleOneUiState(
     val sortOrder: ActiveRequestsSortOrder = ActiveRequestsSortOrder.RegisteredAt,
     val selectedRequest: SimpleOneRequest? = null,
     val isInitializing: Boolean = true,
+    val isResolvingUser: Boolean = false,
     val initialArchiveReady: Boolean = false,
     val initialLoadRequested: Boolean = false,
     val showConnection: Boolean = false,
@@ -60,6 +61,7 @@ class SimpleOneViewModel(
     private var archiveJob: Job? = null
     private var detailJob: Job? = null
     private var authJob: Job? = null
+    private var identityJob: Job? = null
     private var sessionEpoch = 0L
 
     init { restore() }
@@ -98,12 +100,30 @@ class SimpleOneViewModel(
             try {
                 repository.authenticate(ownerUserId, state.username, state.password)
                 if (epoch != sessionEpoch) return@launch
-                mutableState.update { it.copy(password = "", snapshot = it.snapshot.copy(currentUser = null), isAuthorized = true, isLoading = false, showConnection = false) }
+                mutableState.update { it.copy(password = "", snapshot = SimpleOneSnapshot(), isAuthorized = true, isLoading = false, showConnection = false) }
                 if (!mutableState.value.initialArchiveReady) loadClosedArchive() else refreshActiveRequests()
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
                 if (epoch == sessionEpoch) mutableState.update { it.copy(isLoading = false,
                     errorMessage = if (error is SimpleOneFailure.Unauthorized) "Проверьте логин и пароль SimpleOne." else error.userMessage()) }
+            }
+        }
+    }
+
+    fun ensureCurrentUser() {
+        val current = state.value
+        if (startOffline || !current.isAuthorized || current.isInitializing || current.snapshot.currentUser != null || identityJob?.isActive == true) return
+        val epoch = sessionEpoch
+        mutableState.update { it.copy(isResolvingUser = true) }
+        identityJob = viewModelScope.launch {
+            try {
+                val snapshot = repository.resolveCurrentUser(ownerUserId)
+                if (epoch == sessionEpoch) mutableState.update { it.copy(snapshot = if (it.snapshot.currentUser != null && it.snapshot.sessionFingerprint == snapshot.sessionFingerprint) it.snapshot else snapshot, isResolvingUser = false) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                if (epoch == sessionEpoch) mutableState.update { it.copy(isResolvingUser = false,
+                    isAuthorized = it.isAuthorized && error !is SimpleOneFailure.Unauthorized && error !is SimpleOneFailure.MissingCredentials,
+                    errorMessage = error.userMessage()) }
             }
         }
     }
@@ -136,9 +156,9 @@ class SimpleOneViewModel(
 
     fun signOut() {
         sessionEpoch++
-        activeJob?.cancel(); archiveJob?.cancel(); authJob?.cancel(); detailJob?.cancel()
+        activeJob?.cancel(); archiveJob?.cancel(); authJob?.cancel(); detailJob?.cancel(); identityJob?.cancel()
         mutableState.update { it.copy(password = "", isAuthorized = false, isLoading = false,
-            isClosedLoading = false, isDetailLoading = false, selectedRequest = null, archiveProgress = null,
+            isClosedLoading = false, isDetailLoading = false, isResolvingUser = false, selectedRequest = null, archiveProgress = null,
             showConnection = false, errorMessage = null, notice = null) }
         viewModelScope.launch { repository.signOut(ownerUserId) }
     }

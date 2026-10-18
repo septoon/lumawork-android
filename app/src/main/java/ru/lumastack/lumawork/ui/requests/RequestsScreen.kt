@@ -101,6 +101,7 @@ data class RequestsActions(
     val onExportArchive: suspend () -> ByteArray = { byteArrayOf() },
     val onCleanupArchive: (ru.lumastack.lumawork.domain.requests.ClosedRequestsPeriod?) -> Unit = {},
     val browserAuthKey: suspend () -> String? = { null },
+    val onResolveCurrentUser: () -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

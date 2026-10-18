@@ -83,6 +83,31 @@ class SimpleOneRepositoryTest {
         assertEquals("engineer", sessionStore.readUsername("owner-1"))
     }
 
+    @Test fun `new authorization cannot restore previous SimpleOne identity or reuse it for filters`() = runBlocking {
+        val oldSession = StoredSimpleOneSession("owner-1", "old-auth", "old-user")
+        val newSession = StoredSimpleOneSession("owner-1", "new-auth", "new-user")
+        val oldSnapshot = SimpleOneSnapshot(SimpleOneUser("old-user-id", "old-user", "", ""), listOf(request()),
+            sessionFingerprint = simpleOneSessionFingerprint(oldSession))
+        val sessions = FakeSimpleOneSessionStore().apply { save(newSession) }
+        val cache = FakeSimpleOneCache().apply { values["owner-1"] = oldSnapshot }
+        val api = FakeSimpleOneApi()
+        val repository = SimpleOneRepository(api, sessions, cache)
+        assertNull(repository.readSnapshot("owner-1"))
+        val refreshed = repository.refresh("owner-1", oldSnapshot)
+        assertEquals("simple-user", refreshed.currentUser?.sysId)
+        assertEquals(simpleOneSessionFingerprint(newSession), refreshed.sessionFingerprint)
+        assertEquals(1, api.currentUserCalls)
+    }
+    @Test fun `coordination identity resolve does not start request lists and stable cache reads are local`() = runBlocking {
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner-1", "auth", "user")) }
+        val api = FakeSimpleOneApi()
+        val repository = SimpleOneRepository(api, sessions, FakeSimpleOneCache())
+        val verified = repository.resolveCurrentUser("owner-1")
+        assertEquals("simple-user", verified.currentUser?.sysId)
+        assertEquals(verified, repository.readSnapshot("owner-1"))
+        assertEquals(1, api.currentUserCalls)
+        assertEquals(0, api.activeCalls); assertEquals(0, api.archiveCalls); assertEquals(0, api.exportCalls)
+    }
     @Test
     fun `fresh detail cache avoids SimpleOne request`() = runBlocking {
         val api = FakeSimpleOneApi()
@@ -106,6 +131,29 @@ class SimpleOneRepositoryTest {
         assertEquals(0, api.detailCalls)
     }
 
+    @Test fun `coordination detail cache rejects changed and unknown list versions`() = runBlocking {
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner-1", "auth", "user")) }
+        val supplemental = FakeSimpleOneSupplementalCache().apply {
+            details["owner-1" to "request-1"] = SimpleOneDetailCacheEntry(request().copy(sysUpdatedAt = "v1", description = "old"), 1_000L)
+        }
+        val api = FakeSimpleOneApi()
+        val repository = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), supplemental) { 2_000L }
+        assertEquals("old", repository.requestDetails("owner-1", request().copy(sysUpdatedAt = "v1"), requiresCurrentVersion = true).description)
+        assertEquals(0, api.detailCalls)
+        assertEquals("v2", repository.requestDetails("owner-1", request().copy(sysUpdatedAt = "v2"), requiresCurrentVersion = true).sysUpdatedAt)
+        assertEquals(1, api.detailCalls)
+        repository.requestDetails("owner-1", request(), requiresCurrentVersion = true)
+        assertEquals(2, api.detailCalls)
+    }
+    @Test fun `coordination network failure cannot replace current list version with stale cached detail`() = runBlocking {
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner-1", "auth", "user")) }
+        val supplemental = FakeSimpleOneSupplementalCache().apply {
+            details["owner-1" to "request-1"] = SimpleOneDetailCacheEntry(request().copy(sysUpdatedAt = "v1"), 1_000L)
+        }
+        val repository = SimpleOneRepository(FakeSimpleOneApi(error = SimpleOneFailure.Http(500, "error")), sessions,
+            FakeSimpleOneCache(), supplemental) { 2_000L }
+        assertTrue(runCatching { repository.requestDetails("owner-1", request().copy(sysUpdatedAt = "v2"), requiresCurrentVersion = true) }.isFailure)
+    }
     @Test
     fun `stale detail cache is fallback for transient error`() = runBlocking {
         val sessionStore = FakeSimpleOneSessionStore().apply {

@@ -1,451 +1,274 @@
 package ru.lumastack.lumawork.ui.coordination
 
-import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
-import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.painterResource
+import ru.lumastack.lumawork.R
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.*
+import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import ru.lumastack.lumawork.BuildConfig
 import ru.lumastack.lumawork.data.coordination.CoordinationRepository
+import ru.lumastack.lumawork.data.coordination.GroupClosedRequestsState
 import ru.lumastack.lumawork.data.simpleone.SimpleOneRepository
-import ru.lumastack.lumawork.domain.coordination.CoordinationEngineer
-import ru.lumastack.lumawork.domain.coordination.CoordinationRegion
-import ru.lumastack.lumawork.domain.coordination.CoordinationRequestGroup
-import ru.lumastack.lumawork.domain.coordination.CoordinationSection
-import ru.lumastack.lumawork.domain.coordination.coordinationEngineerKey
-import ru.lumastack.lumawork.domain.coordination.coordinationEngineers
+import ru.lumastack.lumawork.domain.coordination.*
+import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
-import ru.lumastack.lumawork.ui.requests.SimpleOneRequestDetailContent
+import ru.lumastack.lumawork.ui.requests.*
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
+import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
 
 @Composable
-fun CoordinationRoute(
-    ownerUserId: String,
-    startOffline: Boolean,
-    simpleOneState: SimpleOneUiState,
-    coordinationRepository: CoordinationRepository,
-    simpleOneRepository: SimpleOneRepository,
-    widthClass: AppWidthClass,
-    modifier: Modifier = Modifier,
+fun CoordinationRoute(ownerUserId: String, startOffline: Boolean, simpleOneState: SimpleOneUiState,
+    coordinationRepository: CoordinationRepository, simpleOneRepository: SimpleOneRepository, widthClass: AppWidthClass,
+    modifier: Modifier = Modifier, session: AppSession? = null, requestsActions: RequestsActions? = null,
 ) {
-    val coordinationViewModel: CoordinationViewModel = viewModel(
-        key = "coordination-$ownerUserId-$startOffline",
-        factory = CoordinationViewModel.factory(
-            coordinationRepository,
-            simpleOneRepository,
-            ownerUserId,
-            startOffline,
-        ),
-    )
-    val state by coordinationViewModel.state.collectAsStateWithLifecycle()
-    LaunchedEffect(simpleOneState.snapshot.currentUser?.sysId, simpleOneState.isAuthorized) {
-        coordinationViewModel.activate(
-            simpleOneUserId = simpleOneState.snapshot.currentUser?.sysId.orEmpty(),
-            isAuthorized = simpleOneState.isAuthorized,
-        )
-    }
-    CoordinationScreen(
-        state = state,
-        widthClass = widthClass,
-        onSectionChange = coordinationViewModel::selectSection,
-        onRegionChange = coordinationViewModel::selectRegion,
-        onRefresh = { coordinationViewModel.refresh() },
-        onOpenEngineer = coordinationViewModel::openEngineer,
-        onOpenRequest = coordinationViewModel::openRequest,
-        onBack = coordinationViewModel::back,
-        modifier = modifier,
-    )
-}
-
-@Composable
-private fun CoordinationScreen(
-    state: CoordinationUiState,
-    widthClass: AppWidthClass,
-    onSectionChange: (CoordinationSection) -> Unit,
-    onRegionChange: (CoordinationRegion) -> Unit,
-    onRefresh: () -> Unit,
-    onOpenEngineer: (String) -> Unit,
-    onOpenRequest: (SimpleOneRequest) -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(isDark) {
-        Brush.verticalGradient(
-            if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
-        )
-    }
-    AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
-        enabled = state.isAuthorized && state.selectedRequest == null, contentAlignment = Alignment.TopCenter) {
-        when {
-            state.selectedRequest != null -> SimpleOneRequestDetailContent(
-                request = state.selectedRequest,
-                widthClass = widthClass,
-                isLoading = state.isDetailLoading,
-                errorMessage = state.detailErrorMessage,
-                onBack = onBack,
-            )
-            state.selectedEngineerId != null -> EngineerRequestsContent(
-                state = state,
-                widthClass = widthClass,
-                onBack = onBack,
-                onOpenRequest = onOpenRequest,
-            )
-            else -> CoordinationOverview(
-                state = state,
-                widthClass = widthClass,
-                onSectionChange = onSectionChange,
-                onRegionChange = onRegionChange,
-                onOpenEngineer = onOpenEngineer,
-                onOpenRequest = onOpenRequest,
-            )
-        }
+    key(ownerUserId, session?.token, startOffline) {
+        CoordinationRouteContent(ownerUserId, startOffline, simpleOneState, coordinationRepository, simpleOneRepository, widthClass, modifier, session, requestsActions)
     }
 }
 
 @Composable
-private fun CoordinationOverview(
-    state: CoordinationUiState,
-    widthClass: AppWidthClass,
-    onSectionChange: (CoordinationSection) -> Unit,
-    onRegionChange: (CoordinationRegion) -> Unit,
-    onOpenEngineer: (String) -> Unit,
-    onOpenRequest: (SimpleOneRequest) -> Unit,
+private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne: SimpleOneUiState,
+    repository: CoordinationRepository, simpleOneRepository: SimpleOneRepository, width: AppWidthClass,
+    modifier: Modifier, session: AppSession?, requestsActions: RequestsActions?,
 ) {
-    val columns = if (widthClass == AppWidthClass.Compact) 1 else 2
-    val group = state.currentGroup()
-    val engineers = remember(group.requests) { coordinationEngineers(group.requests) }
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(20.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.widthIn(max = 1000.dp).fillMaxSize(),
-    ) {
-        item(key = "sections", span = { GridItemSpan(maxLineSpan) }) {
-            SectionSelector(state.section, onSectionChange)
+    val model: CoordinationViewModel = viewModel(key = "coordination-$owner-$offline", factory = CoordinationViewModel.factory(repository, simpleOneRepository, owner, offline))
+    val state by model.state.collectAsStateWithLifecycle()
+    val archive = repository.groupClosedRepository
+    val unscopedArchiveState = archive?.state?.collectAsStateWithLifecycle()?.value
+    val archiveState = unscopedArchiveState?.takeIf { it.ownerUserId == owner && it.simpleOneUserId == simpleOne.snapshot.currentUser?.sysId } ?: GroupClosedRequestsState()
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val holder = rememberSaveableStateHolder()
+    val json = remember { Json { ignoreUnknownKeys = true; encodeDefaults = true } }
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    val user = simpleOne.snapshot.currentUser
+    LaunchedEffect(user?.sysId, simpleOne.isAuthorized, simpleOne.isInitializing) {
+        if (!simpleOne.isInitializing && user == null && simpleOne.isAuthorized && !offline) requestsActions?.onResolveCurrentUser?.invoke()
+        model.activate(user?.sysId.orEmpty(), simpleOne.isAuthorized)
+    }
+    LaunchedEffect(state.isAuthorized, state.simpleOneUserId, archiveState.requiresAuthorization) {
+        if (!offline && simpleOne.isAuthorized && ((!state.isAuthorized && state.simpleOneUserId.isNotBlank()) || archiveState.requiresAuthorization)) requestsActions?.onSignOut?.invoke()
+    }
+    LaunchedEffect(state.isArchiveOpen, user?.sysId, simpleOne.isAuthorized, lifecycle) {
+        if (state.isArchiveOpen && archive != null) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            archive.activate(owner, user?.sysId.orEmpty(), simpleOne.isAuthorized, offline)
+            while (true) { delay(60_000); if (!offline) archive.refresh() }
         }
-        item(key = "summary", span = { GridItemSpan(maxLineSpan) }) {
-            CoordinationSummary(
-                state = state,
-                group = group,
-                engineers = engineers,
-                onRegionChange = onRegionChange,
-            )
-        }
-        if (!state.isAuthorized && state.simpleOneUserId.isBlank()) {
-            item(key = "not-authorized", span = { GridItemSpan(maxLineSpan) }) {
-                MessageCard("SimpleOne не подключён", "Войдите в SimpleOne на экране «Заявки».")
-            }
-        } else if (group.requests.isEmpty()) {
-            item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
-                MessageCard(
-                    if (state.isLoading) "Загружаю активные заявки…" else "Активных заявок нет",
-                    state.errorMessage ?: if (state.isAuthorized) {
-                        "В текущем разделе ничего не найдено."
-                    } else {
-                        "Войдите в SimpleOne и обновите раздел."
-                    },
-                )
-            }
-        } else if (state.section == CoordinationSection.Distribution) {
-            items(engineers, key = CoordinationEngineer::id) { engineer ->
-                EngineerCard(engineer, onClick = { onOpenEngineer(engineer.id) })
+    }
+    val records = remember(state.snapshot, archiveState.records) {
+        state.snapshot.regions.values.flatMap { it.requests } + state.snapshot.returnEquipment?.requests.orEmpty() + archiveState.records
+    }
+    val comments = session?.let { rememberClientPersonalCommentsController(it, offline, records, BuildConfig.API_ORIGIN, json) }
+    var terminal by remember { mutableStateOf<String?>(null) }
+    val copy: (String) -> Unit = { text ->
+        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Координация", text))
+        if (Build.VERSION.SDK_INT < 33) scope.launch { snackbar.showSnackbar("Скопировано") }
+    }
+    BackHandler(state.selectedRequest != null || state.selectedEngineerId != null || state.isArchiveOpen, model::back)
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        val selected = state.selectedRequest
+        if (selected != null && session != null && requestsActions != null && comments != null) {
+            RequestsDetailContent(selected,
+                simpleOne.copy(isOffline = offline, isAuthorized = state.isAuthorized, isDetailLoading = state.isDetailLoading, detailErrorMessage = state.detailErrorMessage),
+                requestsActions.copy(onCloseRequest = model::back, onOpenRequest = { model.openRequest(it, force = true) }),
+                comments, session, simpleOneRepository, json, onOpenTerminal = { terminal = it })
+        } else if (selected != null) {
+            SimpleOneRequestDetailContent(selected, width, state.isDetailLoading, state.detailErrorMessage, model::back)
+        } else if (state.isArchiveOpen) {
+            holder.SaveableStateProvider("closed-group-${state.simpleOneUserId}") {
+                CoordinationGroupClosedContent("$owner-${state.simpleOneUserId}", archiveState, state.isAuthorized, offline, model::back,
+                    onRefresh = { scope.launch { archive?.refresh(forceFull = true) } }, onOpen = { model.openRequest(it) }, copy = copy)
             }
         } else {
-            items(group.requests, key = SimpleOneRequest::id) { request ->
-                CoordinationRequestCard(request, onClick = { onOpenRequest(request) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionSelector(
-    selected: CoordinationSection,
-    onSelect: (CoordinationSection) -> Unit,
-) {
-    AppSegmentedControl(
-        titles = CoordinationSection.entries.map { it.title },
-        selectedIndex = CoordinationSection.entries.indexOf(selected),
-        onSelect = { onSelect(CoordinationSection.entries[it]) },
-    )
-}
-
-@Composable
-private fun CoordinationSummary(
-    state: CoordinationUiState,
-    group: CoordinationRequestGroup,
-    engineers: List<CoordinationEngineer>,
-    onRegionChange: (CoordinationRegion) -> Unit,
-) {
-    var regionMenuExpanded by remember { mutableStateOf(false) }
-    Card(
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(22.dp),
-    ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        if (state.section == CoordinationSection.Distribution) "Регион / город" else "Возврат оборудования",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    if (state.section == CoordinationSection.Distribution) {
-                        Box {
-                            Button(onClick = { regionMenuExpanded = true }) { Text(state.region.title) }
-                            DropdownMenu(
-                                expanded = regionMenuExpanded,
-                                onDismissRequest = { regionMenuExpanded = false },
-                            ) {
-                                CoordinationRegion.entries.forEach { region ->
-                                    DropdownMenuItem(
-                                        text = { Text(region.title) },
-                                        onClick = {
-                                            regionMenuExpanded = false
-                                            onRegionChange(region)
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        Text("Текущий пользователь SimpleOne", style = MaterialTheme.typography.titleMedium)
+            Column(Modifier.widthIn(max = 1100.dp).fillMaxSize()) {
+                if (state.selectedEngineerId == null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    AppSegmentedControl(CoordinationSection.entries.map { it.title }, state.section.ordinal, { model.selectSection(CoordinationSection.entries[it]) }, Modifier.weight(1f))
+                    IconButton(onClick = model::openArchive, enabled = state.isAuthorized && archive != null) { Icon(painterResource(R.drawable.ic_nav_assignment), "Закрытые заявки группы") }
+                } else Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = model::back) { Text("Назад") }
+                    val engineer = coordinationEngineers(state.currentGroup?.requests.orEmpty()).firstOrNull { it.id == state.selectedEngineerId }
+                    Text(engineer?.name ?: "Заявки", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 2)
+                    IconButton(onClick = model::refresh, enabled = state.isAuthorized && !offline && !state.isLoading) { Icon(Icons.Default.Refresh, "Обновить заявки инженера") }
+                }
+                if (simpleOne.isAuthorized && user == null) Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (simpleOne.isResolvingUser || simpleOne.isLoading || simpleOne.isInitializing) { CircularProgressIndicator(); Text("Проверяю профиль SimpleOne…") }
+                    else {
+                        CoordinationMessage("Профиль SimpleOne недоступен", simpleOne.errorMessage ?: "Для открытия координации требуется подтверждённый профиль SimpleOne.")
+                        TextButton(onClick = { requestsActions?.onResolveCurrentUser?.invoke() }, enabled = !offline) { Text("Повторить") }
                     }
                 }
-                if (state.isLoading) {
-                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                else if (!state.isAuthorized) CoordinationMessage("SimpleOne не подключён", "Войдите в SimpleOne на экране «Заявки», затем вернитесь в координацию.", Modifier.padding(16.dp))
+                else AppRefreshContainer(Modifier.weight(1f), state.isLoading, model::refresh, enabled = !offline) {
+                    holder.SaveableStateProvider("active-${state.section}-${state.region}-${state.selectedEngineerId}") {
+                        CoordinationActiveContent(state, user?.displayName?.ifBlank { user.username } ?: "Текущий пользователь", width,
+                            offline, model::selectRegion, model::openEngineer, { model.openRequest(it) }, copy)
+                    }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MetricCard(
-                    value = if (state.section == CoordinationSection.Distribution) {
-                        engineers.count { !it.isUnassigned }.toString()
-                    } else {
-                        group.requests.size.toString()
-                    },
-                    title = if (state.section == CoordinationSection.Distribution) "инженеров" else "возвратов",
-                    modifier = Modifier.weight(1f),
-                )
-                MetricCard(
-                    value = group.requests.size.toString(),
-                    title = "активных заявок",
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            group.updatedAtEpochMillis?.let {
-                Text(
-                    "Обновлено ${UPDATED_FORMATTER.format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))}",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            state.errorMessage?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-            }
         }
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+        if (comments != null) ClientPersonalCommentsHost(comments, Modifier.align(Alignment.BottomCenter))
     }
+    terminal?.let { WarehouseRequestsDialog(it, simpleOneRepository, owner, offline) { terminal = null } }
 }
 
 @Composable
-private fun MetricCard(value: String, title: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.background(
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-            RoundedCornerShape(14.dp),
-        ).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Text(value, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-        Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-private fun EngineerCard(engineer: CoordinationEngineer, onClick: () -> Unit) {
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(20.dp),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (engineer.isUnassigned) "?" else engineer.name.initials(),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Text(
-                engineer.name,
-                modifier = Modifier.weight(1f),
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(engineer.requestCount.toString(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-private fun EngineerRequestsContent(
-    state: CoordinationUiState,
-    widthClass: AppWidthClass,
-    onBack: () -> Unit,
-    onOpenRequest: (SimpleOneRequest) -> Unit,
+private fun CoordinationActiveContent(state: CoordinationUiState, userName: String, width: AppWidthClass, offline: Boolean,
+    onRegion: (CoordinationRegion) -> Unit, onEngineer: (String) -> Unit, onRequest: (SimpleOneRequest) -> Unit, copy: (String) -> Unit,
 ) {
-    val columns = if (widthClass == AppWidthClass.Compact) 1 else 2
-    val allRequests = state.snapshot.regions[state.region.name]?.requests.orEmpty()
-    val requests = remember(allRequests, state.selectedEngineerId) {
-        allRequests.filter { it.coordinationEngineerKey() == state.selectedEngineerId }
-            .sortedByDescending { it.registeredDateTime() }
-    }
-    val engineer = coordinationEngineers(allRequests).firstOrNull { it.id == state.selectedEngineerId }
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(20.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.widthIn(max = 1000.dp).fillMaxSize(),
-    ) {
-        item(key = "engineer-header", span = { GridItemSpan(maxLineSpan) }) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(onClick = onBack) { Text("Назад") }
-                    Text(engineer?.name ?: "Заявки", style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        "${state.region.title} · ${requests.size} заявок",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (state.isLoading) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-            }
+    val group = state.currentGroup
+    val requests = remember(group?.requests, state.selectedEngineerId) { if (state.selectedEngineerId != null) state.engineerRequests else group?.requests.orEmpty().sortedCoordinationRequests() }
+    val engineers = remember(group?.requests) { coordinationEngineers(group?.requests.orEmpty()) }
+    val detail = state.selectedEngineerId != null
+    val returning = state.section == CoordinationSection.ReturnEquipment
+    LazyVerticalGrid(GridCells.Fixed(if (width == AppWidthClass.Compact) 1 else 2), contentPadding = PaddingValues(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+        item("summary", span = { GridItemSpan(maxLineSpan) }) {
+            CoordinationSummary(state, userName, engineers, detail, onRegion)
         }
-        items(requests, key = SimpleOneRequest::id) { request ->
-            CoordinationRequestCard(request, onClick = { onOpenRequest(request) })
+        if (offline) item("offline", span = { GridItemSpan(maxLineSpan) }) { Text("Сохранённые данные. Для обновления подключитесь к сети.", style = MaterialTheme.typography.bodySmall) }
+        listOfNotNull(state.errorMessage, state.statusErrorMessage).distinct().forEachIndexed { index, error ->
+            item("error-$index", span = { GridItemSpan(maxLineSpan) }) { Text(error, color = MaterialTheme.colorScheme.error) }
         }
-    }
-}
-
-@Composable
-private fun CoordinationRequestCard(request: SimpleOneRequest, onClick: () -> Unit) {
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(
-            if (request.isOverdue()) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f)
-            else MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        ),
-        shape = RoundedCornerShape(20.dp),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text(request.displayNumber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-            request.state.takeIf(String::isNotBlank)?.let {
-                Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
+        when {
+            state.isLoading && group == null -> item("loading", span = { GridItemSpan(maxLineSpan) }) { Row(Modifier.padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) { CircularProgressIndicator(Modifier.size(22.dp)); Text("Загружаю активные заявки") } }
+            group == null -> item("no-cache", span = { GridItemSpan(maxLineSpan) }) { CoordinationMessage("Нет сохранённых данных", "Подключитесь к интернету и обновите координацию.") }
+            requests.isEmpty() -> item("empty", span = { GridItemSpan(maxLineSpan) }) { CoordinationMessage(if (returning) "Заявок «Возврат ТО» нет" else "Активных заявок нет", when {
+                state.errorMessage != null -> "В последних сохранённых данных активных заявок нет."
+                returning -> "У текущего пользователя нет активных заявок этого типа."
+                detail && state.selectedEngineerId == CoordinationEngineer.UNASSIGNED_ID -> "Все активные заявки региона уже назначены инженерам."
+                detail -> "У инженера больше нет активных заявок в выбранном регионе."
+                else -> "В выбранном регионе нет активных заявок."
+            }) }
+            !detail && !returning -> {
+                item("engineers-title", span = { GridItemSpan(maxLineSpan) }) { Column { Text("Распределение", style = MaterialTheme.typography.titleMedium); Text("По инженерам и без назначения", style = MaterialTheme.typography.bodySmall) } }
+                items(engineers, key = { it.id }) { engineer -> Card(onClick = { onEngineer(engineer.id) }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (engineer.isUnassigned) Icon(painterResource(R.drawable.ic_nav_groups), null, tint = MaterialTheme.colorScheme.primary)
+                        else Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.primary)
+                        Text(engineer.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                        Text(engineer.requestCount.toString(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
+                    }
+                } }
             }
-            request.shortDescription.takeIf(String::isNotBlank)?.let {
-                Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            request.address.takeIf(String::isNotBlank)?.let {
-                Text(
-                    it,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            else -> {
+                if (returning) item("return-title", span = { GridItemSpan(maxLineSpan) }) { Column { Text("Мои возвраты", style = MaterialTheme.typography.titleMedium); Text("Активные заявки текущего пользователя", style = MaterialTheme.typography.bodySmall) } }
+                items(requests, key = { it.id }) { CoordinationRequestCard(it, it.id in state.loadingStatusIds, returning, { onRequest(it) }, copy) }
             }
         }
     }
 }
 
 @Composable
-private fun MessageCard(title: String, message: String) {
-    Card(
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(20.dp),
-    ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
-            Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun CoordinationSummary(state: CoordinationUiState, userName: String, engineers: List<CoordinationEngineer>, detail: Boolean, onRegion: (CoordinationRegion) -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                if (state.section == CoordinationSection.Distribution) {
+                    if (!detail) Text("Регион / город", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Box {
+                        if (detail) Text(state.region.title, style = MaterialTheme.typography.titleMedium)
+                        else TextButton(onClick = { menu = true }) { Text(state.region.title); Icon(Icons.Default.KeyboardArrowDown, null) }
+                        DropdownMenu(menu, { menu = false }) { CoordinationRegion.entries.forEach { region -> DropdownMenuItem({ Text(region.title) }, { menu = false; onRegion(region) },
+                            trailingIcon = { if (region == state.region) Icon(Icons.Default.Check, null) }) } }
+                    }
+                } else { Text("Возврат ТО", style = MaterialTheme.typography.titleMedium); Text(userName, style = MaterialTheme.typography.bodyMedium) }
+            }
+            if (state.isLoading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            if (state.section == CoordinationSection.Distribution && !detail) Text("${engineers.count { !it.isUnassigned }} инженеров", style = MaterialTheme.typography.titleMedium)
+            Text("${if (detail) state.engineerRequests.size else state.currentGroup?.requests?.size ?: 0} заявок", style = MaterialTheme.typography.titleMedium)
+        }
+        state.currentGroup?.updatedAtEpochMillis?.let { Text("Обновлено ${COORDINATION_UPDATED.format(Instant.ofEpochMilli(it))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    } }
+}
+
+@Composable
+private fun CoordinationRequestCard(request: SimpleOneRequest, loading: Boolean, returning: Boolean, open: () -> Unit, copy: (String) -> Unit) {
+    val data = remember(request, loading, returning) { CoordinationRequestPresentation(request, loading, usesMulticardStatus = !returning) }
+    Card(onClick = open, modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SelectionContainer(Modifier.weight(1f)) { Text(data.primaryNumber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium) }
+            data.secondaryNumber?.let { Text("| $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!returning && data.typeTitle.isNotBlank()) Text(data.typeTitle, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            data.status?.let { status -> Text(status, color = coordinationStatusColor(status), style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f)) }
+            if (loading) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+        }
+        HorizontalDivider()
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f)) { CoordinationCopyField("ID терминала", data.terminalText, data.terminal, copy) }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                CoordinationCopyField("S/N установки", data.installedSerialText, data.installedSerial, copy)
+                CoordinationCopyField("S/N демонтажа", data.dismantledSerialText, data.dismantledSerial, copy)
+            }
+        }
+        if (data.registeredAt != null || data.deadline != null) { HorizontalDivider(); Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            data.registeredAt?.let { Text("Регистрация: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            data.deadline?.let { Text("Срок СУТС: $it", style = MaterialTheme.typography.bodySmall, color = if (request.isOverdue()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
+        } }
+        if (data.address.isNotBlank()) { HorizontalDivider(); Column { Text("Адрес", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(data.address, maxLines = 2, overflow = TextOverflow.Ellipsis) } }
+    } }
+}
+
+@Composable
+private fun CoordinationCopyField(title: String, display: String, value: String, copy: (String) -> Unit) {
+    Column { Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (value.isBlank()) Text(display, style = MaterialTheme.typography.bodyMedium)
+        else TextButton(onClick = { copy(value) }, contentPadding = PaddingValues(0.dp)) { Text(display) }
     }
 }
-
-private fun CoordinationUiState.currentGroup(): CoordinationRequestGroup = when (section) {
-    CoordinationSection.Distribution -> snapshot.regions[region.name] ?: CoordinationRequestGroup()
-    CoordinationSection.ReturnEquipment -> snapshot.returnEquipment ?: CoordinationRequestGroup()
+@Composable
+internal fun CoordinationMessage(title: String, message: String, modifier: Modifier = Modifier) {
+    Card(modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium); Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    } }
 }
+private val COORDINATION_UPDATED = DateTimeFormatter.ofPattern("d MMM, HH:mm", Locale.forLanguageTag("ru")).withZone(ZoneId.systemDefault())
 
-private fun String.initials(): String = split(Regex("\\s+"))
-    .filter(String::isNotBlank)
-    .take(2)
-    .mapNotNull(String::firstOrNull)
-    .joinToString("")
-    .uppercase(Locale.forLanguageTag("ru"))
-    .ifBlank { "?" }
-
-private val UPDATED_FORMATTER = DateTimeFormatter.ofPattern("d MMM, HH:mm", Locale.forLanguageTag("ru"))
+@Composable
+private fun coordinationStatusColor(status: String): androidx.compose.ui.graphics.Color {
+    val value = status.lowercase()
+    return when {
+        listOf("ожидан", "waiting", "pending").any(value::contains) -> androidx.compose.ui.graphics.Color(0xFFB26A00)
+        listOf("отказ", "отмен", "cancel").any(value::contains) -> MaterialTheme.colorScheme.error
+        listOf("решен", "выполн", "закрыт", "completed").any(value::contains) -> androidx.compose.ui.graphics.Color(0xFF25824F)
+        value.contains("недоступ") -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.primary
+    }
+}

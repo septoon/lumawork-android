@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 
 enum class CoordinationSection(val title: String) {
-    Distribution("Распределение"),
+    Distribution("На группу"),
     ReturnEquipment("Возврат ТО"),
 }
 
@@ -36,6 +36,9 @@ data class CoordinationSnapshot(
     val simpleOneUserId: String = "",
     val regions: Map<String, CoordinationRequestGroup> = emptyMap(),
     val returnEquipment: CoordinationRequestGroup? = null,
+    val selectedRegion: CoordinationRegion = CoordinationRegion.Alushta,
+    val sessionFingerprint: String = "",
+    val revision: Long = 0,
 )
 
 data class CoordinationEngineer(
@@ -74,7 +77,7 @@ fun coordinationEngineers(requests: List<SimpleOneRequest>): List<CoordinationEn
     )
 
 fun SimpleOneRequest.coordinationEngineerKey(): String {
-    val name = assignedUser.trim().lowercase()
+    val name = ru.lumastack.lumawork.domain.requests.normalizedClosedRequestsText(assignedUser)
     if (name.isNotEmpty()) return "name:$name"
     val userId = assignedUserId.trim()
     if (userId.isNotEmpty()) return "id:$userId"

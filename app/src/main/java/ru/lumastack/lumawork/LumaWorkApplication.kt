@@ -136,10 +136,16 @@ class AppContainer(application: Application) {
         supplementalCache = FileSimpleOneSupplementalCache(application, json),
     )
 
+    val coordinationGroupClosedRepository = ru.lumastack.lumawork.data.coordination.CoordinationGroupClosedRequestsRepository(
+        simpleOneApi, simpleOneSessionStore,
+        ru.lumastack.lumawork.data.coordination.FileCoordinationGroupClosedRequestsCache(application, json),
+        CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    )
     val coordinationRepository = CoordinationRepository(
         api = simpleOneApi,
         sessionStore = simpleOneSessionStore,
         cache = FileCoordinationCache(application, json),
+        groupClosedRepository = coordinationGroupClosedRepository,
     )
 
     val timeReportRepository = TimeReportRepository(
