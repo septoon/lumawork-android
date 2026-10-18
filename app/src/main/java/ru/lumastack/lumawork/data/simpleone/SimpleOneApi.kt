@@ -595,6 +595,8 @@ class OkHttpSimpleOneApi(
             "multicard_comment_ing",
             "multicard_information",
             "description",
+            "new_closure_code",
+            "closure_notes",
             "close_code",
             "close_notes",
         )
@@ -756,11 +758,11 @@ internal fun parseSimpleOneRequest(
         ),
         engineerComment = item.field("multicard_comment_ing"),
         closureCode = firstNonEmpty(
-            item.fieldDisplay("close_code", "closure_code", "resolution_code", "multicard_close_code"),
+            item.fieldDisplay("new_closure_code", "close_code", "closure_code", "resolution_code", "multicard_close_code"),
             labeledValue(infoTexts, "Код закрытия"),
         ),
         resolution = firstNonEmpty(
-            item.field("close_notes", "resolution", "solution", "resolved_notes", "multicard_resolution"),
+            item.field("closure_notes", "close_notes", "resolution", "solution", "resolved_notes", "multicard_resolution"),
             labeledValue(infoTexts, "Решение"),
         ),
         additionalInformation = information,

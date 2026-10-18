@@ -10,6 +10,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SimpleOnePayloadTest {
+    @Test fun `canonical closure fields preserve display label and resolution`() {
+        val record = parseSimpleOneRequest(Json.parseToJsonElement("""
+            {"sys_id":"done","number":"REQ-DONE",
+             "new_closure_code":{"value":"visit-code","display_value":"Решено с выездом на место"},
+             "closure_notes":"Терминал заменён"}
+        """).jsonObject)
+        assertEquals("Решено с выездом на место", record.closureCode)
+        assertEquals("Терминал заменён", record.resolution)
+    }
+
     @Test
     fun `list item resolves wrapped display and nested fields`() {
         val item = Json.parseToJsonElement(

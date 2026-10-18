@@ -2,6 +2,8 @@ package ru.lumastack.lumawork.data.simpleone
 
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import ru.lumastack.lumawork.domain.requests.buildClosedRequestsAnalytics
+import ru.lumastack.lumawork.domain.requests.prepareClosedRequests
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -15,6 +17,21 @@ import ru.lumastack.lumawork.domain.simpleone.*
 
 class ClosedRequestsArchiveTest {
     @get:Rule val temporary = TemporaryFolder()
+    @Test fun `list fallback requests closure fields and supplies completed analytics`() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val columns = chain.request().url.queryParameter("columns").orEmpty().split(",")
+            val closure = if ("new_closure_code" in columns) ",\"new_closure_code\":\"Решено с выездом\"" else ""
+            val resolution = if ("closure_notes" in columns) ",\"closure_notes\":\"Терминал заменён\"" else ""
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"status":"OK","data":{"list":[{"sys_id":"done","number":"REQ-DONE","state":"closed","multicard_request_type":"replacement","resolved_at":"2026-10-15 12:00:00"$closure$resolution}]}}""".toResponseBody()).build()
+        }.build()
+        val records = OkHttpSimpleOneApi("https://sd.test/v1", client, closedArchiveCondition = { "wide" }).closedRequests("user", "auth")
+        val analytics = buildClosedRequestsAnalytics(prepareClosedRequests(records))
+        assertEquals(1, analytics.completedCount)
+        assertEquals(listOf("2026-10"), analytics.months.map { it.id })
+        assertEquals("Терминал заменён", records.single().resolution)
+    }
+
     @Test fun `archive query matches wide iOS contract without a relative date window`() {
         val condition = ClosedRequestsArchiveQuery("111", "222", "333").condition()
         assertEquals("((multicard_engineerDYNAMIC111^ORassigned_userDYNAMIC222^ORengineer_schedule.employeeDYNAMIC111)^resolved_atNOTONopt:333^stateNOT INon_hold@assigned@in_progress@escalated@returned_to_work@3@6@update_received)", condition)
