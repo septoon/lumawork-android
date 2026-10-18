@@ -17,10 +17,23 @@ class ClosedRequestsArchiveTest {
     @get:Rule val temporary = TemporaryFolder()
     @Test fun `archive query matches wide iOS contract without a relative date window`() {
         val condition = ClosedRequestsArchiveQuery("111", "222", "333").condition()
-        assertEquals("((multicard_engineerDYNAMIC111^ORassigned_userDYNAMIC222^ORengineer_schedule.employeeDYNAMIC111))^resolved_atNOTONopt:333^stateNOT INon_hold@assigned@in_progress@escalated@returned_to_work@3@6@update_received)", condition)
+        assertEquals("((multicard_engineerDYNAMIC111^ORassigned_userDYNAMIC222^ORengineer_schedule.employeeDYNAMIC111)^resolved_atNOTONopt:333^stateNOT INon_hold@assigned@in_progress@escalated@returned_to_work@3@6@update_received)", condition)
         assertTrue(runCatching { ClosedRequestsArchiveQuery("", "222", "333").condition() }.isFailure)
     }
 
+    @Test fun `archive query keeps one outer group and balanced assignment subgroup`() {
+        val condition = ClosedRequestsArchiveQuery("111", "222", "333").condition()
+        var depth = 0
+        for (character in condition) {
+            if (character == '(') depth++
+            if (character == ')') depth--
+            assertTrue("Unmatched closing parenthesis in archive condition", depth >= 0)
+        }
+        assertEquals("Outer archive condition must be balanced", 0, depth)
+        val assignmentEnd = condition.indexOf("^resolved_at")
+        val prefix = condition.substring(0, assignmentEnd)
+        assertEquals("Date and state filters belong inside the outer condition", 1, prefix.count { it == '(' } - prefix.count { it == ')' })
+    }
     @Test fun `closed pagination reads beyond fifty pages without totalCount`() = runBlocking {
         var calls = 0
         val client = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->

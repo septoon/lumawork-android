@@ -15,7 +15,7 @@ internal data class ClosedRequestsArchiveQuery(
         }
         return "((multicard_engineerDYNAMIC$currentUserDynamicId" +
             "^ORassigned_userDYNAMIC$assignedUserDynamicId" +
-            "^ORengineer_schedule.employeeDYNAMIC$currentUserDynamicId))" +
+            "^ORengineer_schedule.employeeDYNAMIC$currentUserDynamicId)" +
             "^resolved_atNOTONopt:$resolvedDateOptionId" +
             "^stateNOT INon_hold@assigned@in_progress@escalated@returned_to_work@3@6@update_received)"
     }
