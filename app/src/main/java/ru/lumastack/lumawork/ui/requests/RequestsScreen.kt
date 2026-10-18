@@ -127,7 +127,7 @@ fun RequestsScreen(
         if (state.mode == RequestsMode.Closed) {
             savedLists.SaveableStateProvider("closed") {
             PullToRefreshBox(isRefreshing = state.isClosedLoading, onRefresh = actions.onRefresh) {
-                ClosedRequestsContent(state.closedArchive.requests, state.searchQuery, actions.onSearchQueryChange,
+                ClosedRequestsContent(state.closedArchiveItems, state.searchQuery, actions.onSearchQueryChange,
                     state.isClosedLoading, state.hasLoadedClosedArchive, state.isOffline || !state.isAuthorized,
                     actions.onOpenRequest, onOpenTerminal, personalComment = personalComment)
             }

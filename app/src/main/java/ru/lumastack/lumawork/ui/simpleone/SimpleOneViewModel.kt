@@ -5,6 +5,10 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ru.lumastack.lumawork.domain.requests.ClosedRequestsItem
+import ru.lumastack.lumawork.domain.requests.prepareClosedRequests
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +29,7 @@ data class SimpleOneUiState(
     val password: String = "",
     val snapshot: SimpleOneSnapshot = SimpleOneSnapshot(),
     val closedArchive: ClosedSimpleOneArchive = ClosedSimpleOneArchive(),
+    val closedArchiveItems: List<ClosedRequestsItem> = emptyList(),
     val mode: RequestsMode = RequestsMode.Active,
     val searchQuery: String = "",
     val statusFilter: ActiveRequestsStatusFilter = ActiveRequestsStatusFilter.Available,
@@ -205,7 +210,8 @@ class SimpleOneViewModel(
         archiveJob = viewModelScope.launch {
             try {
                 val archive = block()
-                if (epoch == sessionEpoch) mutableState.update { it.copy(closedArchive = archive,
+                val items = prepareArchive(archive)
+                if (epoch == sessionEpoch) mutableState.update { it.copy(closedArchive = archive, closedArchiveItems = items,
                     hasLoadedClosedArchive = true, initialArchiveReady = archive.isReady, isClosedLoading = false) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, errorMessage = error.userMessage()) } }
@@ -216,10 +222,11 @@ class SimpleOneViewModel(
         viewModelScope.launch {
             val cached = localOrNull { repository.readSnapshot(ownerUserId) }
             val archive = localOrNull { repository.readClosedArchive(ownerUserId) }
+            val items = archive?.let { prepareArchive(it) }.orEmpty()
             val session = localOrNull { repository.storedSession(ownerUserId) }
             val username = session?.username ?: localOrNull { repository.rememberedUsername(ownerUserId) }.orEmpty()
             mutableState.update { it.copy(username = username, snapshot = cached ?: it.snapshot,
-                closedArchive = archive ?: it.closedArchive, hasLoadedClosedArchive = archive != null,
+                closedArchive = archive ?: it.closedArchive, closedArchiveItems = items, hasLoadedClosedArchive = archive != null,
                 initialArchiveReady = archive?.isReady == true, isInitializing = false, isAuthorized = session != null) }
             // First entry performs local reads only. Active networking starts after a full baseline exists.
             if (archive?.isReady == true) refreshActiveRequests()
@@ -238,9 +245,10 @@ class SimpleOneViewModel(
                 val archive = repository.refreshClosedArchive(ownerUserId, mutableState.value.snapshot) { progress ->
                     if (epoch == sessionEpoch) mutableState.update { it.copy(archiveProgress = progress) }
                 }
+                val items = prepareArchive(archive)
                 if (epoch != sessionEpoch) return@launch
                 val wasReady = mutableState.value.initialArchiveReady
-                mutableState.update { it.copy(closedArchive = archive, hasLoadedClosedArchive = true,
+                mutableState.update { it.copy(closedArchive = archive, closedArchiveItems = items, hasLoadedClosedArchive = true,
                     initialArchiveReady = archive.isReady, isClosedLoading = false, isAuthorized = true, archiveProgress = null) }
                 if (!wasReady) refreshActiveRequests()
             } catch (error: CancellationException) { throw error }
@@ -250,6 +258,13 @@ class SimpleOneViewModel(
             }
         }
     }
+    // Owned by the screen model, so navigation never discards the parsed/searchable archive.
+    private suspend fun prepareArchive(archive: ClosedSimpleOneArchive): List<ClosedRequestsItem> {
+        val current = state.value
+        if (archive.requests === current.closedArchive.requests) return current.closedArchiveItems
+        return withContext(Dispatchers.Default) { prepareClosedRequests(archive.requests) }
+    }
+
     private suspend fun <T> localOrNull(block: suspend () -> T): T? = try { block() }
         catch (error: CancellationException) { throw error }
         catch (_: Exception) { null }

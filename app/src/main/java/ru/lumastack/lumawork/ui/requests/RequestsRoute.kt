@@ -147,10 +147,8 @@ private fun RequestsToolbar(state: SimpleOneUiState, actions: RequestsActions, c
             }
         }
     }
-    // Date bounds are prepared off the UI thread, including for a large archive.
-    val dates by produceState(emptyList<java.time.LocalDate>(), state.closedArchive.requests) {
-        value = withContext(Dispatchers.Default) { state.closedArchive.requests.mapNotNull { parseClosedRequestsDate(it.closedEffectiveTime())?.toLocalDate() } }
-    }
+    // Dates have already been parsed once along with the cached search index.
+    val dates = remember(state.closedArchiveItems) { state.closedArchiveItems.mapNotNull { it.day } }
     Column {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(if (state.mode == RequestsMode.Active) "Активные заявки" else "Закрытые заявки",

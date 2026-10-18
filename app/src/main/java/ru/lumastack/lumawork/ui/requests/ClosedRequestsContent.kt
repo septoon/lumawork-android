@@ -55,7 +55,6 @@ import ru.lumastack.lumawork.domain.requests.closedTerminalId
 import ru.lumastack.lumawork.domain.requests.defaultClosedRequestsPeriod
 import ru.lumastack.lumawork.domain.requests.isClosedReturnEquipment
 import ru.lumastack.lumawork.domain.requests.normalizedClosedAddress
-import ru.lumastack.lumawork.domain.requests.prepareClosedRequests
 import ru.lumastack.lumawork.domain.requests.queryClosedRequests
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.ui.theme.AppTextField
@@ -63,7 +62,7 @@ import ru.lumastack.lumawork.ui.theme.AppTextField
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ClosedRequestsContent(
-    records: List<SimpleOneRequest>,
+    prepared: List<ClosedRequestsItem>,
     query: String,
     onQueryChange: (String) -> Unit,
     isLoading: Boolean,
@@ -75,9 +74,6 @@ fun ClosedRequestsContent(
     personalComment: @Composable (SimpleOneRequest) -> Unit = {},
 ) {
     val today = LocalDate.now()
-    val prepared by androidx.compose.runtime.produceState(emptyList<ClosedRequestsItem>(), records) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { prepareClosedRequests(records) }
-    }
     val automaticPeriod = remember(prepared, today) { defaultClosedRequestsPeriod(prepared, today) }
     var startDay by rememberSaveable { mutableStateOf<String?>(null) }
     var endDay by rememberSaveable { mutableStateOf<String?>(null) }
@@ -129,9 +125,8 @@ fun ClosedRequestsContent(
         if (filtered.isEmpty()) item(key = "closed-empty") {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if ((isLoading && !hasArchive) || (records.isNotEmpty() && prepared.isEmpty())) CircularProgressIndicator()
+                    if (isLoading && !hasArchive) CircularProgressIndicator()
                     Text(when {
-                        records.isNotEmpty() && prepared.isEmpty() -> "Подготовка списка заявок…"
                         isLoading && !hasArchive -> "Загружаем архив…"
                         !hasArchive && offline -> "Войдите в SimpleOne, чтобы загрузить архив."
                         query.isNotBlank() -> "Ничего не найдено"

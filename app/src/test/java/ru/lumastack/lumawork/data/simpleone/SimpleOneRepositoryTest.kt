@@ -419,6 +419,70 @@ class RequestsBootstrapTest {
         } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
     }
 
+    @Test fun `closed tab and detail return reuse ready local index without network or blank list`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = FakeSimpleOneApi()
+            val archive = ClosedSimpleOneArchive(listOf(request().copy(resolvedAt = "2026-10-18 12:00:00")),
+                isComplete = true, queryRevision = 2)
+            val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = archive }
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache), offline = true)
+            settled(model)
+            val prepared = model.state.value.closedArchiveItems
+            assertEquals(1, prepared.size)
+            assertEquals(archive.requests.single(), prepared.single().request)
+            repeat(3) {
+                model.updateMode(ru.lumastack.lumawork.domain.simpleone.RequestsMode.Closed)
+                org.junit.Assert.assertSame(prepared, model.state.value.closedArchiveItems)
+                model.openRequest(archive.requests.single()); model.closeRequest()
+                org.junit.Assert.assertSame(prepared, model.state.value.closedArchiveItems)
+                model.updateMode(ru.lumastack.lumawork.domain.simpleone.RequestsMode.Active)
+            }
+            assertEquals(0, api.currentUserCalls + api.activeCalls + api.archiveCalls + api.exportCalls)
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun `failed manual archive refresh preserves ready cached rows`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = FakeSimpleOneApi(error = SimpleOneFailure.Http(500, "Unavailable"))
+            val archive = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2)
+            val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = archive }
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
+            settled(model) { it.errorMessage != null }
+            val prepared = model.state.value.closedArchiveItems
+            assertEquals(1, prepared.size)
+            model.refreshClosedRequests()
+            assertTrue(model.state.value.isClosedLoading)
+            org.junit.Assert.assertSame(prepared, model.state.value.closedArchiveItems)
+            settled(model) { it.errorMessage != null }
+            org.junit.Assert.assertSame(prepared, model.state.value.closedArchiveItems)
+            assertEquals(archive, model.state.value.closedArchive)
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun `local archive mutation replaces index and cleanup removes stale cached rows`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = FakeSimpleOneApi()
+            val cache = FakeSimpleOneSupplementalCache().apply {
+                archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2)
+            }
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache), offline = true)
+            settled(model)
+            val previous = model.state.value.closedArchiveItems
+            val xlsx = makeSimpleOneXlsx(listOf("Номер заявки", "sys_id"), listOf(listOf("REQ2", "request-2")))
+            model.importArchive(xlsx)
+            settled(model) { it.closedArchive.requests.size == 2 }
+            assertEquals(setOf("request-1", "request-2"), model.state.value.closedArchiveItems.map { it.request.id }.toSet())
+            org.junit.Assert.assertNotSame(previous, model.state.value.closedArchiveItems)
+            model.cleanupArchive(null)
+            settled(model) { it.closedArchive.requests.isEmpty() }
+            assertTrue(model.state.value.closedArchiveItems.isEmpty())
+            assertEquals(0, api.currentUserCalls + api.activeCalls + api.archiveCalls + api.exportCalls)
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
+    }
+
     @Test fun `only explicit click downloads archive then unlocks and refreshes active`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
