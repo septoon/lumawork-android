@@ -193,6 +193,7 @@ fun AppShell(
             onCleanupArchive = simpleOneViewModel::cleanupArchive,
             browserAuthKey = simpleOneViewModel::browserAuthKey,
             onResolveCurrentUser = simpleOneViewModel::ensureCurrentUser,
+            onSignInIdentityOnly = simpleOneViewModel::signInIdentityOnly,
         )
     }
 
@@ -589,6 +590,7 @@ private fun DestinationContent(
                 startOffline = isOffline,
                 simpleOneState = simpleOneState,
                 repository = timeReportRepository,
+                requestsActions = simpleOneActions,
                 widthClass = contentWidthClass,
             )
             AppDestination.Employees -> EmployeeRoute(

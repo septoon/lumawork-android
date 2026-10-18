@@ -404,6 +404,21 @@ class RequestsBootstrapTest {
         } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
     }
 
+    @Test fun `time report login resolves identity without downloading request archives`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = FakeSimpleOneApi()
+            val model = model(SimpleOneRepository(api, FakeSimpleOneSessionStore(), FakeSimpleOneCache()))
+            settled(model)
+            model.updateUsername("engineer"); model.updatePassword("password")
+            model.signInIdentityOnly()
+            settled(model) { it.isAuthorized && it.snapshot.currentUser != null && !it.isResolvingUser }
+            assertEquals(1, api.currentUserCalls)
+            assertEquals(0, api.activeCalls + api.archiveCalls + api.exportCalls)
+            assertFalse(model.state.value.initialArchiveReady)
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
+    }
+
     @Test fun `only explicit click downloads archive then unlocks and refreshes active`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {

@@ -48,6 +48,24 @@ class TimeReportParserTest {
     }
 
     @Test
+    fun `list fields and day grouping match actual work date in iOS`() {
+        val record = kotlinx.serialization.json.Json.parseToJsonElement("""{
+          "sys_id":"record-1", "acticvity":"SUTS001", "month":"Август",
+          "sys_created_at":"12.08.2026 10:30:00", "date_of_work":"31.07.2026 09:00:00",
+          "time_of_work_hours":"2", "time_of_work_minutes":"15",
+          "travel_time_hours":"1", "travel_time_minutes":"5",
+          "extracurricular_activities_hours":"3", "extracurricular_work":"1"
+        }""") as kotlinx.serialization.json.JsonObject
+        val entry = requireNotNull(TimeReportParser.parseRecord(record))
+        assertEquals(135, entry.workMinutes)
+        assertEquals(65, entry.travelMinutes)
+        assertEquals(180, entry.overtimeMinutes)
+        assertTrue(entry.isOvertime)
+        assertEquals("Август", entry.period)
+        assertEquals(LocalDate.of(2026, 7, 31), ru.lumastack.lumawork.domain.timereport.timeReportDaySummaries(listOf(entry)).single().date)
+    }
+
+    @Test
     fun `duration parser matches iOS numeric and localized formats`() {
         assertEquals(90, TimeReportParser.parseDurationMinutes("90"))
         assertEquals(60, TimeReportParser.parseDurationMinutes("3600000"))

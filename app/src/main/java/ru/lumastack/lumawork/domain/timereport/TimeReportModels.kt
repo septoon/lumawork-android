@@ -20,11 +20,14 @@ data class TimeReportEntry(
     val nonWorkCosts: String = "",
     val isOvertime: Boolean = false,
     val executor: String = "",
+    val simpleOneRecordId: String = "",
+    val workDate: String = "",
 ) {
     val stableId: String
         get() = listOf(activity, createdAtDateTime()?.toString().orEmpty(), executor).joinToString("|")
 
     fun createdAtDateTime(): LocalDateTime? = parseTimeReportDate(createdAt)
+    fun effectiveWorkDateTime(): LocalDateTime? = parseTimeReportDate(workDate) ?: createdAtDateTime()
 }
 
 @Serializable
@@ -33,6 +36,7 @@ data class TimeReportSnapshot(
     val entries: List<TimeReportEntry> = emptyList(),
     val updatedAtEpochMillis: Long? = null,
     val source: TimeReportSource = TimeReportSource.ListApi,
+    val sessionFingerprint: String = "",
 )
 
 @Serializable
@@ -67,11 +71,11 @@ data class TimeReportMonthGroup(
 }
 
 fun timeReportDaySummaries(entries: List<TimeReportEntry>): List<TimeReportDaySummary> = entries
-    .mapNotNull { entry -> entry.createdAtDateTime()?.toLocalDate()?.let { it to entry } }
+    .mapNotNull { entry -> entry.effectiveWorkDateTime()?.toLocalDate()?.let { it to entry } }
     .groupBy(Pair<LocalDate, TimeReportEntry>::first, Pair<LocalDate, TimeReportEntry>::second)
     .map { (date, dayEntries) ->
         val sorted = dayEntries.sortedWith(
-            compareByDescending<TimeReportEntry> { it.createdAtDateTime() }
+            compareByDescending<TimeReportEntry> { it.effectiveWorkDateTime() }
                 .thenBy(TimeReportEntry::activity),
         )
         TimeReportDaySummary(

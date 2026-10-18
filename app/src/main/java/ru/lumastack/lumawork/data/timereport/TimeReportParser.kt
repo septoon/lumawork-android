@@ -25,6 +25,7 @@ internal object TimeReportParser {
 
     fun parseRecord(item: JsonObject): TimeReportEntry? {
         val activity = item.value(
+            "acticvity",
             "activity",
             "task",
             "itsm_request",
@@ -38,14 +39,17 @@ internal object TimeReportParser {
             item.value("sys_created_at", "created_at", "Когда создано"),
             item.value("date_of_work", "Дата проведения работ"),
         )
-        val createdAt = normalizeDate(createdAtRaw) ?: return null
+        val workDate = item.value("date_of_work", "Дата проведения работ")
+        val createdAt = normalizeDate(createdAtRaw) ?: normalizeDate(workDate) ?: return null
         if (activity.isBlank()) return null
 
         return TimeReportEntry(
             activity = activity,
-            period = item.value("period", "Период", preferDisplay = true),
+            period = item.value("month", "period", "Период", preferDisplay = true),
             createdAt = createdAt,
             createdAtRaw = createdAtRaw,
+            simpleOneRecordId = item.value("sys_id", "id", "ID"),
+            workDate = normalizeDate(workDate).orEmpty(),
             workMinutes = parseMinutes(
                 duration = item.value(
                     "time_of_work",
@@ -54,15 +58,15 @@ internal object TimeReportParser {
                     "time_work",
                     "Время работ",
                 ),
-                hours = item.value("work_hours", "time_work_hours", "Время работ (ч)"),
-                minutes = item.value("work_minutes", "time_work_minutes", "Время работ (м)"),
+                hours = item.value("time_of_work_hours", "work_hours", "time_work_hours", "Время работ (ч)"),
+                minutes = item.value("time_of_work_minutes", "work_minutes", "time_work_minutes", "Время работ (м)"),
             ),
             travelMinutes = parseMinutes(
                 duration = item.value("travel_time", "time_on_road", "Время в дороге"),
-                hours = item.value("travel_hours", "time_on_road_hours", "Время в дороге (ч)"),
-                minutes = item.value("travel_minutes", "time_on_road_minutes", "Время в дороге (м)"),
+                hours = item.value("travel_time_hours", "travel_hours", "time_on_road_hours", "Время в дороге (ч)"),
+                minutes = item.value("travel_time_minutes", "travel_minutes", "time_on_road_minutes", "Время в дороге (м)"),
             ),
-            overtimeMinutes = parseNumeric(item.value("overtime_hours", "over_time_hours", "Внеурочные работы (ч.)"))
+            overtimeMinutes = parseNumeric(item.value("extracurricular_activities_hours", "overtime_hours", "over_time_hours", "Внеурочные работы (ч.)"))
                 .times(60).roundToInt() +
                 parseNumeric(item.value("overtime_minutes", "over_time_minutes", "Внеурочные работы (м)"))
                     .roundToInt(),
@@ -74,7 +78,7 @@ internal object TimeReportParser {
                 "Трудозатраты нерабочие",
                 preferDisplay = true,
             ),
-            isOvertime = parseBoolean(item.value("overtime", "is_overtime", "Внеурочные работы")),
+            isOvertime = parseBoolean(item.value("extracurricular_work", "overtime", "is_overtime", "Внеурочные работы")),
             executor = item.value(
                 "person.c_full_name",
                 "person",
@@ -91,6 +95,7 @@ internal object TimeReportParser {
             "Активность",
             "Задача",
             "Задача.Активность",
+            "acticvity",
             "activity",
             "task",
             "itsm_request",
@@ -100,26 +105,29 @@ internal object TimeReportParser {
             row.value("Когда создано", "sys_created_at", "created_at"),
             row.value("Дата проведения работ", "date_of_work"),
         )
-        val createdAt = normalizeDate(createdAtRaw) ?: return null
+        val workDate = row.value("Дата проведения работ", "date_of_work")
+        val createdAt = normalizeDate(createdAtRaw) ?: normalizeDate(workDate) ?: return null
         if (activity.isBlank()) return null
 
         return TimeReportEntry(
             activity = activity,
-            period = row.value("Период", "period"),
+            period = row.value("Период", "month", "period"),
             createdAt = createdAt,
             createdAtRaw = createdAtRaw,
+            simpleOneRecordId = row.value("sys_id", "id", "ID"),
+            workDate = normalizeDate(workDate).orEmpty(),
             workMinutes = parseMinutes(
                 duration = row.value("Время работ", "time_of_work", "work_time", "work_duration", "time_work"),
-                hours = row.value("Время работ (ч)", "work_hours", "time_work_hours"),
-                minutes = row.value("Время работ (м)", "work_minutes", "time_work_minutes"),
+                hours = row.value("Время работ (ч)", "time_of_work_hours", "work_hours", "time_work_hours"),
+                minutes = row.value("Время работ (м)", "time_of_work_minutes", "work_minutes", "time_work_minutes"),
             ),
             travelMinutes = parseMinutes(
                 duration = row.value("Время в дороге", "travel_time", "time_on_road"),
-                hours = row.value("Время в дороге (ч)", "travel_hours", "time_on_road_hours"),
-                minutes = row.value("Время в дороге (м)", "travel_minutes", "time_on_road_minutes"),
+                hours = row.value("Время в дороге (ч)", "travel_time_hours", "travel_hours", "time_on_road_hours"),
+                minutes = row.value("Время в дороге (м)", "travel_time_minutes", "travel_minutes", "time_on_road_minutes"),
             ),
             overtimeMinutes = parseNumeric(
-                row.value("Внеурочные работы (ч.)", "overtime_hours", "over_time_hours"),
+                row.value("Внеурочные работы (ч.)", "extracurricular_activities_hours", "overtime_hours", "over_time_hours"),
             ).times(60).roundToInt() + parseNumeric(
                 row.value("Внеурочные работы (м)", "overtime_minutes", "over_time_minutes"),
             ).roundToInt(),
@@ -130,7 +138,7 @@ internal object TimeReportParser {
                 "non_work_costs",
                 "non_work_time",
             ),
-            isOvertime = parseBoolean(row.value("Внеурочные работы", "overtime", "is_overtime")),
+            isOvertime = parseBoolean(row.value("Внеурочные работы", "extracurricular_work", "overtime", "is_overtime")),
             executor = row.value(
                 "Исполнитель",
                 "person",

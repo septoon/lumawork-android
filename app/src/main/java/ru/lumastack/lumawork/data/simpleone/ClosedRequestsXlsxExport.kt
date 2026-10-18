@@ -13,6 +13,14 @@ internal object ClosedRequestsXlsxExport {
             addAll(values(SimpleOneRequest("", "")).keys)
             requests.forEach { addAll(it.tableFields.keys) }
         }.toList()
+        return createTable("Закрытые заявки", columns, requests.map { request ->
+            val fields = values(request)
+            columns.map { fields[it].orEmpty() }
+        })
+    }
+
+    internal fun createTable(sheetName: String, columns: List<String>, rows: List<List<String>>): ByteArray {
+        if (rows.size > 1_048_575) throw SimpleOneXlsxException("Архив слишком велик для выгрузки.")
         if (columns.size > 16_384) throw SimpleOneXlsxException("Слишком много колонок для XLSX.")
         val output = ByteArrayOutputStream()
         var xmlSize = 0L
@@ -32,7 +40,7 @@ internal object ClosedRequestsXlsxExport {
             }
             part("[Content_Types].xml", """<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>""")
             part("_rels/.rels", """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>""")
-            part("xl/workbook.xml", """<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Закрытые заявки" sheetId="1" r:id="rId1"/></sheets></workbook>""")
+            part("xl/workbook.xml", """<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetName.xmlEscaped()}" sheetId="1" r:id="rId1"/></sheets></workbook>""")
             part("xl/_rels/workbook.xml.rels", """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>""")
             zip.putNextEntry(ZipEntry("xl/worksheets/sheet1.xml"))
             xml("""<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>""")
@@ -45,10 +53,7 @@ internal object ClosedRequestsXlsxExport {
                 xml("</row>")
             }
             row(1, columns)
-            requests.forEachIndexed { index, request ->
-                val fields = values(request)
-                row(index + 2, columns.map { fields[it].orEmpty() })
-            }
+            rows.forEachIndexed { index, cells -> row(index + 2, cells) }
             xml("</sheetData></worksheet>")
             zip.closeEntry()
         }

@@ -6,6 +6,10 @@ import androidx.lifecycle.viewModelScope
 import java.time.LocalDate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ru.lumastack.lumawork.domain.timereport.TimeReportMonthGroup
+import ru.lumastack.lumawork.domain.timereport.timeReportMonthGroups
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,7 +23,12 @@ data class TimeReportUiState(
     val simpleOneUserId: String = "",
     val isAuthorized: Boolean = false,
     val snapshot: TimeReportSnapshot? = null,
+    val monthGroups: List<TimeReportMonthGroup> = emptyList(),
     val selectedMonthId: String? = null,
+    val isInitializing: Boolean = true,
+    val initialLoadRequested: Boolean = false,
+    val progress: String? = null,
+    val filterMonthId: String? = null,
     val isLoading: Boolean = false,
     val isDeleting: Boolean = false,
     val errorMessage: String? = null,
@@ -35,37 +44,72 @@ class TimeReportViewModel(
     val state: StateFlow<TimeReportUiState> = mutableState.asStateFlow()
     private var loadJob: Job? = null
 
-    fun activate(simpleOneUserId: String, isAuthorized: Boolean) {
-        if (simpleOneUserId.isBlank()) {
-            mutableState.update { it.copy(isAuthorized = false) }
-            return
+    private var activated = false
+    private var connectedUserId = ""
+    private var sessionRevision = ""
+
+    fun activate(simpleOneUserId: String, isAuthorized: Boolean, revision: String = "") {
+        val changedSession = sessionRevision != revision
+        sessionRevision = revision
+        if ((!isAuthorized && mutableState.value.isAuthorized) || changedSession) {
+            loadJob?.cancel()
+            mutableState.update { it.copy(isLoading = false, isDeleting = false, progress = null) }
         }
-        if (mutableState.value.simpleOneUserId == simpleOneUserId) {
-            mutableState.update { it.copy(isAuthorized = isAuthorized) }
-            if (isAuthorized && !startOffline && mutableState.value.snapshot == null) refresh()
-            return
-        }
+        val changedUser = simpleOneUserId.isNotBlank() && simpleOneUserId != connectedUserId
+        connectedUserId = simpleOneUserId
+        mutableState.update { it.copy(isAuthorized = isAuthorized) }
+        if (activated && !changedUser && !changedSession && !mutableState.value.isInitializing) return
+        activated = true
+        mutableState.update { it.copy(isInitializing = true,
+            snapshot = it.snapshot?.takeIf { cached -> (!changedSession && simpleOneUserId.isBlank()) || cached.simpleOneUserId == simpleOneUserId },
+            monthGroups = it.monthGroups.takeIf { _ -> (!changedSession && simpleOneUserId.isBlank()) || it.snapshot?.simpleOneUserId == simpleOneUserId }.orEmpty()) }
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            val cached = runCatching { repository.read(ownerUserId, simpleOneUserId) }.getOrNull()
-            mutableState.update {
-                it.copy(
-                    simpleOneUserId = simpleOneUserId,
-                    isAuthorized = isAuthorized,
-                    snapshot = cached,
-                    selectedMonthId = null,
-                    errorMessage = null,
-                    notice = null,
-                )
-            }
-            if (isAuthorized && !startOffline) refreshCurrent(showError = cached == null)
+            val cached = repository.read(ownerUserId, simpleOneUserId, allowOfflineCache = startOffline)
+            val groups = prepareGroups(cached)
+            mutableState.update { it.copy(
+                simpleOneUserId = simpleOneUserId.ifBlank { cached?.simpleOneUserId.orEmpty() },
+                snapshot = cached, monthGroups = groups, selectedMonthId = null, filterMonthId = null,
+                isInitializing = false, isLoading = false, progress = null, errorMessage = null, notice = null,
+            ) }
         }
     }
 
-    fun refresh() {
-        loadJob?.cancel()
+    fun refresh(): Boolean {
+        if (mutableState.value.isLoading || mutableState.value.isDeleting || mutableState.value.isInitializing || loadJob?.isActive == true) return false
+        if (startOffline) {
+            mutableState.update { it.copy(initialLoadRequested = true, errorMessage = "Для загрузки трудозатрат требуется подключение к сети.") }
+            return true
+        }
+        if (!mutableState.value.isAuthorized) return false
         loadJob = viewModelScope.launch { refreshCurrent(showError = true) }
+        return true
     }
+
+    suspend fun loadAfterActivation(): Boolean {
+        loadJob?.join()
+        return refresh()
+    }
+
+    fun filterMonth(monthId: String?) { mutableState.update { it.copy(filterMonthId = monthId) } }
+    fun clearMessage() { mutableState.update { it.copy(errorMessage = null, notice = null) } }
+
+    fun importXlsx(bytes: ByteArray) {
+        val current = mutableState.value
+        if (current.isLoading || current.isDeleting || loadJob?.isActive == true || current.simpleOneUserId.isBlank()) return
+        loadJob = viewModelScope.launch {
+            mutableState.update { it.copy(isLoading = true, errorMessage = null, notice = null, progress = "Разбираю XLSX.") }
+            try {
+                val snapshot = repository.importXlsx(ownerUserId, current.simpleOneUserId, bytes)
+                val groups = prepareGroups(snapshot)
+                mutableState.update { it.copy(snapshot = snapshot, monthGroups = groups, isLoading = false, progress = null,
+                    notice = "Трудозатраты загружены: ${snapshot.entries.size} строк.") }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { mutableState.update { it.copy(isLoading = false, progress = null, errorMessage = error.userMessage()) } }
+        }
+    }
+
+    suspend fun exportXlsx(): ByteArray = repository.exportXlsx(mutableState.value.snapshot?.entries.orEmpty())
 
     fun openMonth(monthId: String) {
         mutableState.update { it.copy(selectedMonthId = monthId) }
@@ -77,20 +121,22 @@ class TimeReportViewModel(
 
     fun deleteAll() {
         val current = mutableState.value
-        if (current.isDeleting || current.simpleOneUserId.isBlank()) return
-        viewModelScope.launch {
+        if (current.isDeleting || current.isLoading || loadJob?.isActive == true || current.simpleOneUserId.isBlank()) return
+        loadJob = viewModelScope.launch {
             mutableState.update { it.copy(isDeleting = true, errorMessage = null, notice = null) }
             try {
                 val deleted = repository.deleteAll(ownerUserId, current.simpleOneUserId)
                 mutableState.update {
                     it.copy(
                         snapshot = null,
+                        monthGroups = emptyList(),
                         selectedMonthId = null,
+                        filterMonthId = null,
                         isDeleting = false,
                         notice = "Удалено строк трудозатрат: $deleted.",
                     )
                 }
-            } catch (_: Exception) {
+            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {
                 mutableState.update { it.copy(isDeleting = false, errorMessage = "Не удалось очистить архив.") }
             }
         }
@@ -98,8 +144,8 @@ class TimeReportViewModel(
 
     fun deleteRange(startDate: LocalDate, endDate: LocalDate) {
         val current = mutableState.value
-        if (current.isDeleting || current.simpleOneUserId.isBlank()) return
-        viewModelScope.launch {
+        if (current.isDeleting || current.isLoading || loadJob?.isActive == true || current.simpleOneUserId.isBlank()) return
+        loadJob = viewModelScope.launch {
             mutableState.update { it.copy(isDeleting = true, errorMessage = null, notice = null) }
             try {
                 val deleted = repository.deleteRange(
@@ -109,12 +155,15 @@ class TimeReportViewModel(
                     endDate = endDate,
                 )
                 val updated = repository.read(ownerUserId, current.simpleOneUserId)
+                val groups = prepareGroups(updated)
                 mutableState.update {
                     it.copy(
                         snapshot = updated,
+                        monthGroups = groups,
                         selectedMonthId = it.selectedMonthId?.takeIf { monthId ->
-                            updated?.entries?.any { entry -> entry.createdAt.startsWith(monthId) } == true
+                            groups.any { group -> group.monthId == monthId }
                         },
+                        filterMonthId = it.filterMonthId?.takeIf { monthId -> groups.any { group -> group.monthId == monthId } },
                         isDeleting = false,
                         notice = if (deleted > 0) {
                             "Удалено строк трудозатрат: $deleted."
@@ -123,7 +172,7 @@ class TimeReportViewModel(
                         },
                     )
                 }
-            } catch (_: Exception) {
+            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) {
                 mutableState.update { it.copy(isDeleting = false, errorMessage = "Не удалось очистить выбранный период.") }
             }
         }
@@ -135,13 +184,17 @@ class TimeReportViewModel(
 
     private suspend fun refreshCurrent(showError: Boolean) {
         val current = mutableState.value
-        if (!current.isAuthorized || current.simpleOneUserId.isBlank()) return
-        mutableState.update { it.copy(isLoading = true, errorMessage = null, notice = null) }
+        if (!current.isAuthorized) return
+        mutableState.update { it.copy(isLoading = true, initialLoadRequested = true, errorMessage = null, notice = null) }
         try {
-            val snapshot = repository.refresh(ownerUserId, current.simpleOneUserId)
+            val snapshot = repository.refresh(ownerUserId, connectedUserId) { text -> mutableState.update { it.copy(progress = text) } }
+            val groups = prepareGroups(snapshot)
             mutableState.update {
                 it.copy(
                     snapshot = snapshot,
+                    monthGroups = groups,
+                    simpleOneUserId = snapshot.simpleOneUserId,
+                    progress = null,
                     isAuthorized = true,
                     isLoading = false,
                     notice = if (showError) "Трудозатраты обновлены: ${snapshot.entries.size} строк." else null,
@@ -154,6 +207,7 @@ class TimeReportViewModel(
                 it.copy(
                     isAuthorized = false,
                     isLoading = false,
+                    progress = null,
                     errorMessage = if (showError) "Войдите в SimpleOne, чтобы обновить трудозатраты." else null,
                 )
             }
@@ -161,11 +215,15 @@ class TimeReportViewModel(
             mutableState.update {
                 it.copy(
                     isLoading = false,
+                    progress = null,
                     errorMessage = if (showError) error.userMessage() else null,
                 )
             }
         }
     }
+
+    private suspend fun prepareGroups(snapshot: TimeReportSnapshot?): List<TimeReportMonthGroup> =
+        withContext(Dispatchers.Default) { timeReportMonthGroups(snapshot?.entries.orEmpty()) }
 
     private fun Throwable.userMessage(): String = when (this) {
         is SimpleOneFailure -> message ?: "Не удалось загрузить трудозатраты."

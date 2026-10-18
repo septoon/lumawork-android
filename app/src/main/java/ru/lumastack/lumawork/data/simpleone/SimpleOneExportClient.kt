@@ -54,7 +54,7 @@ internal class SimpleOneExportClient(
         payload = exportPayload(
             userId = userId,
             tableName = "itsm_tchnsrv_time_report",
-            condition = TIME_REPORT_CONDITION,
+            condition = timeReportCondition(),
             columns = TIME_REPORT_EXPORT_COLUMNS,
         ),
     )
@@ -314,35 +314,11 @@ internal class SimpleOneExportClient(
             "closure_notes",
         )
         private val TIME_REPORT_EXPORT_COLUMNS = listOf(
-            "task",
-            "task.sys_created_at",
-            "task.closed_at",
-            "task.deadline",
-            "sys_created_at",
-            "time_of_work",
-            "travel_time",
-            "extracurricular_time",
-            "work_start",
-            "work_end",
-            "assignment_group",
-            "person",
-            "person.c_corporate_structure",
-            "task.initiator",
-            "task.client",
-            "task.company",
-            "task.activity",
-            "task.activity.phase",
-            "task.activity.sale_iteco",
-            "task.activity.contract_number",
-            "task.activity.budget_number",
-            "task.activity.crm_code",
-            "task.service",
-            "task.activity.service_manager",
-            "result",
+            "sys_id", "acticvity", "month", "sys_created_at", "date_of_work", "time_of_work_hours",
+            "time_of_work_minutes", "time_of_work", "extracurricular_activities_hours", "travel_time_hours",
+            "travel_time_minutes", "travel_time", "extracurricular_time", "extracurricular_work", "result", "person",
         )
 
-        private const val TIME_REPORT_CONDITION =
-            "(personDYNAMIC156957141416138823)^ORDERBYDESCdate_of_work"
 
 
     }

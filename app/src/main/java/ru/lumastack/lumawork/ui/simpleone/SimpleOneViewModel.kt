@@ -88,7 +88,10 @@ class SimpleOneViewModel(
 
     fun dismissConnection() { mutableState.update { it.copy(showConnection = false, password = "", errorMessage = null) } }
 
-    fun signIn() {
+    fun signIn() = signIn(loadRequests = true)
+    fun signInIdentityOnly() = signIn(loadRequests = false)
+
+    private fun signIn(loadRequests: Boolean) {
         val state = state.value
         if (startOffline || state.isLoading || state.isClosedLoading || authJob?.isActive == true) return
         if (state.username.isBlank() || state.password.isBlank()) {
@@ -101,7 +104,8 @@ class SimpleOneViewModel(
                 repository.authenticate(ownerUserId, state.username, state.password)
                 if (epoch != sessionEpoch) return@launch
                 mutableState.update { it.copy(password = "", snapshot = SimpleOneSnapshot(), isAuthorized = true, isLoading = false, showConnection = false) }
-                if (!mutableState.value.initialArchiveReady) loadClosedArchive() else refreshActiveRequests()
+                if (!loadRequests) ensureCurrentUser()
+                else if (!mutableState.value.initialArchiveReady) loadClosedArchive() else refreshActiveRequests()
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
                 if (epoch == sessionEpoch) mutableState.update { it.copy(isLoading = false,

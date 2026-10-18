@@ -77,7 +77,7 @@ class SimpleOneExportClientTest {
     }
 
     @Test
-    fun `time report export uses dedicated table condition and all 25 columns`() = runBlocking {
+    fun `time report export uses iOS table condition and work date fields`() = runBlocking {
         val bodies = CopyOnWriteArrayList<String>()
         val xlsx = byteArrayOf(0x50, 0x4b, 0x03, 0x04)
         val client = OkHttpClient.Builder()
@@ -121,7 +121,9 @@ class SimpleOneExportClientTest {
         val export = payload["export"]!!.jsonObject
         assertEquals("itsm_tchnsrv_time_report", export["tableName"].toString().trim('"'))
         assertTrue(export["condition"].toString().contains("personDYNAMIC156957141416138823"))
-        assertEquals(25, export["columns"]!!.jsonArray.size)
+        assertEquals(16, export["columns"]!!.jsonArray.size)
+        assertTrue(export["columns"]!!.jsonArray.any { it.toString().contains("date_of_work") })
+        assertTrue(export["columns"]!!.jsonArray.any { it.toString().contains("sys_id") })
         assertTrue(export["columns"]!!.jsonArray.any { it.toString().contains("result") })
     }
 }

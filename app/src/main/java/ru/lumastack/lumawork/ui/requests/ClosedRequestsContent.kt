@@ -252,6 +252,7 @@ internal fun closedTypeColor(type: String): Color = when (type) {
 internal fun ClosedRequestsPeriodDialog(
     available: ClosedRequestsPeriod, selected: ClosedRequestsPeriod?, onDismiss: () -> Unit,
     onApply: (ClosedRequestsPeriod?) -> Unit,
+    title: String = "Период закрытых заявок",
 ) {
     val initial = selected ?: ClosedRequestsPeriod(available.end, available.end)
     val selectableDates = remember(available) { object : SelectableDates {
@@ -276,7 +277,7 @@ internal fun ClosedRequestsPeriodDialog(
             }
         }) {
         DateRangePicker(state = pickerState, modifier = Modifier.heightIn(max = 480.dp),
-            title = { Text("Период закрытых заявок", Modifier.padding(16.dp)) }, showModeToggle = true)
+            title = { Text(title, Modifier.padding(16.dp)) }, showModeToggle = true)
     }
 }
 

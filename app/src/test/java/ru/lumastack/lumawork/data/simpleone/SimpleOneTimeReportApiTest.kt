@@ -13,6 +13,27 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SimpleOneTimeReportApiTest {
+    @Test fun `personal archive reads beyond one hundred pages and reports progress`() = runBlocking {
+        var pages = 0
+        val progress = mutableListOf<Int>()
+        val client = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+            val request = chain.request()
+            val page = request.url.queryParameter("page")!!.toInt()
+            pages++
+            val range = if (page <= 100) ((page - 1) * 100 + 1)..(page * 100) else 10001..10001
+            val items = range.joinToString(",") { id ->
+                """{"sys_id":"$id","task":"TASK-$id","sys_created_at":"12.08.2026 10:30:00"}"""
+            }
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"data":{"items":[$items],"total":10001}}""".toResponseBody()).build()
+        }).build()
+        val entries = OkHttpSimpleOneApi("https://sd.test/v1", client, Json { ignoreUnknownKeys = true })
+            .timeReportEntries("auth", progress::add)
+        assertEquals(101, pages)
+        assertEquals(10001, entries.size)
+        assertEquals(10001, progress.last())
+    }
+
     @Test
     fun `time report list uses iOS condition and maps nested display values`() = runBlocking {
         val requestedUrl = AtomicReference<String>()

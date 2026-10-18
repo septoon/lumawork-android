@@ -61,6 +61,8 @@ interface SimpleOneApi {
     suspend fun closedRequests(userId: String, authKey: String): List<SimpleOneRequest>
     suspend fun exportClosedRequests(userId: String, authKey: String): ByteArray
     suspend fun timeReportEntries(authKey: String): List<TimeReportEntry>
+    suspend fun timeReportEntries(authKey: String, onProgress: (Int) -> Unit): List<TimeReportEntry> =
+        timeReportEntries(authKey).also { onProgress(it.size) }
     suspend fun exportTimeReport(userId: String, authKey: String): ByteArray
     suspend fun backpackItems(authKey: String): List<BackpackItem>
     suspend fun backpackList(authKey: String): List<BackpackItem> = backpackItems(authKey)
@@ -156,26 +158,32 @@ class OkHttpSimpleOneApi(
     override suspend fun exportClosedRequests(userId: String, authKey: String): ByteArray =
         exportClient.exportClosedRequests(userId, authKey)
 
-    override suspend fun timeReportEntries(authKey: String): List<TimeReportEntry> {
+    override suspend fun timeReportEntries(authKey: String): List<TimeReportEntry> = timeReportEntries(authKey) {}
+
+    override suspend fun timeReportEntries(authKey: String, onProgress: (Int) -> Unit): List<TimeReportEntry> {
         val entries = mutableListOf<TimeReportEntry>()
         val seenIds = mutableSetOf<String>()
         var page = 1
-        while (page <= MAX_TIME_REPORT_PAGES) {
+        val seenRows = mutableSetOf<String>()
+        while (true) {
             val url = "$origin/list/itsm_tchnsrv_time_report".toHttpUrl().newBuilder()
-                .addQueryParameter("condition", TIME_REPORT_CONDITION)
+                .addQueryParameter("condition", timeReportCondition() + "^ORDERBYDESCsys_id")
                 .addQueryParameter("page", page.toString())
                 .addQueryParameter("per_page", PAGE_SIZE.toString())
                 .build()
             val response = request(authenticatedRequest(url.toString(), authKey))
             val items = simpleOneListItems(response) ?: throw serverFailure(response)
                 ?: SimpleOneFailure.InvalidResponse
-            val previousCount = entries.size
+            val newRows = items.count { seenRows.add(it.string("sys_id", "id").ifBlank { it.toString() }) }
+            if (items.isNotEmpty() && newRows == 0) throw SimpleOneFailure.Http(200, "SimpleOne повторяет страницу трудозатрат. Повторите загрузку.")
             items.mapNotNull(TimeReportParser::parseRecord).forEach { entry ->
                 if (seenIds.add(entry.stableId)) entries += entry
             }
             val total = simpleOneTotalCount(response)
             val hasMore = total?.let { page * PAGE_SIZE < it } ?: (items.size == PAGE_SIZE)
-            if (!hasMore || entries.size == previousCount) break
+            onProgress(entries.size)
+            if (items.isEmpty() && hasMore) throw SimpleOneFailure.InvalidResponse
+            if (!hasMore) break
             page += 1
         }
         return entries.sortedWith(
@@ -547,13 +555,10 @@ class OkHttpSimpleOneApi(
         private const val MAX_ACTIVE_PAGES = 10
         private const val MAX_ARCHIVE_REQUESTS = 100_000
         private const val MAX_COORDINATION_PAGES = 30
-        private const val MAX_TIME_REPORT_PAGES = 100
         private const val MAX_BACKPACK_PAGES = 50
         private const val MAX_EMPLOYEE_PAGES = 50
         private const val EMPLOYEE_ADDRESS_LIMIT = 40
         private const val BACKPACK_DETAIL_CONCURRENCY = 4
-        private const val TIME_REPORT_CONDITION =
-            "(personDYNAMIC156957141416138823)^ORDERBYDESCdate_of_work"
         private const val BACKPACK_CONDITION =
             "(quantity>0^(warehouse.responsible_for_write_offCONTAINS_DYNAMIC161312729414608208" +
                 "^ORactivity.service_managerDYNAMIC156957141416138823" +
@@ -1175,3 +1180,10 @@ private fun String.plainSimpleOneText(): String = replace(Regex("<[^>]+>"), "")
 
 private val BACKPACK_INPUT_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 private val BACKPACK_OUTPUT_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss")
+
+/** Same personal archive scope and date ordering as iOS, without a relative time window. */
+internal fun timeReportCondition(): String {
+    val dynamicId = ru.lumastack.lumawork.BuildConfig.SIMPLEONE_CURRENT_USER_DYNAMIC_ID
+    if (dynamicId.isBlank() || !dynamicId.all(Char::isDigit)) throw SimpleOneFailure.Http(400, "Не настроена выгрузка трудозатрат SimpleOne.")
+    return "(personDYNAMIC$dynamicId)^ORDERBYDESCdate_of_work"
+}
