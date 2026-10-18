@@ -2,6 +2,7 @@ package ru.lumastack.lumawork.data.fuel
 
 import java.io.IOException
 import java.util.UUID
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -11,6 +12,12 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -57,13 +64,13 @@ class OkHttpFuelApi(
     }
 
     override suspend fun records(token: String): List<FuelRecord> =
-        execute<FuelRecordsResponse>(request("/api/v2/fuel", token)).records
+        execute<FuelRecordsResponse>(request("/api/v2/fuel", token), ::normalizeFuelRecords).records
 
     override suspend fun create(token: String, draft: FuelDraft): FuelRecord =
-        execute(request("/api/v2/fuel", token, "POST", draft.payload(UUID.randomUUID().toString())))
+        execute(request("/api/v2/fuel", token, "POST", draft.payload(UUID.randomUUID().toString())), ::normalizeFuelRecord)
 
     override suspend fun update(token: String, recordId: String, draft: FuelDraft): FuelRecord =
-        execute(request(recordPath(recordId), token, "PUT", draft.payload(recordId)))
+        execute(request(recordPath(recordId), token, "PUT", draft.payload(recordId)), ::normalizeFuelRecord)
 
     override suspend fun delete(token: String, recordId: String) {
         executeEmpty(request(recordPath(recordId), token, "DELETE"))
@@ -84,11 +91,27 @@ class OkHttpFuelApi(
         }
     }
 
-    private suspend inline fun <reified Value> execute(request: Request): Value = withContext(Dispatchers.IO) {
+    private suspend inline fun <reified Value> execute(request: Request, crossinline normalize: (JsonElement) -> JsonElement = { it }): Value = withContext(Dispatchers.IO) {
         val response = executeResponse(request)
         response.use {
-            runCatching { json.decodeFromString<Value>(it.body.string()) }.getOrElse { throw FuelFailure.InvalidResponse }
+            runCatching { json.decodeFromJsonElement<Value>(normalize(json.parseToJsonElement(it.body.string()))) }.getOrElse { throw FuelFailure.InvalidResponse }
         }
+    }
+
+    // v2 returns Prisma enum names (FUEL, COMPENSATION_PAYMENT); iOS normalizes them too.
+    private fun normalizeFuelRecord(element: JsonElement): JsonElement {
+        val record = element as? JsonObject ?: throw FuelFailure.InvalidResponse
+        return JsonObject(record.mapValues { (key, value) ->
+            if (key == "recordType" || key == "adjustmentKind") {
+                (value as? JsonPrimitive)?.contentOrNull?.let { JsonPrimitive(it.lowercase(Locale.ROOT)) } ?: value
+            } else value
+        })
+    }
+
+    private fun normalizeFuelRecords(element: JsonElement): JsonElement {
+        val root = element as? JsonObject ?: throw FuelFailure.InvalidResponse
+        val records = root["records"] as? JsonArray ?: throw FuelFailure.InvalidResponse
+        return JsonObject(root + ("records" to JsonArray(records.map(::normalizeFuelRecord))))
     }
 
     private suspend fun executeEmpty(request: Request) {
