@@ -37,7 +37,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -74,10 +73,6 @@ import ru.lumastack.lumawork.data.feedback.FeedbackStatus
 import ru.lumastack.lumawork.domain.model.AdminPermission
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
 private enum class AdminSection(val title: String) { Overview("Сводка"), Users("Пользователи"), Images("Изображения"), GsmTemplate("Шаблон ГСМ"), Feedback("Обратная связь") }
 
@@ -293,8 +288,7 @@ fun AdminRoute(
 
 @Composable
 private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: AppWidthClass, model: AdminViewModel, modifier: Modifier) {
-    val dark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(dark) { Brush.verticalGradient(if (dark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark) else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight)) }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
     val sections = buildList {
         if (session.user.can(AdminPermission.ViewOverview)) add(AdminSection.Overview)
         if (session.user.can(AdminPermission.ViewUsers)) add(AdminSection.Users)

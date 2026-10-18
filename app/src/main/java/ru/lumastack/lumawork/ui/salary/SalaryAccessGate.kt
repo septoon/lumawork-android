@@ -76,6 +76,8 @@ import ru.lumastack.lumawork.data.auth.OkHttpAuthApi
 import ru.lumastack.lumawork.data.salary.SalaryPasscodeStore
 import ru.lumastack.lumawork.domain.model.AppSession
 
+val LocalSalaryBiometricEnabled = androidx.compose.runtime.staticCompositionLocalOf { true }
+
 @Composable
 fun SalaryAccessGate(
     session: AppSession,
@@ -99,7 +101,8 @@ fun SalaryAccessGate(
     val scope = rememberCoroutineScope()
     val email = session.user.email.trim().lowercase()
     val currentCancel by rememberUpdatedState(onCancel)
-    val biometricAvailable = remember(context, foreground) { salaryBiometricAvailable(context) }
+    val biometricEnabled = LocalSalaryBiometricEnabled.current
+    val biometricAvailable = biometricEnabled && remember(context, foreground) { salaryBiometricAvailable(context) }
 
     fun cancelPending() {
         presentationAccess.lock()
@@ -365,7 +368,7 @@ private tailrec fun Context.salaryActivity(): Activity? = when (this) {
     else -> null
 }
 
-private fun salaryBiometricAvailable(context: Context): Boolean = when {
+internal fun salaryBiometricAvailable(context: Context): Boolean = when {
     Build.VERSION.SDK_INT >= 29 -> context.getSystemService(BiometricManager::class.java)?.canAuthenticate() == BiometricManager.BIOMETRIC_SUCCESS
     Build.VERSION.SDK_INT == 28 -> {
         val manager = context.packageManager

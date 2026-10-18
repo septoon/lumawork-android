@@ -11,6 +11,18 @@ import ru.lumastack.lumawork.domain.model.AppUser
 
 class FuelRepositoryTest {
     @Test
+    fun `confirmed GSM fuel types update cache without discarding records or fetching server`() = runBlocking {
+        val api = FakeFuelApi()
+        val cache = FakeFuelCache().apply { value = FuelSnapshot(records = listOf(FuelRecord("saved", date = "2026-08-11"))) }
+        val repository = FuelRepository(api, cache)
+        repository.setFuelTypes(session().user.id, listOf(" ДТ ", "", "ДТ", "АИ-95"))
+        val saved = repository.read(session().user.id)!!
+        assertEquals(listOf("ДТ", "АИ-95"), saved.fuelTypes)
+        assertEquals("saved", saved.records.single().id)
+        assertEquals(0, api.createCalls)
+    }
+
+    @Test
     fun `monthly mileage is applied locally before remote persistence`() = runBlocking {
         val api = FakeFuelApi()
         val cache = FakeFuelCache()

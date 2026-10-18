@@ -37,6 +37,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
+import ru.lumastack.lumawork.data.settings.AppSettingsPreferences
+import ru.lumastack.lumawork.ui.salary.LocalSalaryBiometricEnabled
+import ru.lumastack.lumawork.ui.notifications.RequestNotificationsHost
+import ru.lumastack.lumawork.LocalRequestNotification
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -98,6 +108,7 @@ import ru.lumastack.lumawork.ui.auto.AutoRoute
 import ru.lumastack.lumawork.ui.fuel.FuelRoute
 import ru.lumastack.lumawork.ui.wiki.WikiRoute
 import ru.lumastack.lumawork.ui.ftp.FtpRoute
+import ru.lumastack.lumawork.ui.tools.ToolsRoute
 import ru.lumastack.lumawork.ui.salary.SalaryRoute
 import ru.lumastack.lumawork.ui.feedback.FeedbackRoute
 import ru.lumastack.lumawork.ui.analytics.AnalyticsScreen
@@ -116,6 +127,7 @@ enum class AppDestination(
     Fuel("Топливо", "Лимиты и заправки", "Т"),
     Wiki("Вики", "База знаний", "В"),
     Ftp("FTP", "Файлы Сервионики", "F"),
+    Tools("Инструменты", "USB-диагностика терминалов", "И"),
     Salary("Зарплата", "Выплаты и документы", "₽"),
     Requests("Заявки", "SimpleOne и архив", "З"),
     Coordination("Координация", "Инженеры и активные заявки", "К"),
@@ -203,68 +215,104 @@ fun AppShell(
     var feedbackOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
     val openProfile = { profileEditing = false; profileOpen = true }
     val contentStateHolder = rememberSaveableStateHolder()
-    val destinations = remember(session.user.isAdminRole) {
+    val context = LocalContext.current
+    val preferences = remember(context) { AppSettingsPreferences(context) }
+    DisposableEffect(preferences) { onDispose { preferences.close() } }
+    val settings by preferences.state.collectAsStateWithLifecycle()
+    val availableDestinations = remember(session.user.isAdminRole) {
         AppDestination.entries.filter { (!it.adminOnly || session.user.isAdminRole) && it != AppDestination.Feedback }
     }
-    var selectedName by rememberSaveable { mutableStateOf(AppDestination.Home.name) }
-    val selected = destinations.firstOrNull { it.name == selectedName } ?: AppDestination.Home
+    val availableIds = availableDestinations.map { it.name }
+    val visibleIds = settings.navigation.visible(availableIds)
+    val destinations = availableDestinations.filter { it.name in visibleIds }
+    var selectedName by rememberSaveable(session.user.id) { mutableStateOf(destinations.first().name) }
+    // Visibility filters the menu; internal actions can still open an available hidden screen.
+    val selected = availableDestinations.firstOrNull { it.name == selectedName } ?: destinations.first()
+    val navigationConfiguration = availableIds.joinToString(",") + ";" + visibleIds.joinToString(",")
+    var appliedNavigationConfiguration by rememberSaveable(session.user.id) { mutableStateOf(navigationConfiguration) }
+    androidx.compose.runtime.LaunchedEffect(navigationConfiguration) {
+        // A restored internal route may be hidden in the menu. Normalize it only after an actual settings/role change.
+        val allowed = if (appliedNavigationConfiguration == navigationConfiguration) availableIds else visibleIds
+        if (selectedName !in allowed) selectedName = destinations.first().name
+        appliedNavigationConfiguration = navigationConfiguration
+    }
     val onSelect: (AppDestination) -> Unit = { selectedName = it.name }
-    BackHandler(enabled = selected != AppDestination.Home) { onSelect(AppDestination.Home) }
+    val home = destinations.firstOrNull { it == AppDestination.Home } ?: destinations.first()
+    BackHandler(enabled = selected != home) { onSelect(home) }
+    RequestNotificationsHost(session, isOffline, simpleOneState.snapshot, simpleOneState.isAuthorized)
+    val notification = LocalRequestNotification.current
+    androidx.compose.runtime.LaunchedEffect(notification?.requestId, session.user.id, simpleOneState.isAuthorized, isOffline) {
+        if (notification == null || !simpleOneState.isAuthorized) return@LaunchedEffect
+        onSelect(AppDestination.Requests)
+        simpleOneViewModel.updateMode(RequestsMode.Active)
+        val cached = simpleOneViewModel.state.value.activeRequests.firstOrNull { it.id == notification.requestId }
+        val request = cached ?: if (!isOffline) {
+            simpleOneViewModel.refreshActiveRequests()
+            kotlinx.coroutines.withTimeoutOrNull(15_000) {
+                simpleOneViewModel.state.map { state -> state.activeRequests.firstOrNull { it.id == notification.requestId } }.filterNotNull().first()
+            }
+        } else null
+        request?.let(simpleOneViewModel::openRequest)
+        notification.consume()
+    }
 
-    AppDrawerShell(
-        contentStateHolder = contentStateHolder,
-        session = session,
-        isOffline = isOffline,
-        routeRepository = routeRepository,
-        simpleOneRepository = simpleOneRepository,
-        coordinationRepository = coordinationRepository,
-        timeReportRepository = timeReportRepository,
-        backpackRepository = backpackRepository,
-        backpackPhotoRepository = backpackPhotoRepository,
-        backpackImageRepository = backpackImageRepository,
-        employeeRepository = employeeRepository,
-        workScheduleRepository = workScheduleRepository,
-        autoRepository = autoRepository,
-        vehicleImageRepository = vehicleImageRepository,
-        fuelRepository = fuelRepository,
-        wikiRepository = wikiRepository,
-        ftpRepository = ftpRepository,
-        salaryRepository = salaryRepository,
-        feedbackRepository = feedbackRepository,
-        adminRepository = adminRepository,
-        simpleOneState = simpleOneState,
-        simpleOneActions = simpleOneActions,
-        destinations = destinations,
-        selected = selected,
-        onSelect = onSelect,
-        onOpenProfile = openProfile,
-        onOpenSettings = { settingsOpen = true },
-        onOpenFeedback = { feedbackOpen = true },
-    )
-    if (profileOpen) ProfileRoute(
-        session = session,
-        offline = isOffline,
-        auth = authRepository,
-        auto = autoRepository,
-        images = vehicleImageRepository,
-        simpleOne = simpleOneRepository,
-        liveArchive = simpleOneState.closedArchive,
-        isArchiveLoading = simpleOneState.isClosedLoading,
-        startInEditor = profileEditing,
-        onDismiss = { profileOpen = false },
-    )
-    if (settingsOpen) AppSettingsSheet(
-        session = session,
-        onDismiss = { settingsOpen = false },
-        onOpenProfile = { settingsOpen = false; profileEditing = true; profileOpen = true },
-        onLogout = { settingsOpen = false; onLogout() },
-    )
-    if (feedbackOpen) AppFeedbackDialog(
-        session = session,
-        offline = isOffline,
-        repository = feedbackRepository,
-        onDismiss = { feedbackOpen = false },
-    )
+    CompositionLocalProvider(LocalSalaryBiometricEnabled provides settings.salaryBiometricEnabled) {
+        AppDrawerShell(
+            contentStateHolder = contentStateHolder,
+            session = session,
+            isOffline = isOffline,
+            routeRepository = routeRepository,
+            simpleOneRepository = simpleOneRepository,
+            coordinationRepository = coordinationRepository,
+            timeReportRepository = timeReportRepository,
+            backpackRepository = backpackRepository,
+            backpackPhotoRepository = backpackPhotoRepository,
+            backpackImageRepository = backpackImageRepository,
+            employeeRepository = employeeRepository,
+            workScheduleRepository = workScheduleRepository,
+            autoRepository = autoRepository,
+            vehicleImageRepository = vehicleImageRepository,
+            fuelRepository = fuelRepository,
+            wikiRepository = wikiRepository,
+            ftpRepository = ftpRepository,
+            salaryRepository = salaryRepository,
+            feedbackRepository = feedbackRepository,
+            adminRepository = adminRepository,
+            simpleOneState = simpleOneState,
+            simpleOneActions = simpleOneActions,
+            destinations = destinations,
+            selected = selected,
+            onSelect = onSelect,
+            onOpenProfile = openProfile,
+            onOpenSettings = { settingsOpen = true },
+            onOpenFeedback = { feedbackOpen = true },
+        )
+        if (settingsOpen) AppSettingsSheet(
+            session = session, offline = isOffline, auth = authRepository, images = vehicleImageRepository,
+            auto = autoRepository, fuel = fuelRepository, preferences = preferences, settings = settings, destinations = availableDestinations,
+            onDismiss = { settingsOpen = false },
+            onOpenProfile = { profileEditing = true; profileOpen = true },
+            onLogout = { settingsOpen = false; onLogout() },
+        )
+        if (profileOpen) ProfileRoute(
+            session = session,
+            offline = isOffline,
+            auth = authRepository,
+            auto = autoRepository,
+            images = vehicleImageRepository,
+            simpleOne = simpleOneRepository,
+            liveArchive = simpleOneState.closedArchive,
+            isArchiveLoading = simpleOneState.isClosedLoading,
+            startInEditor = profileEditing,
+            onDismiss = { profileOpen = false },
+        )
+        if (feedbackOpen) AppFeedbackDialog(
+            session = session,
+            offline = isOffline,
+            repository = feedbackRepository,
+            onDismiss = { feedbackOpen = false },
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -494,6 +542,7 @@ private fun DestinationMark(destination: AppDestination) {
         AppDestination.Fuel -> R.drawable.ic_nav_local_gas_station
         AppDestination.Wiki -> R.drawable.ic_nav_menu_book
         AppDestination.Ftp -> R.drawable.ic_nav_folder_open
+        AppDestination.Tools -> R.drawable.ic_nav_tools
         AppDestination.Salary -> R.drawable.ic_nav_account_balance_wallet
         AppDestination.Requests -> R.drawable.ic_nav_assignment
         AppDestination.Coordination -> R.drawable.ic_nav_assignment_ind
@@ -619,6 +668,14 @@ private fun DestinationContent(
                 startOffline = isOffline,
                 repository = wikiRepository,
                 widthClass = contentWidthClass,
+            )
+            AppDestination.Tools -> ToolsRoute(
+                owner = session.user.id,
+                repository = ftpRepository,
+                requests = simpleOneState,
+                widthClass = contentWidthClass,
+                onFtp = { onSelect(AppDestination.Ftp) },
+                onWiki = { onSelect(AppDestination.Wiki) },
             )
             AppDestination.Ftp -> FtpRoute(
                 session = session,

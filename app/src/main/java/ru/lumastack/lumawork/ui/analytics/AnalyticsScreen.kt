@@ -17,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -50,9 +49,7 @@ fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, onRefres
             state.errorMessage?.let { snackbar.showSnackbar(it) }
         }
     }
-    val dark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(dark) { Brush.verticalGradient(if (dark)
-        listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark) else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight)) }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isClosedLoading,
         enabled = state.isAuthorized && !state.isOffline && state.initialArchiveReady && !state.isInitializing,
         onRefresh = { requestedRefresh = true; onRefresh() }) {

@@ -47,7 +47,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -72,10 +71,6 @@ import ru.lumastack.lumawork.domain.auto.VehicleDraft
 import ru.lumastack.lumawork.domain.auto.VehicleInputValidation
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
 @Composable
 fun AutoRoute(
@@ -135,13 +130,7 @@ private fun AutoScreen(
     startOffline: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(isDark) {
-        Brush.verticalGradient(
-            if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
-        )
-    }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
         enabled = !state.isSaving && !startOffline, contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {

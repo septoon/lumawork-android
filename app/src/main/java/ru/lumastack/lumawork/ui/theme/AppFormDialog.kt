@@ -72,7 +72,7 @@ fun AppFormDialog(
         ),
     ) {
         val view = LocalView.current
-        val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
+        val isDark = ru.lumastack.lumawork.ui.theme.LocalAppDarkTheme.current
         val navigationBarColor = MaterialTheme.colorScheme.surface.toArgb()
         DisposableEffect(view, isDark, navigationBarColor) {
             val window = (view.parent as? DialogWindowProvider)?.window

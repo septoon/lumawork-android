@@ -30,6 +30,11 @@ class FuelRepository(
         return types
     }
 
+    /** Apply the confirmed GSM profile without a second network request. */
+    suspend fun setFuelTypes(ownerUserId: String, types: List<String>) {
+        update(ownerUserId) { it.copy(fuelTypes = types.map(String::trim).filter(String::isNotBlank).distinct()) }
+    }
+
     suspend fun read(ownerUserId: String): FuelSnapshot? = cache.read(ownerUserId)
 
     suspend fun refresh(session: AppSession): FuelSnapshot {

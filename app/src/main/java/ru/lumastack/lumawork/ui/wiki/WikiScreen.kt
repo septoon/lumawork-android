@@ -49,7 +49,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -62,10 +61,6 @@ import ru.lumastack.lumawork.domain.wiki.WikiBlock
 import ru.lumastack.lumawork.domain.wiki.WikiSearchResult
 import ru.lumastack.lumawork.domain.wiki.cleanWikiText
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
 @Composable
 fun WikiRoute(
@@ -103,13 +98,7 @@ private fun WikiScreen(
     pdfUrl: () -> String?,
     modifier: Modifier = Modifier,
 ) {
-    val dark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(dark) {
-        Brush.verticalGradient(
-            if (dark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
-        )
-    }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
     val searchState = rememberLazyListState()
     val articleState = rememberLazyListState()
     var displayedArticleId by rememberSaveable { mutableStateOf<String?>(null) }

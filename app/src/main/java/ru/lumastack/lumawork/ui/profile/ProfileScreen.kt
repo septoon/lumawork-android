@@ -1,9 +1,6 @@
 package ru.lumastack.lumawork.ui.profile
 
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,7 +56,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
@@ -114,25 +110,12 @@ fun ProfileRoute(
     LaunchedEffect(documents, session.user.id) {
         documents.changes.collect { (owner, items) -> if (owner == session.user.id) documentCount = items.size }
     }
-    var avatarMenu by remember { mutableStateOf(false) }
-    var removeAvatar by remember { mutableStateOf(false) }
-    var cameraPath by rememberSaveable { mutableStateOf<String?>(null) }
     val close = {
         if (!state.busy) {
             if (documentsOpen) documentsOpen = false
             else if (editing && !startInEditor) { editing = false; vm.close(); vm.open(session, offline) }
             else { vm.close(); onDismiss() }
         }
-    }
-    val importAvatar: (Uri) -> Unit = { uri -> vm.uploadAvatar { readAvatarJpeg(context, uri) } }
-    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(importAvatar) }
-    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(importAvatar) }
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        val file = cameraPath?.let(::File)
-        cameraPath = null
-        if (success && file != null) vm.uploadAvatar {
-            try { readAvatarJpeg(context, Uri.fromFile(file)) } finally { file.delete() }
-        } else file?.delete()
     }
     LaunchedEffect(session, offline) { vm.open(session, offline) }
     DisposableEffect(vm, context) {
@@ -167,33 +150,8 @@ fun ProfileRoute(
                     onOpenDocuments = { documentsOpen = true })
                 else LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     item(key = "avatar") {
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                            ProfileAvatar(session.user, images, 80.dp)
-                            Box {
-                                TextButton(onClick = { avatarMenu = true }, enabled = !state.busy && !offline) { Text("Изменить фото") }
-                                DropdownMenu(avatarMenu, { avatarMenu = false }) {
-                                    DropdownMenuItem(text = { Text("Фотогалерея") }, onClick = {
-                                        avatarMenu = false
-                                        gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                    })
-                                    DropdownMenuItem(text = { Text("Сделать фото") }, onClick = {
-                                        avatarMenu = false
-                                        runCatching {
-                                            val file = File.createTempFile("profile-avatar-", ".jpg", context.cacheDir)
-                                            cameraPath = file.absolutePath
-                                            camera.launch(FileProvider.getUriForFile(context, "${context.packageName}.files", file))
-                                        }.onFailure {
-                                            cameraPath?.let(::File)?.delete()
-                                            cameraPath = null
-                                            vm.showError("Не удалось открыть камеру.")
-                                        }
-                                    })
-                                    DropdownMenuItem(text = { Text("Выбрать файл") }, onClick = { avatarMenu = false; files.launch(arrayOf("image/*")) })
-                                    if (!session.user.avatarUrl.isNullOrBlank()) DropdownMenuItem(text = { Text("Удалить фото", color = MaterialTheme.colorScheme.error) }, onClick = { avatarMenu = false; removeAvatar = true })
-                                }
-                            }
-                            Text(session.user.email, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                        ProfileAvatarEditor(session.user, images, enabled = !offline && !state.busy, busy = state.busy,
+                            onUpload = vm::uploadAvatar, onDelete = vm::deleteAvatar, onError = vm::showError)
                     }
                     if (offline) item(key = "offline") { Text("Подключитесь к интернету, чтобы сохранить профиль.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     state.error?.let { message -> item(key = "error") { Text(message, color = MaterialTheme.colorScheme.error) } }
@@ -239,10 +197,6 @@ fun ProfileRoute(
                 }
             }
         }
-        if (removeAvatar) AlertDialog(onDismissRequest = { removeAvatar = false }, title = { Text("Удалить фото профиля?") },
-            confirmButton = { TextButton(onClick = { removeAvatar = false; vm.deleteAvatar() }) { Text("Удалить") } },
-            dismissButton = { TextButton(onClick = { removeAvatar = false }) { Text("Отмена") } })
-
     }
 }
 

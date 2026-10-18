@@ -1,6 +1,10 @@
 package ru.lumastack.lumawork
 
+import android.content.Intent
 import android.os.Bundle
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
+import ru.lumastack.lumawork.data.notifications.AndroidRequestNotificationDelivery
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
@@ -14,9 +18,28 @@ import ru.lumastack.lumawork.ui.update.AppUpdateHost
 import ru.lumastack.lumawork.ui.update.LocalUpdateCheck
 import ru.lumastack.lumawork.ui.update.UpdateViewModel
 
+data class RequestNotificationNavigation(val requestId: String, val consume: () -> Unit)
+val LocalRequestNotification = staticCompositionLocalOf<RequestNotificationNavigation?> { null }
+
 class MainActivity : ComponentActivity() {
+    private val pendingRequest = mutableStateOf<RequestNotificationNavigation?>(null)
+    private fun receiveNotification(value: Intent?) {
+        if (value?.action != AndroidRequestNotificationDelivery.ACTION_OPEN_REQUESTS) return
+        val requestId = value.getStringExtra(AndroidRequestNotificationDelivery.EXTRA_REQUEST_ID)?.takeIf { it.isNotBlank() } ?: return
+        pendingRequest.value = RequestNotificationNavigation(requestId) {
+            pendingRequest.value = null
+            intent?.action = null
+        }
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        receiveNotification(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        receiveNotification(intent)
         val container = (application as LumaWorkApplication).container
 
         setContent {
@@ -24,7 +47,7 @@ class MainActivity : ComponentActivity() {
                 val viewModel: AuthViewModel = viewModel(factory = AuthViewModel.factory(container.authRepository))
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 val updateViewModel: UpdateViewModel = viewModel()
-                CompositionLocalProvider(LocalUpdateCheck provides { updateViewModel.check() }) {
+                CompositionLocalProvider(LocalUpdateCheck provides { updateViewModel.check() }, LocalRequestNotification provides pendingRequest.value) {
                     AuthContent(
                         state = state,
                         onEmailChange = viewModel::onEmailChange,

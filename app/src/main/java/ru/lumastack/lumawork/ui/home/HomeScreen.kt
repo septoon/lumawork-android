@@ -47,7 +47,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -77,10 +76,6 @@ import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import ru.lumastack.lumawork.ui.theme.AppTextField
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,11 +100,7 @@ fun HomeScreen(
     val state by model.state.collectAsStateWithLifecycle()
     LaunchedEffect(model) { model.selectDate(LocalDate.parse(selectedDate)) }
     LaunchedEffect(model, session.user.profile) { model.updateSettings(ru.lumastack.lumawork.domain.route.RouteSettings.from(session.user.profile)) }
-    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(isDark) {
-        Brush.verticalGradient(if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight))
-    }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
     val maxContentWidth = when (widthClass) {
         AppWidthClass.Compact -> 560.dp
         AppWidthClass.Medium -> 920.dp

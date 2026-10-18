@@ -87,10 +87,6 @@ import ru.lumastack.lumawork.domain.backpack.filterBackpackGroups
 import ru.lumastack.lumawork.domain.backpack.photoFor
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
 @Composable
 fun BackpackRoute(
@@ -154,13 +150,7 @@ private fun BackpackScreen(
     val groups = remember(state.snapshot?.items) { backpackGroups(state.snapshot?.items.orEmpty()) }
     val visibleGroups = remember(state.snapshot, state.query, state.locationFilter) { backpackGroups(visibleBackpackItems(state.snapshot, state.query, state.locationFilter)) }
     val selected = visibleGroups.firstOrNull { it.id == state.selectedGroupId } ?: groups.firstOrNull { it.id == state.selectedGroupId }
-    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(isDark) {
-        Brush.verticalGradient(
-            if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
-        )
-    }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
     val listState = rememberLazyGridState()
     val detailState = rememberLazyGridState()
     var displayedDetailId by rememberSaveable { mutableStateOf<String?>(null) }

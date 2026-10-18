@@ -62,10 +62,6 @@ import ru.lumastack.lumawork.domain.employees.EmployeeAddress
 import ru.lumastack.lumawork.domain.employees.employeeCountWord
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
 @Composable
 fun EmployeeRoute(
@@ -124,13 +120,7 @@ private fun EmployeeScreen(
     canRefresh: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(isDark) {
-        Brush.verticalGradient(
-            if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
-        )
-    }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
     val directoryState = rememberLazyListState()
     val detailState = rememberLazyListState()
     var displayedEmployeeId by rememberSaveable { mutableStateOf<String?>(null) }

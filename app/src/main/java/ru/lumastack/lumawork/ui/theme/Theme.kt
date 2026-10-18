@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -29,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 
 enum class AppAppearance(val title: String) {
-    System("Системная"), Light("Светлая"), Dark("Тёмная");
+    System("Система"), Light("День"), Dark("Ночь");
 
     fun usesDarkTheme(systemDark: Boolean): Boolean = when (this) {
         System -> systemDark
@@ -38,10 +39,30 @@ enum class AppAppearance(val title: String) {
     }
 }
 
-data class AppAppearancePreference(val mode: AppAppearance, val onChange: (AppAppearance) -> Unit)
+data class AppAppearancePreference(
+    val mode: AppAppearance,
+    val backgroundEnabled: Boolean = true,
+    val onBackgroundChange: (Boolean) -> Unit = {},
+    val onChange: (AppAppearance) -> Unit,
+)
 
 val LocalAppAppearance = staticCompositionLocalOf {
     AppAppearancePreference(AppAppearance.System) {}
+}
+
+val LocalAppDarkTheme = staticCompositionLocalOf { false }
+
+/** Shared screen fill: changing the background preference never replaces the screen's state. */
+@Composable
+fun appScreenBackground(): Brush {
+    val dark = LocalAppDarkTheme.current
+    val colored = LocalAppAppearance.current.backgroundEnabled
+    val background = MaterialTheme.colorScheme.background
+    return remember(dark, colored, background) {
+        Brush.verticalGradient(if (!colored) listOf(background, background)
+            else if (dark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
+            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight))
+    }
 }
 
 val LumaPrimaryLight = Color(0xFF3D634F)
@@ -115,9 +136,11 @@ fun LumaWorkTheme(
     fun readMode() = AppAppearance.entries.firstOrNull { it.name == preferences.getString("mode", null) }
         ?: AppAppearance.System
     var appearance by remember(preferences) { mutableStateOf(readMode()) }
+    var backgroundEnabled by remember(preferences) { mutableStateOf(preferences.getBoolean("background-color-enabled", true)) }
     DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == "mode") appearance = readMode()
+            if (key == "background-color-enabled") backgroundEnabled = preferences.getBoolean("background-color-enabled", true)
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
@@ -144,12 +167,18 @@ fun LumaWorkTheme(
         }
         onDispose { }
     }
-    CompositionLocalProvider(LocalAppAppearance provides AppAppearancePreference(appearance) {
+    CompositionLocalProvider(LocalAppDarkTheme provides resolvedDark,
+        LocalAppAppearance provides AppAppearancePreference(appearance, backgroundEnabled, {
+            backgroundEnabled = it
+            preferences.edit { putBoolean("background-color-enabled", it) }
+        }) {
         appearance = it
         preferences.edit { putString("mode", it.name) }
     }) {
         MaterialTheme(
-            colorScheme = if (resolvedDark) DarkColors else LightColors,
+            colorScheme = (if (resolvedDark) DarkColors else LightColors).let { colors ->
+                if (backgroundEnabled) colors else colors.copy(background = if (resolvedDark) Color(0xFF121212) else Color(0xFFF5F5F5))
+            },
             typography = LumaTypography,
             shapes = Shapes(
                 extraSmall = RoundedCornerShape(10.dp),

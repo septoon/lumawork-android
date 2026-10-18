@@ -46,7 +46,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.focus.FocusRequester
@@ -81,10 +80,6 @@ import ru.lumastack.lumawork.data.feedback.FeedbackRepository
 import ru.lumastack.lumawork.data.admin.AdminRepository
 import ru.lumastack.lumawork.data.simpleone.SimpleOneRepository
 import ru.lumastack.lumawork.data.timereport.TimeReportRepository
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
 @Composable
 fun AuthContent(
@@ -142,16 +137,7 @@ fun AuthContent(
         return
     }
 
-    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(isDark) {
-        Brush.verticalGradient(
-            if (isDark) {
-                listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            } else {
-                listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight)
-            },
-        )
-    }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
 
     Box(
         modifier = Modifier

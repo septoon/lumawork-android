@@ -34,7 +34,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import java.time.Instant
@@ -47,10 +46,6 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.timereport.TimeReportMonthGroup
 import ru.lumastack.lumawork.domain.timereport.TimeReportSnapshot
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
 @Composable
 internal fun TimeReportScreen(
@@ -72,13 +67,7 @@ internal fun TimeReportScreen(
     var deleteAllPresented by remember { mutableStateOf(false) }
     var deleteRangePresented by remember { mutableStateOf(false) }
     var cleanupPeriod by remember { mutableStateOf<ru.lumastack.lumawork.domain.requests.ClosedRequestsPeriod?>(null) }
-    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(isDark) {
-        Brush.verticalGradient(
-            if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
-        )
-    }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
 
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
         enabled = state.isAuthorized && !state.isDeleting && !state.isLoading, contentAlignment = Alignment.TopCenter) {

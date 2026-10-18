@@ -62,7 +62,6 @@ import ru.lumastack.lumawork.BuildConfig
 import ru.lumastack.lumawork.domain.fuel.FuelArchivePolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,10 +79,6 @@ import ru.lumastack.lumawork.domain.fuel.FuelRecordType
 import ru.lumastack.lumawork.domain.fuel.FuelSummaryMonth
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
 
 @Composable
 fun FuelRoute(
@@ -170,13 +165,7 @@ private fun FuelScreen(
     onOpenImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val isDark = MaterialTheme.colorScheme.background == LumaBackgroundTopDark
-    val background = remember(isDark) {
-        Brush.verticalGradient(
-            if (isDark) listOf(LumaBackgroundTopDark, LumaBackgroundBottomDark)
-            else listOf(LumaBackgroundTopLight, LumaBackgroundBottomLight),
-        )
-    }
+    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
         enabled = !state.isSaving && !state.isOffline, contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
