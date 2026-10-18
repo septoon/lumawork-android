@@ -108,6 +108,8 @@ fun SimpleOneRequest.clientCommentTIN(): String {
         normalizedClientCommentTIN(clientCommentField(label)).takeIf(String::isNotEmpty)?.let { return it }
     }
     val texts = listOf(description, additionalInformation, engineerComment)
+    // Most archive rows have no TIN. Avoid parsing all detail labels just to discover that.
+    if (texts.none { it.contains("ИНН", ignoreCase = true) }) return ""
     for (label in listOf("ИНН ТСП", "ИНН", "ИНН клиента")) {
         val pattern = Regex("(?:^|[\\n\\r;])\\s*${Regex.escape(label)}\\s*[:：=]\\s*([\\d \\-]+)", RegexOption.IGNORE_CASE)
         for (text in texts) for (match in pattern.findAll(text)) {

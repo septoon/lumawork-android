@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
@@ -33,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,6 +58,7 @@ import ru.lumastack.lumawork.domain.requests.clientCommentTerminalID
 import ru.lumastack.lumawork.domain.requests.clientCommentTerminals
 import ru.lumastack.lumawork.domain.requests.clientPersonalCommentMetadata
 import ru.lumastack.lumawork.domain.requests.clientPersonalCommentRows
+import ru.lumastack.lumawork.domain.requests.normalizedClientCommentTIN
 import ru.lumastack.lumawork.domain.requests.normalizedClientCommentScope
 import ru.lumastack.lumawork.domain.requests.supportsClientPersonalComments
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
@@ -97,6 +101,15 @@ class ClientPersonalCommentsController internal constructor(
         private set
     var draft by mutableStateOf<ClientPersonalCommentDraft?>(null)
         private set
+    var isOpening by mutableStateOf(false)
+        private set
+    private var editorJob: Job? = null
+    private var editorRevision = 0L
+    private var options by mutableStateOf(CommentEditorOptions())
+    private var cachedOptions: CommentEditorOptions? = null
+    private var optionRecords: List<SimpleOneRequest>? = null
+    private var optionTarget: ClientPersonalCommentTarget? = null
+    private var optionTerminal = ""
     var isSaving by mutableStateOf(false)
         private set
     var saveError by mutableStateOf<String?>(null)
@@ -106,6 +119,7 @@ class ClientPersonalCommentsController internal constructor(
     internal var originalComment: ClientPersonalComment? = null
 
     internal fun updateComments(value: List<ClientPersonalComment>) {
+        if (comments === value) return
         comments = value
         matching = ClientPersonalCommentMatchingIndex(value)
     }
@@ -118,31 +132,72 @@ class ClientPersonalCommentsController internal constructor(
 
     /** null request is the top menu's blank «Комментарий» action. */
     fun openEditor(request: SimpleOneRequest? = null) {
-        if (offline || (request != null && !canEdit(request))) return
-        scope.launch {
-            repository.hydrate()
-            if (offline) return@launch
-            val existing = request?.let(::commentFor)
-            currentTarget = request?.clientCommentAddress()?.takeIf(String::isNotBlank)?.let(::ClientPersonalCommentTarget)
-            currentTerminalID = request?.clientCommentTerminalID().orEmpty()
-            originalComment = existing
-            val tin = existing?.displayTIN?.takeIf(String::isNotBlank) ?: request?.clientCommentTIN().orEmpty()
-            val terminals = terminalOptions(tin)
-            draft = if (request == null) repository.snapshot.value.draft ?: ClientPersonalCommentDraft()
-                else clientCommentEditorDraft(tin, existing, currentTarget, currentTerminalID, terminals, repository.snapshot.value.draft)
-            saveError = null
+        if (isOpening || isSaving || offline || (request != null && !canEdit(request))) return
+        val revision = ++editorRevision
+        editorJob?.cancel()
+        isOpening = true
+        editorJob = scope.launch {
+            try {
+                repository.hydrate()
+                if (offline) return@launch
+                val existing = request?.let(::commentFor)
+                val target = request?.clientCommentAddress()?.takeIf(String::isNotBlank)?.let(::ClientPersonalCommentTarget)
+                val terminal = request?.clientCommentTerminalID().orEmpty()
+                val cached = repository.snapshot.value.draft
+                val tin = if (request == null) cached?.tin.orEmpty()
+                    else existing?.displayTIN?.takeIf(String::isNotBlank) ?: request.clientCommentTIN()
+                val prepared = prepareOptions(tin, records, target, terminal)
+                if (offline || revision != editorRevision) return@launch
+                currentTarget = target
+                currentTerminalID = terminal
+                originalComment = existing
+                options = prepared
+                draft = if (request == null) cached ?: ClientPersonalCommentDraft()
+                    else clientCommentEditorDraft(tin, existing, target, terminal, prepared.terminals, cached)
+                saveError = null
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) { saveError = "Не удалось открыть личный комментарий. Попробуйте ещё раз." }
+            finally { if (revision == editorRevision) isOpening = false }
         }
     }
 
+    // Compose reads prepared options only; neither rendering nor typing scans the archive.
     internal fun targetOptions(tin: String): List<ClientPersonalCommentTarget> =
-        (clientCommentTargets(records, tin, currentTarget) + draft?.targets.orEmpty()).distinctBy { it.key }
+        ((if (options.tin == normalizedClientCommentTIN(tin)) options.targets else listOfNotNull(currentTarget)) +
+            draft?.targets.orEmpty()).distinctBy { it.key }
 
     internal fun terminalOptions(tin: String): List<ClientPersonalCommentTerminalOption> =
-        clientCommentTerminals(records, tin, currentTerminalID, currentTarget?.address.orEmpty())
+        if (options.tin == normalizedClientCommentTIN(tin)) options.terminals else emptyList()
+
+    private suspend fun prepareOptions(tin: String, source: List<SimpleOneRequest>,
+        target: ClientPersonalCommentTarget?, terminal: String): CommentEditorOptions {
+        val normalized = normalizedClientCommentTIN(tin)
+        cachedOptions?.let { if (optionRecords === source && it.tin == normalized && optionTarget == target && optionTerminal == terminal) return it }
+        val prepared = withContext(Dispatchers.Default) {
+            CommentEditorOptions(normalized, clientCommentTargets(source, normalized, target),
+                clientCommentTerminals(source, normalized, terminal, target?.address.orEmpty()))
+        }
+        cachedOptions = prepared
+        optionRecords = source
+        optionTarget = target
+        optionTerminal = terminal
+        return prepared
+    }
+
+    private fun reloadOptions(tin: String) {
+        val revision = ++editorRevision
+        editorJob?.cancel()
+        editorJob = scope.launch {
+            val prepared = prepareOptions(tin, records, currentTarget, currentTerminalID)
+            if (revision == editorRevision && draft?.normalizedTIN == normalizedClientCommentTIN(tin)) options = prepared
+        }
+    }
 
     fun updateDraft(value: ClientPersonalCommentDraft) {
         if (isSaving) return
+        val changedTIN = draft?.normalizedTIN != value.normalizedTIN
         draft = value
+        if (changedTIN) reloadOptions(value.tin)
         saveError = null
         // Start immediately and finish queued draft writes across configuration/account disposal.
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -153,7 +208,15 @@ class ClientPersonalCommentsController internal constructor(
         }
     }
 
-    fun dismissEditor() { if (!isSaving) { draft = null; saveError = null } }
+    fun dismissEditor() {
+        if (!isSaving) {
+            editorRevision++
+            editorJob?.cancel()
+            isOpening = false
+            draft = null
+            saveError = null
+        }
+    }
 
     fun save() {
         val value = draft ?: return
@@ -172,6 +235,12 @@ class ClientPersonalCommentsController internal constructor(
     }
 }
 
+private data class CommentEditorOptions(
+    val tin: String = "",
+    val targets: List<ClientPersonalCommentTarget> = emptyList(),
+    val terminals: List<ClientPersonalCommentTerminalOption> = emptyList(),
+)
+
 /** Render once in the Requests root Box. Per-card content uses [ClientPersonalCommentBlock]. */
 @Composable
 fun ClientPersonalCommentsHost(controller: ClientPersonalCommentsController, modifier: Modifier = Modifier) {
@@ -182,6 +251,18 @@ fun ClientPersonalCommentsHost(controller: ClientPersonalCommentsController, mod
         }
     }
     SnackbarHost(snackbar, modifier)
+    if (controller.isOpening) {
+        AppFormDialog(title = "Личный комментарий", onDismiss = controller::dismissEditor,
+            confirmLabel = "Сохранить", onConfirm = {}, confirmEnabled = false) {
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator()
+                    Text("Подготовка адресов и терминалов…")
+                }
+            }
+        }
+        return
+    }
     val draft = controller.draft ?: return
     ClientPersonalCommentEditor(controller, draft)
 }
