@@ -14,6 +14,27 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class SalaryApiTest {
+    @Test fun `salary response shapes infer accrual month like iOS and reject malformed payload`() = runBlocking {
+        for (key in listOf("records", "entries", "items", "data")) {
+            val entry = api { """{"$key":[{"_id":"entry-1","date":"2026-06-05","baseSalary":1000}]}""" }.records("token").single()
+            assertEquals("entry-1", entry.id)
+            assertEquals("2026-05", entry.accrualMonthKey)
+        }
+        org.junit.Assert.assertTrue(runCatching { api { """{"unexpected":true}""" }.records("token") }.isFailure)
+    }
+
+    @Test fun `net create sends amount as base salary and clears unrelated comments`() = runBlocking {
+        val api = api { request ->
+            val body = Json.parseToJsonElement(Buffer().also { request.body!!.writeTo(it) }.readUtf8()).jsonObject
+            assertEquals("1000.0", body["baseSalary"]?.toString())
+            assertEquals("0.0", body["weekendPay"]?.toString())
+            assertNull(body["comment"])
+            body.toString()
+        }
+        api.create("token", SalaryDraft(amount = "1000", comment = "Старая заметка", kind = SalaryKind.Salary))
+        Unit
+    }
+
     @Test fun `vacation extension payload is restored from the v2 response`() = runBlocking {
         val api = api { """{"records":[{"id":"1","date":"2026-10-15","amount":1000,"payload":{"kind":"vacation","vacationStartDate":"2026-10-19","vacationEndDate":"2026-10-30"}}]}""" }
         val entry = api.records("token").single()

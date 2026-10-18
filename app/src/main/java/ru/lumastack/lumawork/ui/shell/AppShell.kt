@@ -631,6 +631,7 @@ private fun DestinationContent(
                 startOffline = isOffline,
                 repository = salaryRepository,
                 widthClass = contentWidthClass,
+                onCancel = { onSelect(AppDestination.Home) },
             )
             AppDestination.Analytics -> AnalyticsScreen(
                 state = simpleOneState,

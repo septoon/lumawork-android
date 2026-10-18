@@ -12,6 +12,8 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.floor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -53,21 +55,21 @@ import okhttp3.Response
     val vacationStartDate: String? = null,
     val vacationEndDate: String? = null,
 ) {
-    val accrualMonthKey: String get() = periodMonth?.takeIf(MONTH_REGEX::matches) ?: date.take(7)
+    val accrualMonthKey: String get() = periodMonth?.takeIf(MONTH_REGEX::matches) ?: defaultSalaryPeriod(date)
     val usesNetAmount: Boolean get() = amount != null || date >= NET_START
     val payout: Double get() = if (usesNetAmount) amount ?: baseSalary + weekendPay else baseSalary + weekendPay - floor((baseSalary + weekendPay) * .13)
-    val resolvedKind: SalaryKind get() = kind ?: if (date.takeLast(2).toIntOrNull()?.let { it <= 10 } == true) SalaryKind.Salary else SalaryKind.Advance
+    val resolvedKind: SalaryKind get() = kind ?: if (!usesNetAmount) SalaryKind.Salary else if (date.takeLast(2).toIntOrNull()?.let { it <= 10 } == true) SalaryKind.Salary else SalaryKind.Advance
     companion object { const val NET_START = "2026-05-13" }
 }
 
 @Serializable data class SalarySnapshot(val records: List<SalaryEntry> = emptyList(), val updatedAtEpochMillis: Long? = null)
 
 @Serializable data class SalaryDraft(
-    val date: String = LocalDate.now().toString(), val periodMonth: String = defaultPeriod(LocalDate.now().toString()),
+    val date: String = LocalDate.now().toString(), val periodMonth: String = defaultSalaryPeriod(LocalDate.now().toString()),
     val amount: String = "", val kind: SalaryKind = SalaryKind.Advance, val baseSalary: String = "", val weekendPay: String = "", val comment: String = "",
     val vacationStartDate: String = "", val vacationEndDate: String = "",
 ) {
-    constructor(entry: SalaryEntry) : this(entry.date, entry.accrualMonthKey, entry.amount.numberText(), entry.resolvedKind, entry.baseSalary.numberText(), entry.weekendPay.numberText(), entry.comment.orEmpty(), entry.vacationStartDate.orEmpty(), entry.vacationEndDate.orEmpty())
+    constructor(entry: SalaryEntry) : this(entry.date, entry.accrualMonthKey, (entry.amount ?: (entry.baseSalary + entry.weekendPay)).numberText(), entry.resolvedKind, entry.baseSalary.numberText(), entry.weekendPay.numberText(), entry.comment.orEmpty(), entry.vacationStartDate.orEmpty(), entry.vacationEndDate.orEmpty())
 }
 
 data class SalaryMonth(val key: String, val entries: List<SalaryEntry>) {
@@ -87,7 +89,11 @@ fun validateSalaryDraft(draft: SalaryDraft): String? {
         if (!MONTH_REGEX.matches(draft.periodMonth)) return "Укажите месяц в формате ГГГГ-ММ."
         val amount = draft.amount.number() ?: return "Укажите выплату на руки."
         if (amount < 0) return "Выплата должна быть неотрицательной."
-    } else if (listOf(draft.baseSalary.number(), draft.weekendPay.number()).filterNotNull().any { it < 0 }) return "Суммы должны быть неотрицательными."
+    } else {
+        val base = draft.baseSalary.number() ?: return "Укажите корректный оклад."
+        val weekend = if (draft.weekendPay.isBlank()) 0.0 else draft.weekendPay.number() ?: return "Укажите корректную оплату в выходной."
+        if (base < 0 || weekend < 0) return "Суммы должны быть неотрицательными."
+    }
     return null
 }
 
@@ -101,7 +107,12 @@ interface SalaryApi { suspend fun records(token: String): List<SalaryEntry>; sus
 
 class OkHttpSalaryApi(origin: String, private val json: Json, private val client: OkHttpClient = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()) : SalaryApi {
     private val base = origin.trimEnd('/')
-    override suspend fun records(token: String) = execute<JsonObject>(request("/api/v2/salary", token))["records"]?.jsonArray.orEmpty().map { normalizeEntry(it) }
+    override suspend fun records(token: String): List<SalaryEntry> {
+        val response = execute<JsonObject>(request("/api/v2/salary", token))
+        val records = listOf("records", "entries", "data", "items").firstNotNullOfOrNull { response[it] as? kotlinx.serialization.json.JsonArray }
+            ?: throw SalaryFailure.InvalidResponse
+        return records.map(::normalizeEntry)
+    }
     override suspend fun create(token: String, draft: SalaryDraft) = normalizeEntry(execute<JsonObject>(request("/api/v2/salary", token, "POST", draft.payload(UUID.randomUUID().toString()))))
     override suspend fun update(token: String, id: String, draft: SalaryDraft) = normalizeEntry(execute<JsonObject>(request("/api/v2/salary/$id", token, "PUT", draft.payload(id))))
     override suspend fun delete(token: String, id: String) { executeResponse(request("/api/v2/salary/$id", token, "DELETE")).close() }
@@ -109,29 +120,94 @@ class OkHttpSalaryApi(origin: String, private val json: Json, private val client
     private suspend inline fun <reified T> execute(request: Request): T = executeResponse(request).use { runCatching { json.decodeFromString<T>(it.body.string()) }.getOrElse { throw SalaryFailure.InvalidResponse } }
     private suspend fun executeResponse(request: Request): Response { val response = try { client.newCall(request).awaitSalary() } catch (error: IOException) { throw SalaryFailure.Network(error) }; if (response.code in listOf(401,403)) { response.close(); throw SalaryFailure.Unauthorized }; if (!response.isSuccessful) { val code=response.code; response.close(); throw SalaryFailure.Http(code) }; return response }
     private fun normalizeEntry(raw: JsonElement): SalaryEntry {
-        val fields = raw.jsonObject
+        val fields = raw as? JsonObject ?: throw SalaryFailure.InvalidResponse
         val payload = fields["payload"] as? JsonObject
-        fun value(key: String): JsonElement = fields[key]?.takeIf { it != JsonNull && it.jsonPrimitive.contentOrNull?.isNotBlank() == true }
-            ?: payload?.get(key) ?: JsonNull
-        // v2 stores extension fields in payload; old and new app releases share this format.
-        val kind = value("kind")
-        val knownKind = kind.takeIf { it.jsonPrimitive.contentOrNull in setOf("advance", "salary", "weekend", "gsm", "vacation", "other") } ?: JsonNull
+        fun text(key: String): String? = (fields[key] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+            ?: (payload?.get(key) as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+        val date = text("date") ?: throw SalaryFailure.InvalidResponse
+        if (runCatching { LocalDate.parse(date) }.isFailure) throw SalaryFailure.InvalidResponse
+        val rawKind = text("kind")?.lowercase(java.util.Locale.ROOT)
+        val kind = rawKind?.takeIf { it in setOf("advance", "salary", "weekend", "gsm", "vacation", "other") }
+        fun amount(key: String, optional: Boolean = false): JsonElement {
+            val rawValue = text(key) ?: return if (optional) JsonNull else JsonPrimitive(0.0)
+            return JsonPrimitive(rawValue.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 } ?: throw SalaryFailure.InvalidResponse)
+        }
         val normalized = fields.toMutableMap().apply {
-            put("kind", knownKind)
+            put("id", text("id")?.let(::JsonPrimitive) ?: text("_id")?.let(::JsonPrimitive) ?: JsonNull)
+            put("date", JsonPrimitive(date))
+            put("periodMonth", JsonPrimitive(text("periodMonth")?.takeIf(MONTH_REGEX::matches) ?: defaultSalaryPeriod(date)))
+            put("baseSalary", amount("baseSalary")); put("weekendPay", amount("weekendPay")); put("amount", amount("amount", true))
+            put("kind", kind?.let(::JsonPrimitive) ?: JsonNull)
             listOf("vacationStartDate", "vacationEndDate").forEach { key ->
-                put(key, if (knownKind == JsonPrimitive("vacation")) value(key) else JsonNull)
+                put(key, if (kind == "vacation") text(key)?.let(::JsonPrimitive) ?: JsonNull else JsonNull)
             }
         }
         return try { json.decodeFromJsonElement(JsonObject(normalized)) } catch (_: Exception) { throw SalaryFailure.InvalidResponse }
     }
-    private fun SalaryDraft.payload(id: String): String = json.encodeToString(SalaryEntry(id, date, baseSalary.number() ?: 0.0, weekendPay.number() ?: 0.0, periodMonth.takeIf { date >= SalaryEntry.NET_START }, amount.number().takeIf { date >= SalaryEntry.NET_START }, kind, comment.trim().ifBlank { null }, vacationStartDate.takeIf { kind == SalaryKind.Vacation }, vacationEndDate.takeIf { kind == SalaryKind.Vacation }))
+    private fun SalaryDraft.payload(id: String): String {
+        validateSalaryDraft(this)?.let { throw IllegalArgumentException(it) }
+        val net = date >= SalaryEntry.NET_START
+        val netAmount = amount.number()
+        return Json(json) { encodeDefaults = true; explicitNulls = false }.encodeToString(SalaryEntry(id, date, if (net) netAmount ?: 0.0 else baseSalary.number() ?: 0.0,
+            if (net) 0.0 else weekendPay.number() ?: 0.0, periodMonth.takeIf { net }, netAmount.takeIf { net }, kind,
+            comment.trim().takeIf { kind == SalaryKind.Other && it.isNotEmpty() },
+            vacationStartDate.takeIf { kind == SalaryKind.Vacation }, vacationEndDate.takeIf { kind == SalaryKind.Vacation }))
+    }
     companion object { private val JSON = "application/json; charset=utf-8".toMediaType() }
 }
 interface SalaryCache { suspend fun read(owner: String): SalarySnapshot?; suspend fun save(owner: String, snapshot: SalarySnapshot) }
 class FileSalaryCache(context: Context, private val json: Json) : SalaryCache { private val dir=File(context.noBackupFilesDir,"salary"); override suspend fun read(owner:String)=withContext(Dispatchers.IO){ val f=file(owner); if(!f.isFile)return@withContext null; runCatching{json.decodeFromString<SalarySnapshot>(f.readText())}.getOrNull() }; override suspend fun save(owner:String,snapshot:SalarySnapshot)=withContext(Dispatchers.IO){ val f=file(owner);f.parentFile?.mkdirs();val t=File(f.parentFile,"${f.name}.tmp");t.writeText(json.encodeToString(snapshot));if(!t.renameTo(f)){f.writeText(t.readText());t.delete()} }; private fun file(v:String)=File(dir,MessageDigest.getInstance("SHA-256").digest(v.toByteArray()).joinToString(""){"%02x".format(it)}+".json") }
-class SalaryRepository(private val api: SalaryApi, private val cache: SalaryCache, private val now:()->Long=System::currentTimeMillis) { suspend fun read(owner:String)=cache.read(owner); suspend fun refresh(owner:String,token:String)=SalarySnapshot(api.records(token).sortedByDescending(SalaryEntry::date),now()).also{cache.save(owner,it)}; suspend fun save(owner:String,token:String,id:String?,draft:SalaryDraft):SalarySnapshot { val saved=if(id==null)api.create(token,draft)else api.update(token,id,draft);val old=read(owner)?:SalarySnapshot();return old.copy(records=(if(id==null)old.records+saved else old.records.map{if(it.id==id)saved else it}).sortedByDescending(SalaryEntry::date),updatedAtEpochMillis=now()).also{cache.save(owner,it)} }; suspend fun delete(owner:String,token:String,entry:SalaryEntry):SalarySnapshot{val id=entry.id?:return read(owner)?:SalarySnapshot();api.delete(token,id);val old=read(owner)?:SalarySnapshot();return old.copy(records=old.records.filterNot{it.id==id},updatedAtEpochMillis=now()).also{cache.save(owner,it)}} }
-private fun String.number()=trim().replace(',','.').toDoubleOrNull()
+class SalaryRepository(private val api: SalaryApi, private val cache: SalaryCache, private val now: () -> Long = System::currentTimeMillis) {
+    private val cacheMutex = Mutex()
+    private val revisions = mutableMapOf<String, Long>()
+    private val mutations = mutableMapOf<String, Int>()
+
+    suspend fun read(owner: String) = cacheMutex.withLock { cache.read(owner) }
+    suspend fun refresh(owner: String, token: String): SalarySnapshot {
+        val revision = cacheMutex.withLock { revisions[owner] ?: 0L }
+        val incoming = SalarySnapshot(api.records(token).sortedByDescending(SalaryEntry::date), now())
+        return cacheMutex.withLock {
+            if ((revisions[owner] ?: 0L) != revision || (mutations[owner] ?: 0) > 0) cache.read(owner) ?: SalarySnapshot()
+            else incoming.also { cache.save(owner, it) }
+        }
+    }
+    suspend fun save(owner: String, token: String, id: String?, draft: SalaryDraft): SalarySnapshot {
+        validateSalaryDraft(draft)?.let { throw IllegalArgumentException(it) }
+        beginMutation(owner)
+        try {
+            val saved = if (id == null) api.create(token, draft) else api.update(token, id, draft)
+            return cacheMutex.withLock {
+                val old = cache.read(owner) ?: SalarySnapshot()
+                val records = if (id == null) old.records.filterNot { it.id == saved.id && saved.id != null } + saved
+                    else old.records.filterNot { it.id == id } + saved
+                old.copy(records = records.sortedByDescending(SalaryEntry::date), updatedAtEpochMillis = now()).also { cache.save(owner, it) }
+            }
+        } finally { endMutation(owner) }
+    }
+    suspend fun delete(owner: String, token: String, entry: SalaryEntry): SalarySnapshot {
+        val id = entry.id?.takeIf(String::isNotBlank) ?: throw IllegalArgumentException("У записи нет ID.")
+        beginMutation(owner)
+        try {
+            api.delete(token, id)
+            return cacheMutex.withLock {
+                val old = cache.read(owner) ?: SalarySnapshot()
+                old.copy(records = old.records.filterNot { it.id == id }, updatedAtEpochMillis = now()).also { cache.save(owner, it) }
+            }
+        } finally { endMutation(owner) }
+    }
+    private suspend fun beginMutation(owner: String) = cacheMutex.withLock {
+        revisions[owner] = (revisions[owner] ?: 0L) + 1
+        mutations[owner] = (mutations[owner] ?: 0) + 1
+    }
+    private suspend fun endMutation(owner: String) = withContext(kotlinx.coroutines.NonCancellable) {
+        cacheMutex.withLock {
+            revisions[owner] = (revisions[owner] ?: 0L) + 1
+            mutations[owner] = ((mutations[owner] ?: 0) - 1).coerceAtLeast(0)
+        }
+    }
+}
+private fun String.number()=trim().replace(',','.').toDoubleOrNull()?.takeIf { it.isFinite() }
 private fun Double?.numberText()=this?.let{if(it%1.0==0.0)it.toLong().toString()else it.toString()}.orEmpty()
-private fun defaultPeriod(date:String):String { val ym=runCatching{YearMonth.parse(date.take(7))}.getOrElse{return date.take(7)};return if(date>=SalaryEntry.NET_START&&date.takeLast(2).toIntOrNull()?.let{it<=10}==true)ym.minusMonths(1).toString()else ym.toString() }
+internal fun defaultSalaryPeriod(date:String):String { val ym=runCatching{YearMonth.parse(date.take(7))}.getOrElse{return date.take(7)};return if(date>=SalaryEntry.NET_START&&date.takeLast(2).toIntOrNull()?.let{it<=10}==true)ym.minusMonths(1).toString()else ym.toString() }
 private val MONTH_REGEX=Regex("^\\d{4}-(0[1-9]|1[0-2])$")
 private suspend fun Call.awaitSalary():Response=suspendCancellableCoroutine{c->c.invokeOnCancellation{cancel()};enqueue(object:Callback{override fun onFailure(call:Call,e:IOException){if(c.isActive)c.resumeWithException(e)};override fun onResponse(call:Call,response:Response){if(c.isActive)c.resume(response)else response.close()}})}

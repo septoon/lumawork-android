@@ -6,6 +6,19 @@ import org.junit.Test
 import kotlinx.serialization.json.Json
 
 class SalaryModelsTest {
+    @Test fun `legacy payment kind and editing old net records match iOS`() {
+        assertEquals(SalaryKind.Salary, SalaryEntry(date = "2026-04-20", baseSalary = 1000.0).resolvedKind)
+        assertEquals("1500", SalaryDraft(SalaryEntry(date = "2026-08-20", baseSalary = 1000.0, weekendPay = 500.0)).amount)
+    }
+
+    @Test fun `legacy validation rejects empty malformed and nonfinite amounts`() {
+        org.junit.Assert.assertNotNull(validateSalaryDraft(SalaryDraft(date = "2026-04-20", baseSalary = "")))
+        org.junit.Assert.assertNotNull(validateSalaryDraft(SalaryDraft(date = "2026-04-20", baseSalary = "abc")))
+        org.junit.Assert.assertNotNull(validateSalaryDraft(SalaryDraft(date = "2026-04-20", baseSalary = "100", weekendPay = "abc")))
+        org.junit.Assert.assertNotNull(validateSalaryDraft(SalaryDraft(amount = "NaN")))
+        org.junit.Assert.assertNotNull(validateSalaryDraft(SalaryDraft(amount = "Infinity")))
+    }
+
     @Test fun `vacation records decode without losing the salary archive and keep their period in the editor`() {
         val entry = Json.decodeFromString<SalaryEntry>("""{"date":"2026-10-15","amount":12345.0,"kind":"vacation","vacationStartDate":"2026-10-19","vacationEndDate":"2026-10-30"}""")
         val draft = SalaryDraft(entry)
