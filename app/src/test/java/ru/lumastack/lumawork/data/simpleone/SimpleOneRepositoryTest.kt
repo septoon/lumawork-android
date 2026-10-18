@@ -451,6 +451,7 @@ class RequestsBootstrapTest {
             val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
             settled(model) { it.errorMessage != null }
             val prepared = model.state.value.closedArchiveItems
+            val analytics = model.state.value.closedAnalytics
             assertEquals(1, prepared.size)
             model.refreshClosedRequests()
             assertTrue(model.state.value.isClosedLoading)
@@ -458,6 +459,7 @@ class RequestsBootstrapTest {
             settled(model) { it.errorMessage != null }
             org.junit.Assert.assertSame(prepared, model.state.value.closedArchiveItems)
             assertEquals(archive, model.state.value.closedArchive)
+            org.junit.Assert.assertSame(analytics, model.state.value.closedAnalytics)
         } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
     }
 
@@ -480,6 +482,51 @@ class RequestsBootstrapTest {
             settled(model) { it.closedArchive.requests.isEmpty() }
             assertTrue(model.state.value.closedArchiveItems.isEmpty())
             assertEquals(0, api.currentUserCalls + api.activeCalls + api.archiveCalls + api.exportCalls)
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun `analytics restores and reuses local projection and cleanup removes its statistics`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = FakeSimpleOneApi()
+            val cache = FakeSimpleOneSupplementalCache().apply {
+                archives["owner"] = ClosedSimpleOneArchive(listOf(request().copy(resolvedAt = "2026-10-15 12:00:00",
+                    closureCode = "Решено с выездом", requestType = "install")), isComplete = true, queryRevision = 2)
+            }
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache), offline = true)
+            settled(model)
+            val analytics = model.state.value.closedAnalytics
+            assertEquals(1, analytics.completedCount)
+            assertEquals("2026-10", analytics.latestMonth!!.id)
+            repeat(3) {
+                model.updateMode(ru.lumastack.lumawork.domain.simpleone.RequestsMode.Closed)
+                model.openRequest(model.state.value.closedArchive.requests.single()); model.closeRequest()
+                model.updateSearchQuery("test")
+                org.junit.Assert.assertSame(analytics, model.state.value.closedAnalytics)
+            }
+            model.cleanupArchive(null)
+            settled(model) { it.closedArchive.requests.isEmpty() }
+            assertEquals(0, model.state.value.closedAnalytics.completedCount)
+            assertTrue(model.state.value.closedAnalytics.months.isEmpty())
+            assertEquals(0, api.currentUserCalls + api.activeCalls + api.archiveCalls + api.exportCalls)
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun `analytics refresh downloads closed archive without refreshing active requests`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val done = request().copy(resolvedAt = "2026-10-15 12:00:00", closureCode = "Решено с выездом")
+            val api = FakeSimpleOneApi(closed = listOf(done))
+            val cache = FakeSimpleOneSupplementalCache().apply {
+                archives["owner"] = ClosedSimpleOneArchive(listOf(done), isComplete = true, queryRevision = 2)
+            }
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
+            settled(model) { api.activeCalls > 0 }
+            val activeCalls = api.activeCalls
+            model.refreshAnalytics()
+            settled(model) { api.archiveCalls > 0 }
+            assertEquals(activeCalls, api.activeCalls)
+            assertEquals(1, model.state.value.closedAnalytics.completedCount)
         } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
     }
 

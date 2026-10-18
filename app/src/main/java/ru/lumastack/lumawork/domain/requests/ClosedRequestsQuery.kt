@@ -83,6 +83,10 @@ fun parseClosedRequestsDate(raw: String): LocalDateTime? {
         if (serial != null) return LocalDate.of(1899, 12, 30).atStartOfDay()
             .plusSeconds((serial * 86_400).toLong())
     }
+    // iOS exports also accept a one-digit hour, e.g. 29.02.2024 9:05.
+    listOf("dd.MM.yyyy H:mm", "MM.dd.yyyy H:mm").firstNotNullOfOrNull { pattern ->
+        runCatching { LocalDateTime.parse(value, DateTimeFormatter.ofPattern(pattern)) }.getOrNull()
+    }?.takeIf { it.year > 1970 }?.let { return it }
     return listOf("yyyy-MM-dd", "dd.MM.yyyy", "MM.dd.yyyy").firstNotNullOfOrNull { pattern ->
         runCatching { LocalDate.parse(value, DateTimeFormatter.ofPattern(pattern)).atStartOfDay() }.getOrNull()
     }?.takeIf { it.year > 1970 }
