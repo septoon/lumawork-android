@@ -75,6 +75,9 @@ fun WikiRoute(
         factory = WikiViewModel.factory(repository, ownerUserId, startOffline),
     )
     val state by wikiViewModel.state.collectAsStateWithLifecycle()
+    val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
+    LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it); wikiViewModel.notice(null) } }
+    androidx.compose.material3.Scaffold(snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) }, modifier = modifier) { padding ->
     WikiScreen(
         state = state,
         widthClass = widthClass,
@@ -83,8 +86,9 @@ fun WikiRoute(
         onOpen = wikiViewModel::open,
         onCloseArticle = wikiViewModel::closeArticle,
         pdfUrl = wikiViewModel::pdfUrl,
-        modifier = modifier,
+        modifier = Modifier.padding(padding),
     )
+    }
 }
 
 @Composable
@@ -155,7 +159,7 @@ private fun WikiSearchPanel(
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
-    AppRefreshContainer(modifier, isRefreshing = state.isSearching, onRefresh = onRefresh, enabled = state.query.isNotBlank()) {
+    AppRefreshContainer(modifier, isRefreshing = state.isSearching, onRefresh = onRefresh, enabled = state.query.isNotBlank() && !state.offline) {
         LazyColumn(
             Modifier.fillMaxSize(),
             state = listState,
@@ -183,7 +187,7 @@ private fun WikiSearchPanel(
                     Column(Modifier.weight(1f)) {
                         Text("Результаты", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         Text(
-                            if (state.results.isEmpty()) "База знаний VTB Wiki" else "${state.results.size} по запросу «${state.query.trim()}»",
+                            if (state.offline) "Без сети · сохранённые результаты" else if (state.results.isEmpty()) "База знаний VTB Wiki" else "${state.results.size} по запросу «${state.query.trim()}»",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -208,7 +212,7 @@ private fun WikiQuickSearch(query: String, onQueryChange: (String) -> Unit) {
         shape = RoundedCornerShape(20.dp),
     ) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("216 материалов", fontWeight = FontWeight.Bold)
+            Text("База знаний", fontWeight = FontWeight.Bold)
             Text(
                 "Статьи и инструкции.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

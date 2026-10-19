@@ -29,6 +29,8 @@ data class WikiUiState(
     val didCheckPdf: Boolean = false,
     val errorMessage: String? = null,
     val articleErrorMessage: String? = null,
+    val notice: String? = null,
+    val offline: Boolean = false,
 )
 
 class WikiViewModel(
@@ -36,15 +38,23 @@ class WikiViewModel(
     private val ownerUserId: String,
     private val startOffline: Boolean,
 ) : ViewModel() {
-    private val mutableState = MutableStateFlow(WikiUiState())
+    private val mutableState = MutableStateFlow(WikiUiState(offline = startOffline))
+    private var offlineResults = emptyList<WikiSearchResult>()
+    private var offlineQuery = ""
     val state = mutableState.asStateFlow()
     private var searchJob: Job? = null
     private var articleJob: Job? = null
 
     init {
         viewModelScope.launch {
-            val cached = repository.readSearch(ownerUserId)
-            if (cached != null) mutableState.update { it.copy(query = cached.query, results = cached.results) }
+            try {
+                val cached = repository.readSearch(ownerUserId)
+                if (cached != null) {
+                    offlineResults = cached.results; offlineQuery = cached.query
+                    mutableState.update { it.copy(query = cached.query, results = cached.results) }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { notice("Не удалось прочитать сохранённый поиск Вики.") }
             if (!startOffline) scheduleSearch(immediate = true)
         }
     }
@@ -55,6 +65,7 @@ class WikiViewModel(
     }
 
     fun refresh() = scheduleSearch(immediate = true)
+    fun notice(value: String?) { mutableState.update { it.copy(notice = value) } }
 
     fun open(result: WikiSearchResult) {
         articleJob?.cancel()
@@ -63,31 +74,47 @@ class WikiViewModel(
                 articleErrorMessage = null, isPdfAvailable = false, didCheckPdf = false)
         }
         articleJob = viewModelScope.launch {
-            repository.readArticle(result.id)?.let(::showArticle)
+            try { repository.readArticle(result.id)?.let(::showArticle) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { notice("Не удалось прочитать сохранённую статью.") }
             try {
+                if (startOffline) {
+                    mutableState.update { it.copy(isArticleLoading = false, articleErrorMessage = if (it.article == null) "Статья ещё не сохранена. Подключитесь к сети." else null) }
+                    return@launch
+                }
                 showArticle(repository.refreshArticle(result.id))
                 mutableState.update { it.copy(isArticleLoading = false) }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 mutableState.update {
-                    it.copy(isArticleLoading = false, articleErrorMessage = if (it.article == null) error.userMessage() else null)
+                    it.copy(isArticleLoading = false, notice = error.userMessage())
                 }
             }
-            val available = runCatching { repository.isPdfAvailable(result.id) }.getOrDefault(false)
+            val available = try { repository.isPdfAvailable(result.id) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { false }
             mutableState.update { it.copy(isPdfAvailable = available, didCheckPdf = true) }
         }
     }
 
     fun closeArticle() {
         articleJob?.cancel()
-        mutableState.update { it.copy(selectedResult = null, article = null, document = null, articleErrorMessage = null) }
+        mutableState.update { it.copy(selectedResult = null, article = null, document = null, articleErrorMessage = null, isArticleLoading = false) }
     }
 
     fun pdfUrl(): String? = mutableState.value.selectedResult?.id?.let(repository::pdfUrl)
 
     private fun scheduleSearch(immediate: Boolean) {
         searchJob?.cancel()
+        if (startOffline) {
+            val query = mutableState.value.query.trim()
+            val results = if (query == offlineQuery.trim()) offlineResults else offlineResults.filter {
+                "${it.title} ${it.section} ${it.excerpt}".contains(query, ignoreCase = true)
+            }
+            mutableState.update { it.copy(isSearching = false, results = results) }
+            return
+        }
         searchJob = viewModelScope.launch {
             val query = mutableState.value.query.trim()
             if (query.isEmpty()) {
@@ -104,7 +131,7 @@ class WikiViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                mutableState.update { it.copy(isSearching = false, errorMessage = error.userMessage()) }
+                mutableState.update { it.copy(isSearching = false, notice = error.userMessage()) }
             }
         }
     }

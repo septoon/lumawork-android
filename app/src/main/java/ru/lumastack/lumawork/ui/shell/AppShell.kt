@@ -106,7 +106,7 @@ import ru.lumastack.lumawork.ui.timereport.TimeReportRoute
 import ru.lumastack.lumawork.ui.employees.EmployeeRoute
 import ru.lumastack.lumawork.ui.auto.AutoRoute
 import ru.lumastack.lumawork.ui.fuel.FuelRoute
-import ru.lumastack.lumawork.ui.wiki.WikiRoute
+import ru.lumastack.lumawork.ui.assistant.AssistantWorkspaceRoute
 import ru.lumastack.lumawork.ui.ftp.FtpRoute
 import ru.lumastack.lumawork.ui.tools.ToolsRoute
 import ru.lumastack.lumawork.ui.salary.SalaryRoute
@@ -125,7 +125,7 @@ enum class AppDestination(
     Employees("Сотрудники", "Команда и контакты", "С"),
     Maintenance("Авто", "Автомобили и обслуживание", "А"),
     Fuel("Топливо", "Лимиты и заправки", "Т"),
-    Wiki("Вики", "База знаний", "В"),
+    Wiki("Помощник", "Помощник и база знаний", "П"),
     Ftp("FTP", "Файлы Сервионики", "F"),
     Tools("Инструменты", "USB-диагностика терминалов", "И"),
     Salary("Зарплата", "Выплаты и документы", "₽"),
@@ -215,6 +215,10 @@ fun AppShell(
     var feedbackOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
     val openProfile = { profileEditing = false; profileOpen = true }
     val contentStateHolder = rememberSaveableStateHolder()
+    val assistantModels = remember(session.user.id, session.token, isOffline) {
+        object : androidx.lifecycle.ViewModelStoreOwner { override val viewModelStore = androidx.lifecycle.ViewModelStore() }
+    }
+    DisposableEffect(assistantModels) { onDispose { assistantModels.viewModelStore.clear() } }
     val context = LocalContext.current
     val preferences = remember(context) { AppSettingsPreferences(context) }
     DisposableEffect(preferences) { onDispose { preferences.close() } }
@@ -259,6 +263,7 @@ fun AppShell(
     CompositionLocalProvider(LocalSalaryBiometricEnabled provides settings.salaryBiometricEnabled) {
         AppDrawerShell(
             contentStateHolder = contentStateHolder,
+            assistantModels = assistantModels,
             session = session,
             isOffline = isOffline,
             routeRepository = routeRepository,
@@ -319,6 +324,7 @@ fun AppShell(
 @Composable
 private fun AppDrawerShell(
     contentStateHolder: SaveableStateHolder,
+    assistantModels: androidx.lifecycle.ViewModelStoreOwner,
     session: AppSession,
     isOffline: Boolean,
     routeRepository: RouteRepository,
@@ -347,6 +353,7 @@ private fun AppDrawerShell(
     onOpenSettings: () -> Unit,
     onOpenFeedback: () -> Unit,
 ) {
+    var assistantSection by rememberSaveable(session.user.id) { mutableStateOf("chat") }
     var workScheduleOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(selected, simpleOneState.isAuthorized) {
         if (selected != AppDestination.Employees || !simpleOneState.isAuthorized) workScheduleOpen = false
@@ -394,6 +401,7 @@ private fun AppDrawerShell(
             contentStateHolder.SaveableStateProvider(selected.name) {
                 DestinationContent(
                     destination = selected,
+                    assistantModels = assistantModels,
                     session = session,
                     isOffline = isOffline,
                     routeRepository = routeRepository,
@@ -418,6 +426,8 @@ private fun AppDrawerShell(
                     onSelect = onSelect,
                     workScheduleOpen = workScheduleOpen,
                     onCloseWorkSchedule = { workScheduleOpen = false },
+                    assistantSection = assistantSection,
+                    onAssistantSection = { assistantSection = it },
                     modifier = Modifier.padding(padding),
                 )
             }
@@ -557,6 +567,7 @@ private fun DestinationMark(destination: AppDestination) {
 @Composable
 private fun DestinationContent(
     destination: AppDestination,
+    assistantModels: androidx.lifecycle.ViewModelStoreOwner,
     session: AppSession,
     isOffline: Boolean,
     routeRepository: RouteRepository,
@@ -581,6 +592,8 @@ private fun DestinationContent(
     onSelect: (AppDestination) -> Unit,
     workScheduleOpen: Boolean,
     onCloseWorkSchedule: () -> Unit,
+    assistantSection: String,
+    onAssistantSection: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -663,11 +676,10 @@ private fun DestinationContent(
                 routeRepository = routeRepository,
                 widthClass = contentWidthClass,
             )
-            AppDestination.Wiki -> WikiRoute(
-                ownerUserId = session.user.id,
-                startOffline = isOffline,
-                repository = wikiRepository,
-                widthClass = contentWidthClass,
+            AppDestination.Wiki -> AssistantWorkspaceRoute(
+                session = session, offline = isOffline, wiki = wikiRepository, models = assistantModels,
+                simpleOne = simpleOneRepository, backpack = backpackRepository,
+                widthClass = contentWidthClass, section = assistantSection, onSection = onAssistantSection,
             )
             AppDestination.Tools -> ToolsRoute(
                 owner = session.user.id,
@@ -675,7 +687,7 @@ private fun DestinationContent(
                 requests = simpleOneState,
                 widthClass = contentWidthClass,
                 onFtp = { onSelect(AppDestination.Ftp) },
-                onWiki = { onSelect(AppDestination.Wiki) },
+                onWiki = { onAssistantSection("wiki"); onSelect(AppDestination.Wiki) },
             )
             AppDestination.Ftp -> FtpRoute(
                 session = session,

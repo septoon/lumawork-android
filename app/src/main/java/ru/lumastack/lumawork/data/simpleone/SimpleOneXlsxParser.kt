@@ -35,6 +35,40 @@ internal object SimpleOneXlsxParser {
         return parseWorksheet(worksheet, sharedStrings, requiredHeader)
     }
 
+    /** Generic worksheet text for Assistant attachments; request-import header rules stay in readRows. */
+    internal fun readTextWorksheets(bytes: ByteArray): List<String> {
+        val parts = readParts(bytes)
+        val shared = parts["xl/sharedStrings.xml"]?.let(::parseSharedStrings).orEmpty()
+        return parts.entries.filter { it.key.startsWith("xl/worksheets/") && it.key.endsWith(".xml") }
+            .sortedBy { it.key.substringAfterLast('/').removePrefix("sheet").substringBefore('.').toIntOrNull() ?: Int.MAX_VALUE }
+            .take(7).map { (_, xml) ->
+                val output = StringBuilder(); val value = StringBuilder()
+                var type = ""; var reading = false
+                parseXml(xml, object : DefaultHandler() {
+                    override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes?) {
+                        when (elementName(localName, qName)) {
+                            "c" -> { type = attributes?.getValue("t").orEmpty(); value.clear() }
+                            "v", "t" -> reading = true
+                        }
+                    }
+                    override fun characters(ch: CharArray, start: Int, length: Int) {
+                        if (reading && value.length < MAX_CELL_CHARACTERS) value.append(ch, start, minOf(length, MAX_CELL_CHARACTERS - value.length))
+                    }
+                    override fun endElement(uri: String?, localName: String?, qName: String?) {
+                        when (elementName(localName, qName)) {
+                            "v", "t" -> reading = false
+                            "c" -> if (output.length < 12500) {
+                                val text = if (type == "s") value.toString().toIntOrNull()?.let(shared::getOrNull).orEmpty() else value.toString()
+                                output.append(text.take(12500 - output.length)); if (output.length < 12500) output.append('\t')
+                            }
+                            "row" -> if (output.length < 12500) output.append('\n')
+                        }
+                    }
+                })
+                output.toString().trim()
+            }
+    }
+
     private fun readParts(bytes: ByteArray): Map<String, ByteArray> {
         if (bytes.size > MAX_ARCHIVE_BYTES) throw SimpleOneXlsxException("Размер файла превышает 30 МиБ.")
         val parts = linkedMapOf<String, ByteArray>()
