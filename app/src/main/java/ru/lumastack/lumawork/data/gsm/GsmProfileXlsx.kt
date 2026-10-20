@@ -138,7 +138,8 @@ object GsmProfileXlsx {
                 }
             }
             val names = linkedMapOf<String, String>(); val relations = linkedMapOf<String, String>()
-            xml(parts["xl/workbook.xml"]) { tag, a -> if (tag == "sheet") names[a.getValue("name").trim()] = a.getValue("r:id") }
+            xml(parts["xl/workbook.xml"]) { tag, a -> if (tag == "sheet") names[a.getValue("name").trim()] =
+                a.getValue("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id") ?: a.getValue("r:id") }
             xml(parts["xl/_rels/workbook.xml.rels"]) { tag, a ->
                 if (tag == "Relationship" && a.getValue("TargetMode") != "External") {
                     val target = a.getValue("Target").orEmpty()
@@ -148,11 +149,13 @@ object GsmProfileXlsx {
             val shared = mutableListOf<String>(); val item = StringBuilder(); var inText = false
             sax(parts["xl/sharedStrings.xml"], object : DefaultHandler() {
                 override fun startElement(uri: String?, localName: String?, qName: String?, a: Attributes) {
-                    if (qName == "si") item.clear(); if (qName == "t") inText = true
+                    val name = elementName(localName, qName)
+                    if (name == "si") item.clear(); if (name == "t") inText = true
                 }
                 override fun characters(ch: CharArray, start: Int, length: Int) { if (inText) item.append(ch, start, length) }
                 override fun endElement(uri: String?, localName: String?, qName: String?) {
-                    if (qName == "t") inText = false; if (qName == "si") shared += item.toString()
+                    val name = elementName(localName, qName)
+                    if (name == "t") inText = false; if (name == "si") shared += item.toString()
                 }
             })
             for ((name, id) in names) {
@@ -161,15 +164,17 @@ object GsmProfileXlsx {
                 val value = StringBuilder(); val formula = StringBuilder()
                 sax(parts[relations[id]], object : DefaultHandler() {
                     override fun startElement(uri: String?, localName: String?, qName: String?, a: Attributes) {
-                        if (qName == "c") { ref = a.getValue("r"); type = a.getValue("t").orEmpty(); value.clear(); formula.clear() }
-                        if (qName in listOf("v", "t", "f")) tag = qName.orEmpty()
+                        val name = elementName(localName, qName)
+                        if (name == "c") { ref = a.getValue("r"); type = a.getValue("t").orEmpty(); value.clear(); formula.clear() }
+                        if (name in listOf("v", "t", "f")) tag = name
                     }
                     override fun characters(ch: CharArray, start: Int, length: Int) {
                         if (tag == "f") formula.append(ch, start, length) else if (tag == "v" || tag == "t") value.append(ch, start, length)
                     }
                     override fun endElement(uri: String?, localName: String?, qName: String?) {
-                        if (qName in listOf("v", "t", "f")) tag = ""
-                        if (qName == "c") sheet[ref] = Cell(if (type == "s") value.toString().toIntOrNull()?.let(shared::getOrNull).orEmpty() else if (type == "e") "" else value.toString().trim(), formula.toString())
+                        val name = elementName(localName, qName)
+                        if (name in listOf("v", "t", "f")) tag = ""
+                        if (name == "c") sheet[ref] = Cell(if (type == "s") value.toString().toIntOrNull()?.let(shared::getOrNull).orEmpty() else if (type == "e") "" else value.toString().trim(), formula.toString())
                     }
                 })
                 cells[name] = sheet
@@ -189,14 +194,15 @@ object GsmProfileXlsx {
         }
     }
 
+    private fun elementName(localName: String?, qName: String?): String = localName.orEmpty().ifBlank { qName.orEmpty().substringAfter(':') }
     private fun xml(bytes: ByteArray?, onElement: (String, Attributes) -> Unit) = sax(bytes, object : DefaultHandler() {
-        override fun startElement(uri: String?, localName: String?, qName: String?, a: Attributes) = onElement(qName.orEmpty(), a)
+        override fun startElement(uri: String?, localName: String?, qName: String?, a: Attributes) = onElement(elementName(localName, qName), a)
     })
     private fun sax(bytes: ByteArray?, handler: DefaultHandler) {
         if (bytes == null) return
         if (bytes.toString(Charsets.UTF_8).contains("<!DOCTYPE", ignoreCase = true)) throw GsmXlsxFailure("Внешние XML-сущности не поддерживаются.")
         val factory = SAXParserFactory.newInstance().apply {
-            isNamespaceAware = false; isValidating = false
+            isNamespaceAware = true; isValidating = false
             runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
             listOf("http://xml.org/sax/features/external-general-entities", "http://xml.org/sax/features/external-parameter-entities", "http://apache.org/xml/features/nonvalidating/load-external-dtd").forEach { runCatching { setFeature(it, false) } }
         }

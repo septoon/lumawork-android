@@ -1,14 +1,48 @@
 package ru.lumastack.lumawork.data.gsm
 
 import java.io.ByteArrayOutputStream
+import java.io.ByteArrayInputStream
 import java.time.YearMonth
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import java.util.zip.ZipInputStream
 import org.junit.Assert.*
 import org.junit.Test
 
 class GsmProfileXlsxTest {
     private val projects = listOf(GsmProjectOption("pos", "POS тест", "TEST-BUDGET"))
+
+    @Test fun `imports prefixed XML with arbitrary relationship prefixes and shared strings`() {
+        val parts = linkedMapOf<String, String>()
+        ZipInputStream(ByteArrayInputStream(workbook())).use { zip ->
+            var entry = zip.nextEntry
+            while (entry != null) {
+                parts[entry.name] = zip.readBytes().toString(Charsets.UTF_8)
+                entry = zip.nextEntry
+            }
+        }
+        parts["xl/worksheets/custom3.xml"] = parts.getValue("xl/worksheets/custom3.xml")
+            .replace("<c r=\"B3\" t=\"inlineStr\"><is><t>Тест Авто</t></is></c>", "<c r=\"B3\" t=\"s\"><v>0</v></c>")
+        parts["xl/sharedStrings.xml"] = "<sst><si><t>Тест Авто</t></si></sst>"
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { zip ->
+            for ((path, xml) in parts) {
+                val relationships = path.endsWith(".rels")
+                val prefix = if (relationships) "p" else "s"
+                val namespace = if (relationships) "http://schemas.openxmlformats.org/package/2006/relationships"
+                    else "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+                val prefixed = Regex("(<\\/?)([A-Za-z][A-Za-z0-9]*)").replace(xml) { "${it.groupValues[1]}$prefix:${it.groupValues[2]}" }
+                    .replaceFirst(">", " xmlns:$prefix=\"$namespace\">")
+                    .replace("xmlns:r=", "xmlns:links=").replace(" r:id=", " links:id=")
+                zip.putNextEntry(ZipEntry(path)); zip.write(prefixed.toByteArray()); zip.closeEntry()
+            }
+        }
+        val profile = GsmProfileXlsx.parse(out.toByteArray(), YearMonth.of(2026, 9), projects).profile
+        assertEquals("Тестов Иван Иванович", profile.employeeFullName)
+        assertEquals("Тест Авто", profile.carModel)
+        assertEquals(10330, profile.defaultStartOdometer)
+        assertEquals("pos", profile.posProjectId)
+    }
 
     @Test fun `imports account fields and next month end odometer without route or fuel history`() {
         val result = GsmProfileXlsx.parse(workbook(), YearMonth.of(2026, 9), projects)
