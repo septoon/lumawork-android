@@ -9,6 +9,7 @@ import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -66,7 +67,18 @@ class RouteViewModel(
     private val mutableState = MutableStateFlow(dayState(today))
     val state: StateFlow<RouteUiState> = mutableState.asStateFlow()
 
-    init { load() }
+    init {
+        viewModelScope.launch {
+            repository.gsmProfileChanges.collect { owner ->
+                if (owner == session.user.id) {
+                    requestedOdometerMonths.remove(state.value.record.date.take(7))
+                    // Existing monthly settings and user edits retain priority in suggestOdometer().
+                    suggestOdometer()
+                }
+            }
+        }
+        load()
+    }
 
     fun updateSettings(updated: RouteSettings) {
         if (settings == updated) return

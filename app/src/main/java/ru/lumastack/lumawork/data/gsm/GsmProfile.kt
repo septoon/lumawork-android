@@ -32,6 +32,13 @@ data class GsmProfile(
     val reportStartMonth: String = "2026-04",
     val projectName: String = "",
 ) {
+    /** Default month/fuel options do not mean that the account has a profile. */
+    val isEmptyForOnboarding: Boolean get() = listOf(vehicleId.orEmpty(), posProjectId.orEmpty(), armProjectId.orEmpty(),
+        budgetCode, employeeFullName, employeeShortName, employeeReportSignName, authorizedFullName, authorizedShortName,
+        employeeJobTitle, employeeCompany, employeeAddress, employeePhone, employeeTitleCompany, employeeAddressPhone,
+        driverLicenseNumber, fuelCardNumber, carModel, licensePlate, projectName).all(String::isBlank) &&
+        defaultStartOdometer == 0 && fuelNorm == 0.0
+
     fun toggleFuelType(value: String): GsmProfile {
         val next = if (value in fuelTypes) {
             if (fuelTypes.size <= 1) return this

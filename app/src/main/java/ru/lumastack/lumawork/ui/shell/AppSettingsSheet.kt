@@ -66,7 +66,7 @@ private enum class SettingsPage(val title: String) {
 internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthRepository,
     images: VehicleImageRepository, auto: AutoRepository, fuel: FuelRepository,
     preferences: AppSettingsPreferences, settings: DeviceSettings, destinations: List<AppDestination>,
-    onDismiss: () -> Unit, onOpenProfile: () -> Unit, onLogout: () -> Unit) {
+    onDismiss: () -> Unit, onOpenProfile: () -> Unit, onLogout: () -> Unit, onGsmProfileSaved: () -> Unit = {}) {
     var page by rememberSaveable(session.user.id) { mutableStateOf(SettingsPage.Root) }
     var logoutRequested by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -95,7 +95,7 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                 when (page) {
                     SettingsPage.Gsm -> GsmProfileSettingsScreen(session, offline, auto,
                         onBack = { page = SettingsPage.Root }, onAddVehicle = { addVehicle = true },
-                        onSaved = { saved -> fuel.setFuelTypes(session.user.id, saved.fuelTypes.ifEmpty { listOf(saved.fuelType) }) })
+                        onSaved = { saved -> onGsmProfileSaved(); fuel.setFuelTypes(session.user.id, saved.fuelTypes.ifEmpty { listOf(saved.fuelType) }) })
                     SettingsPage.Notifications -> NotificationSettingsScreen(session, offline) { page = SettingsPage.Root }
                     SettingsPage.Route -> RouteSettingsPage(session, offline, auth) { page = SettingsPage.Root }
                     else -> {

@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.data.route
 
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import ru.lumastack.lumawork.domain.model.AppSession
@@ -13,6 +15,9 @@ class RouteRepository(
     private val api: RouteApi,
     private val cache: RouteCache,
 ) {
+    private val profileChanges = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val gsmProfileChanges = profileChanges.asSharedFlow()
+    fun gsmProfileSaved(owner: String) { profileChanges.tryEmit(owner) }
     private val cacheMutex = Mutex()
     suspend fun monthlyMileage(session: AppSession, monthKey: String): RouteMonthlyMileage? {
         val records = cache.readMonth(session.user.id, monthKey)

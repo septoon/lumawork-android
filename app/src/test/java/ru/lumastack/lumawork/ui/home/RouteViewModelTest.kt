@@ -298,6 +298,40 @@ class RouteViewModelTest {
         advanceUntilIdle()
     }
 
+    @Test fun `confirmed GSM profile refreshes previously missing odometer without losing route draft`() = runTest(dispatcher) {
+        val repository = RouteRepository(api, cache)
+        val model = RouteViewModel(repository, session, false, today)
+        api.responseFor(today).complete(null)
+        advanceUntilIdle()
+        assertNull(model.state.value.record.periodStartOdometer)
+        model.updateStop(model.state.value.record.stops[1].id, "Черновик", "00001")
+        model.updateDistance("27")
+        advanceUntilIdle()
+        api.suggestedValue = 10330
+        repository.gsmProfileSaved(session.user.id)
+        advanceUntilIdle()
+        assertEquals(10330, model.state.value.record.periodStartOdometer)
+        assertEquals("Черновик", model.state.value.record.stops[1].address)
+        assertEquals(27, model.state.value.record.distanceKm)
+        assertTrue(api.sent.isEmpty())
+    }
+
+    @Test fun `profile event cannot replace manual odometer or cross account`() = runTest(dispatcher) {
+        val repository = RouteRepository(api, cache)
+        val model = RouteViewModel(repository, session, false, today)
+        api.responseFor(today).complete(null)
+        advanceUntilIdle()
+        api.suggestedValue = 10330
+        repository.gsmProfileSaved("another-account")
+        advanceUntilIdle()
+        assertNull(model.state.value.record.periodStartOdometer)
+        model.updateOdometer("9000")
+        advanceUntilIdle()
+        repository.gsmProfileSaved(session.user.id)
+        advanceUntilIdle()
+        assertEquals(9000, model.state.value.record.periodStartOdometer)
+    }
+
     private fun RouteDayRecord.hasWorkDataForTest() = stops.drop(1).dropLast(1).any { it.address.isNotBlank() || it.requestNumber.isNotBlank() }
 
     private fun model(offline: Boolean = false) = RouteViewModel(RouteRepository(api, cache), session, offline, today)
@@ -318,6 +352,8 @@ private class MemoryRouteCache : RouteCache {
 private class DeferredRouteApi : RouteApi {
     private val responses = mutableMapOf<String, CompletableDeferred<RouteDayRecord?>>()
     fun responseFor(date: LocalDate, workType: RouteWorkType = RouteWorkType.Pos) = responses.getOrPut(workType.storageKey(date.toString())) { CompletableDeferred() }
+    var suggestedValue: Int? = null
+    override suspend fun suggestedOdometer(token: String, month: String): Int? = suggestedValue
     var sendGate: CompletableDeferred<Unit>? = null
     var sendFailure: Exception? = null
     val sent = mutableListOf<RouteDayRecord>()

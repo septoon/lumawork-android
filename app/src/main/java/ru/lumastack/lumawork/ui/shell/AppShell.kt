@@ -243,6 +243,8 @@ fun AppShell(
     val onSelect: (AppDestination) -> Unit = { selectedName = it.name }
     val home = destinations.firstOrNull { it == AppDestination.Home } ?: destinations.first()
     BackHandler(enabled = selected != home) { onSelect(home) }
+    ru.lumastack.lumawork.ui.gsm.GsmProfileOnboarding(session, isOffline, autoRepository, fuelRepository,
+        onProfileSaved = { routeRepository.gsmProfileSaved(session.user.id) })
     RequestNotificationsHost(session, isOffline, simpleOneState.snapshot, simpleOneState.isAuthorized)
     val notification = LocalRequestNotification.current
     androidx.compose.runtime.LaunchedEffect(notification?.requestId, session.user.id, simpleOneState.isAuthorized, isOffline) {
@@ -298,6 +300,7 @@ fun AppShell(
             onDismiss = { settingsOpen = false },
             onOpenProfile = { profileEditing = true; profileOpen = true },
             onLogout = { settingsOpen = false; onLogout() },
+            onGsmProfileSaved = { routeRepository.gsmProfileSaved(session.user.id) },
         )
         if (profileOpen) ProfileRoute(
             session = session,
