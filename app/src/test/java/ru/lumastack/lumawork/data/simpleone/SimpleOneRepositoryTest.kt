@@ -389,6 +389,62 @@ class RequestsBootstrapTest {
     }
     private fun session() = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "key", "engineer")) }
 
+    @Test fun `stored session and active snapshot are visible before slow closed archive restore`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val storedSession = session()
+            val snapshot = SimpleOneSnapshot(activeRequests = listOf(request()),
+                sessionFingerprint = simpleOneSessionFingerprint(requireNotNull(storedSession.read("owner"))))
+            val activeCache = FakeSimpleOneCache().apply { values["owner"] = snapshot }
+            val archiveReadStarted = CompletableDeferred<Unit>()
+            val archiveResult = CompletableDeferred<ClosedSimpleOneArchive?>()
+            val archiveCache = object : SimpleOneSupplementalCache by FakeSimpleOneSupplementalCache() {
+                override suspend fun readClosedArchive(ownerUserId: String): ClosedSimpleOneArchive? {
+                    archiveReadStarted.complete(Unit)
+                    return archiveResult.await()
+                }
+            }
+            val api = FakeSimpleOneApi()
+            val model = model(SimpleOneRepository(api, storedSession, activeCache, archiveCache))
+            archiveReadStarted.await()
+
+            assertTrue(model.state.value.isInitializing)
+            assertTrue(model.state.value.isAuthorized)
+            assertEquals("engineer", model.state.value.username)
+            assertEquals(snapshot, model.state.value.snapshot)
+            assertEquals(0, api.currentUserCalls + api.activeCalls + api.archiveCalls + api.exportCalls)
+
+            archiveResult.complete(null)
+            settled(model)
+            assertTrue(model.state.value.isAuthorized)
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun `signout during archive restore cannot restore authorization or restart loading`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val archiveReadStarted = CompletableDeferred<Unit>()
+            val archiveResult = CompletableDeferred<ClosedSimpleOneArchive?>()
+            val cache = object : SimpleOneSupplementalCache by FakeSimpleOneSupplementalCache() {
+                override suspend fun readClosedArchive(ownerUserId: String): ClosedSimpleOneArchive? {
+                    archiveReadStarted.complete(Unit)
+                    return archiveResult.await()
+                }
+            }
+            val api = FakeSimpleOneApi()
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
+            archiveReadStarted.await()
+            model.signOut()
+            archiveResult.complete(ClosedSimpleOneArchive(isComplete = true, queryRevision = 2))
+            advanceUntilIdle()
+
+            assertFalse(model.state.value.isInitializing)
+            assertFalse(model.state.value.isAuthorized)
+            assertFalse(model.state.value.initialArchiveReady)
+            assertEquals(0, api.currentUserCalls + api.activeCalls + api.archiveCalls + api.exportCalls)
+        } finally { models.forEach { it.viewModelScope.cancel() }; models.clear(); Dispatchers.resetMain() }
+    }
+
     @Test fun `first entry with remembered session only reads local cache`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {

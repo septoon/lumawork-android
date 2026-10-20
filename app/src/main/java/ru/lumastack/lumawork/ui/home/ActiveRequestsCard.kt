@@ -70,10 +70,10 @@ fun ActiveRequestsCard(
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text("Активные заявки", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        text = updateCaption ?: if (state.isAuthorized) {
-                            "Данные ещё не обновлялись"
-                        } else {
-                            "Требуется вход в SimpleOne"
+                        text = updateCaption ?: when {
+                            state.isInitializing -> "Загружаем сохранённые данные…"
+                            state.isAuthorized -> "Данные ещё не обновлялись"
+                            else -> "Требуется вход в SimpleOne"
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
@@ -102,7 +102,7 @@ fun ActiveRequestsCard(
                 )
             }
 
-            if (!state.isAuthorized && requests.isNotEmpty()) {
+            if (!state.isInitializing && !state.isAuthorized && requests.isNotEmpty()) {
                 Text(
                     text = "Показаны сохранённые данные. Войдите, чтобы обновить список.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -118,8 +118,10 @@ fun ActiveRequestsCard(
                 )
             }
 
-            Button(onClick = onOpenRequests, modifier = Modifier.fillMaxWidth()) {
-                Text(if (state.isAuthorized) "Открыть заявки" else "Подключить SimpleOne")
+            if (!state.isInitializing) {
+                Button(onClick = onOpenRequests, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (state.isAuthorized) "Открыть заявки" else "Подключить SimpleOne")
+                }
             }
         }
     }

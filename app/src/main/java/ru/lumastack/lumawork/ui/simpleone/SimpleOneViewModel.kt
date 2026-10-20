@@ -169,7 +169,7 @@ class SimpleOneViewModel(
     fun signOut() {
         sessionEpoch++
         activeJob?.cancel(); archiveJob?.cancel(); authJob?.cancel(); detailJob?.cancel(); identityJob?.cancel()
-        mutableState.update { it.copy(password = "", isAuthorized = false, isLoading = false,
+        mutableState.update { it.copy(password = "", isInitializing = false, isAuthorized = false, isLoading = false,
             isClosedLoading = false, isDetailLoading = false, isResolvingUser = false, selectedRequest = null, archiveProgress = null,
             showConnection = false, errorMessage = null, notice = null) }
         viewModelScope.launch { repository.signOut(ownerUserId) }
@@ -222,15 +222,20 @@ class SimpleOneViewModel(
     }
 
     private fun restore() {
+        val epoch = sessionEpoch
         viewModelScope.launch {
-            val cached = localOrNull { repository.readSnapshot(ownerUserId) }
-            val archive = localOrNull { repository.readClosedArchive(ownerUserId) }
-            val prepared = archive?.let { prepareArchive(it) } ?: PreparedArchive(emptyList(), ClosedRequestsAnalytics())
             val session = localOrNull { repository.storedSession(ownerUserId) }
             val username = session?.username ?: localOrNull { repository.rememberedUsername(ownerUserId) }.orEmpty()
-            mutableState.update { it.copy(username = username, snapshot = cached ?: it.snapshot,
+            val cached = localOrNull { repository.readSnapshot(ownerUserId) }
+            if (epoch != sessionEpoch) return@launch
+            // Session and active requests must not wait for the closed archive and its analytics.
+            mutableState.update { it.copy(username = username, snapshot = cached ?: it.snapshot, isAuthorized = session != null) }
+            val archive = localOrNull { repository.readClosedArchive(ownerUserId) }
+            val prepared = archive?.let { prepareArchive(it) } ?: PreparedArchive(emptyList(), ClosedRequestsAnalytics())
+            if (epoch != sessionEpoch) return@launch
+            mutableState.update { it.copy(
                 closedArchive = archive ?: it.closedArchive, closedArchiveItems = prepared.items, closedAnalytics = prepared.analytics, hasLoadedClosedArchive = archive != null,
-                initialArchiveReady = archive?.isReady == true, isInitializing = false, isAuthorized = session != null) }
+                initialArchiveReady = archive?.isReady == true, isInitializing = false) }
             // First entry performs local reads only. Active networking starts after a full baseline exists.
             if (archive?.isReady == true) refreshActiveRequests()
         }
