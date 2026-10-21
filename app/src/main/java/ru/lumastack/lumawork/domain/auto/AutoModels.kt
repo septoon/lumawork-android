@@ -155,6 +155,10 @@ object VehicleInputValidation {
     private val plateLetters = "АВЕКМНОРСТУХ".toSet()
     private val vinCharacters = "ABCDEFGHJKLMNPRSTUVWXYZ0123456789".toSet()
 
+    /** Identity key matching the vehicle API; unlike the input mask, never truncates the number. */
+    fun normalizePlate(value: String): String = value.uppercase(java.util.Locale.ROOT)
+        .map { cyrillicToLatin[it] ?: it }.filter { it in 'A'..'Z' || it in '0'..'9' }.joinToString("")
+
     fun formatPlate(value: String): String {
         val normalized = value.uppercase().mapNotNull { character ->
             latinToCyrillic[character] ?: character.takeIf { it.isDigit() || it in plateLetters }

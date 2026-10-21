@@ -30,14 +30,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -80,6 +75,10 @@ import ru.lumastack.lumawork.data.feedback.FeedbackRepository
 import ru.lumastack.lumawork.data.admin.AdminRepository
 import ru.lumastack.lumawork.data.simpleone.SimpleOneRepository
 import ru.lumastack.lumawork.data.timereport.TimeReportRepository
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
 
 @Composable
 fun AuthContent(
@@ -137,7 +136,7 @@ fun AuthContent(
         return
     }
 
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
 
     Box(
         modifier = Modifier
@@ -188,12 +187,7 @@ fun AuthContent(
             }
             Spacer(Modifier.height(24.dp))
 
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                shape = RoundedCornerShape(28.dp),
+            AppCard(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
@@ -265,7 +259,7 @@ private fun CodeContent(
         onDone = onVerifyCode,
     )
     PrimaryActionButton("Войти", state.isLoading, onVerifyCode)
-    OutlinedButton(
+    AppOutlinedButton(
         onClick = onBackToEmail,
         enabled = !state.isLoading,
         shape = RoundedCornerShape(16.dp),
@@ -360,7 +354,7 @@ private fun AccessRevokedContent(onResetAccess: () -> Unit) {
         text = "Для восстановления обратитесь в поддержку contact@lumastack.ru.",
         style = MaterialTheme.typography.bodyLarge,
     )
-    Button(
+    AppButton(
         onClick = { uriHandler.openUri("mailto:contact@lumastack.ru") },
         shape = RoundedCornerShape(16.dp),
         contentPadding = PaddingValues(vertical = 14.dp),
@@ -368,7 +362,7 @@ private fun AccessRevokedContent(onResetAccess: () -> Unit) {
     ) {
         Text("Написать в поддержку")
     }
-    OutlinedButton(
+    AppOutlinedButton(
         onClick = onResetAccess,
         shape = RoundedCornerShape(16.dp),
         contentPadding = PaddingValues(vertical = 14.dp),
@@ -380,7 +374,7 @@ private fun AccessRevokedContent(onResetAccess: () -> Unit) {
 
 @Composable
 private fun PrimaryActionButton(label: String, loading: Boolean, onClick: () -> Unit) {
-    Button(
+    AppButton(
         onClick = onClick,
         enabled = !loading,
         shape = RoundedCornerShape(16.dp),
@@ -395,7 +389,7 @@ private fun PrimaryActionButton(label: String, loading: Boolean, onClick: () -> 
                 CircularProgressIndicator(
                     modifier = Modifier.size(18.dp),
                     strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
+                    color = androidx.compose.material3.LocalContentColor.current,
                 )
             }
             Text(label, fontWeight = FontWeight.SemiBold)

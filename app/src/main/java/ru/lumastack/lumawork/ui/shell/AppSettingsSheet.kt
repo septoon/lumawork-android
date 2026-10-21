@@ -56,6 +56,8 @@ import ru.lumastack.lumawork.ui.salary.salaryBiometricAvailable
 import ru.lumastack.lumawork.ui.theme.AppAppearance
 import ru.lumastack.lumawork.ui.theme.LocalAppAppearance
 import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.appTopBarColors
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 private enum class SettingsPage(val title: String) {
     Root("Настройки"), Appearance("Оформление"), Screens("Экраны"), Route("Маршрут"), Gsm("ГСМ профиль"), Notifications("Уведомления")
@@ -100,8 +102,8 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                     SettingsPage.Route -> RouteSettingsPage(session, offline, auth) { page = SettingsPage.Root }
                     else -> {
                         BackHandler { back() }
-                        Scaffold(topBar = {
-                            TopAppBar(title = { Text(page.title) }, navigationIcon = {
+                        Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, topBar = {
+                            TopAppBar(colors = appTopBarColors(), title = { Text(page.title) }, navigationIcon = {
                                 if (page != SettingsPage.Root) IconButton(onClick = ::back, enabled = !busy) {
                                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
                                 }
@@ -139,7 +141,7 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                                                 settings.salaryBiometricEnabled, !busy && available, preferences::biometric)
                                         }
                                         item { SettingsSectionLabel("Аккаунт") }
-                                        item { Surface(shape = MaterialTheme.shapes.medium) {
+                                        item { AppPanel(shape = MaterialTheme.shapes.medium) {
                                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                                 Text("Электронная почта", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                                 Text(session.user.email)
@@ -152,7 +154,7 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                                     SettingsPage.Appearance -> {
                                         item { SettingsSectionLabel("Режим") }
                                         items(AppAppearance.entries, key = { it.name }) { mode ->
-                                            Surface(onClick = { appearance.onChange(mode) }, shape = MaterialTheme.shapes.medium) {
+                                            AppPanel(onClick = { appearance.onChange(mode) }, shape = MaterialTheme.shapes.medium) {
                                                 Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                                     RadioButton(appearance.mode == mode, onClick = { appearance.onChange(mode) })
                                                     Text(mode.title)
@@ -206,7 +208,7 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
 
 @Composable
 private fun SettingsLink(title: String, icon: Int?, enabled: Boolean, onClick: () -> Unit) {
-    Surface(onClick = onClick, enabled = enabled, shape = MaterialTheme.shapes.medium) {
+    AppPanel(onClick = onClick, enabled = enabled, shape = MaterialTheme.shapes.medium) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (icon != null) Icon(painterResource(icon), null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
@@ -219,7 +221,7 @@ private fun SettingsLink(title: String, icon: Int?, enabled: Boolean, onClick: (
 
 @Composable
 private fun SettingsToggle(title: String, subtitle: String?, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
-    Surface(shape = MaterialTheme.shapes.medium) {
+    AppPanel(shape = MaterialTheme.shapes.medium) {
         Row(Modifier.fillMaxWidth().toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
             .padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -249,8 +251,8 @@ private fun RouteSettingsPage(session: AppSession, offline: Boolean, auth: AuthR
     val snackbars = remember { SnackbarHostState() }
     val back = { if (!busy) onBack() }
     BackHandler { back() }
-    Scaffold(topBar = {
-        TopAppBar(title = { Text("Маршрут") }, navigationIcon = {
+    Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, topBar = {
+        TopAppBar(colors = appTopBarColors(), title = { Text("Маршрут") }, navigationIcon = {
             IconButton(onClick = back, enabled = !busy) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
         }, actions = {
             TextButton(enabled = !busy && !offline, onClick = {
@@ -277,7 +279,7 @@ private fun RouteSettingsPage(session: AppSession, offline: Boolean, auth: AuthR
             if (offline) item { Text("Подключитесь к интернету, чтобы сохранить адреса.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             item { SettingsSectionLabel("Карты") }
-            item { Surface(shape = MaterialTheme.shapes.medium) {
+            item { AppPanel(shape = MaterialTheme.shapes.medium) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("Яндекс Карты", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
@@ -298,8 +300,8 @@ private fun RouteSettingsPage(session: AppSession, offline: Boolean, auth: AuthR
 @Composable
 internal fun AppFeedbackDialog(session: AppSession, offline: Boolean, repository: FeedbackRepository, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Scaffold(Modifier.fillMaxSize(), topBar = {
-            TopAppBar(title = { Text("Обратная связь") }, navigationIcon = {
+        Scaffold(Modifier.fillMaxSize().background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, topBar = {
+            TopAppBar(colors = appTopBarColors(), title = { Text("Обратная связь") }, navigationIcon = {
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Закрыть обратную связь") }
             })
         }) { padding ->

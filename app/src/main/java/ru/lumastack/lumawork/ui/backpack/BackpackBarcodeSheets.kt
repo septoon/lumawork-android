@@ -16,7 +16,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -40,6 +39,7 @@ import kotlinx.coroutines.*
 import ru.lumastack.lumawork.domain.backpack.SerialBarcode
 import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,7 +47,7 @@ internal fun SerialBarcodeSheet(value: String, onDismiss: () -> Unit) {
     val matrix = remember(value) { SerialBarcode.encode(value) }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+    ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Text("Серийный номер", style = MaterialTheme.typography.titleLarge)
@@ -131,7 +131,7 @@ internal fun BackpackScannerSheet(onDismiss: () -> Unit, onScan: (String) -> Uni
         lifecycle.addObserver(observer); sync()
         onDispose { lifecycle.removeObserver(observer); view?.pause() }
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+    ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
         Column(Modifier.fillMaxWidth().heightIn(min = 420.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Сканировать S/N", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))

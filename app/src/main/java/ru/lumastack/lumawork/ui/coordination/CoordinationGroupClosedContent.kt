@@ -31,11 +31,12 @@ import ru.lumastack.lumawork.ui.requests.requestStatusColor
 import ru.lumastack.lumawork.ui.requests.requestStatusTextColor
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun CoordinationGroupClosedContent(scopeKey: String, state: GroupClosedRequestsState, authorized: Boolean,
-    offline: Boolean, onBack: () -> Unit, onRefresh: () -> Unit, onOpen: (SimpleOneRequest) -> Unit, copy: (String) -> Unit,
+    offline: Boolean, onRefresh: () -> Unit, onOpen: (SimpleOneRequest) -> Unit, copy: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val preferences = remember(context) { context.getSharedPreferences("coordination-group-closed-filters", Context.MODE_PRIVATE) }
@@ -58,7 +59,6 @@ internal fun CoordinationGroupClosedContent(scopeKey: String, state: GroupClosed
     fun setExcluded(value: Set<String>) { excluded = value; preferences.edit().putStringSet(scopeKey, value).apply() }
     Column(Modifier.widthIn(max = 960.dp).fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("Назад") }
             Text("Закрытые заявки группы", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             Box {
                 TextButton(onClick = { showTypes = true }, enabled = authorized) { Text("Типы") }
@@ -114,7 +114,7 @@ internal fun CoordinationGroupClosedContent(scopeKey: String, state: GroupClosed
 private fun GroupClosedRequestCard(item: ClosedRequestsItem, open: () -> Unit, copy: (String) -> Unit) {
     val record = item.request
     val returning = isClosedReturnEquipment(record.closedRequestType())
-    Card(onClick = open, modifier = Modifier.fillMaxWidth()) {
+    AppCard(onClick = open, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(record.incomingNumber.ifBlank { record.number }, Modifier.weight(1f), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)

@@ -3,11 +3,14 @@ package ru.lumastack.lumawork.ui.requests
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.CancellationException
@@ -23,6 +26,7 @@ import ru.lumastack.lumawork.domain.requests.*
 import ru.lumastack.lumawork.domain.simpleone.RequestsMode
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
+import ru.lumastack.lumawork.ui.shell.AppHeaderActions
 import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import ru.lumastack.lumawork.ui.theme.AppTextField
@@ -149,30 +153,32 @@ private fun RequestsToolbar(state: SimpleOneUiState, actions: RequestsActions, c
     }
     // Dates have already been parsed once along with the cached search index.
     val dates = remember(state.closedArchiveItems) { state.closedArchiveItems.mapNotNull { it.day } }
+    AppHeaderActions {
+        Box {
+            IconButton(onClick = { expanded = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, "Меню заявок", Modifier.rotate(90f)) }
+            DropdownMenu(expanded, { expanded = false }) {
+                fun act(action: () -> Unit) { expanded = false; action() }
+                DropdownMenuItem({ Text("Обновить SimpleOne") }, { act { actions.onRefreshActive(); scope.launch { comments.repository.refresh({ comments.offline }, force = true) } } }, enabled = !state.isOffline)
+                DropdownMenuItem({ Text("Обновить закрытые из SimpleOne") }, { act(actions.onRefreshClosed) }, enabled = !state.isOffline)
+                DropdownMenuItem({ Text("Комментарий") }, { act { comments.openEditor() } }, enabled = !state.isOffline)
+                DropdownMenuItem({ Text("Выйти из SimpleOne") }, { act(actions.onSignOut) }, enabled = state.isAuthorized)
+                HorizontalDivider()
+                DropdownMenuItem({ Text(if (state.closedArchive.requests.isEmpty()) "Загрузить заявки" else "Обновить заявки") },
+                    { act { import.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) } })
+                DropdownMenuItem({ Text("Экспорт заявок XLSX") }, { act { export.launch("Инженер.xlsx") } }, enabled = state.closedArchive.requests.isNotEmpty())
+                if (state.mode == RequestsMode.Closed) {
+                    HorizontalDivider()
+                    DropdownMenuItem({ Text("Удалить за период…") }, { act { cleanupPeriod = true } }, enabled = dates.isNotEmpty())
+                    DropdownMenuItem({ Text("Удалить все закрытые заявки", color = MaterialTheme.colorScheme.error) }, { act { cleanupAll = true } }, enabled = state.closedArchive.requests.isNotEmpty())
+                }
+            }
+        }
+    }
     Column {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(if (state.mode == RequestsMode.Active) "Активные заявки" else "Закрытые заявки",
                 style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            Box {
-                TextButton(onClick = { expanded = true }, enabled = !busy) { Text("Меню") }
-                DropdownMenu(expanded, { expanded = false }) {
-                    fun act(action: () -> Unit) { expanded = false; action() }
-                    DropdownMenuItem({ Text("Обновить SimpleOne") }, { act { actions.onRefreshActive(); scope.launch { comments.repository.refresh({ comments.offline }, force = true) } } }, enabled = !state.isOffline)
-                    DropdownMenuItem({ Text("Обновить закрытые из SimpleOne") }, { act(actions.onRefreshClosed) }, enabled = !state.isOffline)
-                    DropdownMenuItem({ Text("Комментарий") }, { act { comments.openEditor() } }, enabled = !state.isOffline)
-                    DropdownMenuItem({ Text("Выйти из SimpleOne") }, { act(actions.onSignOut) }, enabled = state.isAuthorized)
-                    HorizontalDivider()
-                    DropdownMenuItem({ Text(if (state.closedArchive.requests.isEmpty()) "Загрузить заявки" else "Обновить заявки") },
-                        { act { import.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) } })
-                    DropdownMenuItem({ Text("Экспорт заявок XLSX") }, { act { export.launch("Инженер.xlsx") } }, enabled = state.closedArchive.requests.isNotEmpty())
-                    if (state.mode == RequestsMode.Closed) {
-                        HorizontalDivider()
-                        DropdownMenuItem({ Text("Удалить за период…") }, { act { cleanupPeriod = true } }, enabled = dates.isNotEmpty())
-                        DropdownMenuItem({ Text("Удалить все закрытые заявки", color = MaterialTheme.colorScheme.error) }, { act { cleanupAll = true } }, enabled = state.closedArchive.requests.isNotEmpty())
-                    }
-                }
-            }
         }
         state.archiveProgress?.let { Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
         state.errorMessage?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }

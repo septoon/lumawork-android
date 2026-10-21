@@ -41,11 +41,13 @@ import java.util.Locale
 import ru.lumastack.lumawork.data.salary.*
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
-import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @Composable
 fun SalaryRoute(session: AppSession, startOffline: Boolean, repository: SalaryRepository, widthClass: AppWidthClass,
@@ -68,7 +70,7 @@ private fun SalaryScreen(session: AppSession, offline: Boolean, state: SalaryUiS
     LaunchedEffect(state.error, state.notice) {
         (state.error ?: state.notice)?.let { snackbar.showSnackbar(it); model.clearMessage() }
     }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Column(Modifier.fillMaxSize().background(appScreenBackground())) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Зарплата", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             TextButton(onClick = model::add, enabled = !offline && !state.saving) { Text("Добавить выплату") }
@@ -121,7 +123,7 @@ private fun SalarySummary(state: SalaryUiState, onHidden: () -> Unit, onPeriod: 
     val projection = state.projection
     val latest = projection.latest
     val records = if (state.showAllTime) projection.paymentDates else latest?.entries.orEmpty().map { it.date }.sorted()
-    Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+    AppPanel(color = MaterialTheme.colorScheme.primaryContainer) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Перечислено за ${if (state.showAllTime) "${projection.months.size} мес." else salaryMonthTitle(latest?.key.orEmpty())}", style = MaterialTheme.typography.titleSmall)
             Text(salaryAmount(if (state.showAllTime) projection.total else latest?.total ?: 0.0, state.hidden),
@@ -141,7 +143,7 @@ private fun SalaryAnalytics(state: SalaryUiState, onToggle: (SalaryKind) -> Unit
     val selected = projection.filteredTotal(state.options.excludedKinds)
     val colors = SalaryKind.entries.associateWith { salaryKindColor(it) }
     val border = MaterialTheme.colorScheme.outlineVariant
-    Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+    AppPanel {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Аналитика", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text("Структура выплат и средние значения за всё время", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -218,7 +220,7 @@ private fun SalaryPeriods(state: SalaryUiState, onYear: (String?) -> Unit, onMon
 
 @Composable
 private fun SalaryMonthButton(month: SalaryMonth, hidden: Boolean, onClick: () -> Unit) {
-    Card(onClick = onClick, shape = RoundedCornerShape(18.dp)) {
+    AppCard(onClick = onClick) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(salaryMonthTitle(month.key), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
             Text(if (hidden) "Сумма скрыта" else salaryAmount(month.total, false), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)

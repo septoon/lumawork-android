@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +26,7 @@ import kotlinx.coroutines.flow.drop
 import ru.lumastack.lumawork.R
 import ru.lumastack.lumawork.data.auto.VehicleImageRepository
 import ru.lumastack.lumawork.domain.auto.Vehicle
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @Composable
 internal fun VehicleSelector(
@@ -72,8 +72,7 @@ internal fun VehicleSelector(
                 .background(if (index == pager.currentPage) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = .25f), CircleShape)) }
             Text("+", color = if (displayed == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         }
-        Card(onClick = { displayed?.let(onEdit) ?: onAdd() }, shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = .94f))) {
+        AppCard(onClick = { displayed?.let(onEdit) ?: onAdd() }) {
             Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(if (displayed == null) "Добавить по госномеру" else "Данные автомобиля", fontWeight = FontWeight.Bold)

@@ -21,7 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -58,14 +57,17 @@ import java.util.Locale
 import ru.lumastack.lumawork.domain.fuel.FuelAnalytics
 import ru.lumastack.lumawork.domain.fuel.FuelMonthlyPricePoint
 import ru.lumastack.lumawork.domain.fuel.FuelRecord
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.appTopBarColors
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FuelAnalyticsScreen(records: List<FuelRecord>, onDismiss: () -> Unit) {
     var selectedYear by rememberSaveable { mutableStateOf<String?>(null) }
     val analytics = remember(records, selectedYear) { FuelAnalytics(records, selectedYear) }
-    Scaffold(topBar = {
-        TopAppBar(title = { Text("Аналитика топлива") }, navigationIcon = {
+    Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, topBar = {
+        TopAppBar(colors = appTopBarColors(), title = { Text("Аналитика топлива") }, navigationIcon = {
             IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад") }
         })
     }) { insets ->
@@ -76,7 +78,7 @@ fun FuelAnalyticsScreen(records: List<FuelRecord>, onDismiss: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    AppCard(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Средняя цена литра", style = MaterialTheme.typography.titleMedium)
                             Text(if (analytics.overallPricePerLiter > 0) money(analytics.overallPricePerLiter, 2) else "—", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
@@ -254,7 +256,7 @@ private fun CostChart(points: List<FuelMonthlyPricePoint>) {
 
 @Composable
 private fun AnalyticsPanel(title: String, caption: String, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+    AppCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)

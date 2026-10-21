@@ -15,8 +15,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DateRangePicker
@@ -58,6 +56,7 @@ import ru.lumastack.lumawork.domain.requests.normalizedClosedAddress
 import ru.lumastack.lumawork.domain.requests.queryClosedRequests
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -123,7 +122,7 @@ fun ClosedRequestsContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
         if (filtered.isEmpty()) item(key = "closed-empty") {
-            Card(Modifier.fillMaxWidth()) {
+            AppCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (isLoading && !hasArchive) CircularProgressIndicator()
                     Text(when {
@@ -191,8 +190,7 @@ private fun ClosedRequestCard(
 ) {
     val request = item.request
     val isReturn = isClosedReturnEquipment(request.closedRequestType())
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    AppCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(request.incomingNumber.ifBlank { request.number }, fontWeight = FontWeight.SemiBold,

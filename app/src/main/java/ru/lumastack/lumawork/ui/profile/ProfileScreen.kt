@@ -1,6 +1,5 @@
 package ru.lumastack.lumawork.ui.profile
 
-import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,20 +13,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,13 +52,16 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import java.io.File
 import ru.lumastack.lumawork.data.auth.AuthRepository
 import ru.lumastack.lumawork.data.auto.AutoRepository
 import ru.lumastack.lumawork.data.auto.VehicleImageRepository
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.auto.VehicleEditorFields
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.appTopBarColors
+import androidx.compose.foundation.background
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -131,10 +128,9 @@ fun ProfileRoute(
 
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !state.busy, dismissOnClickOutside = !state.busy)) {
         if (documentsOpen) WorkDocumentsScreen(session, offline, editing, onDismiss = { documentsOpen = false }, repository = documents)
-        else Scaffold(
-            modifier = Modifier.fillMaxSize().imePadding(),
+        else Scaffold(modifier = Modifier.fillMaxSize().imePadding().background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent,
             topBar = {
-                TopAppBar(title = { Text("Профиль") }, navigationIcon = {
+                TopAppBar(colors = appTopBarColors(), title = { Text("Профиль") }, navigationIcon = {
                     IconButton(onClick = close, enabled = !state.busy) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Закрыть профиль") }
                 }, actions = {
                     if (state.busy) CircularProgressIndicator(Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
@@ -202,7 +198,7 @@ fun ProfileRoute(
 
 @Composable
 private fun ProfileCard(content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+    AppPanel {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }

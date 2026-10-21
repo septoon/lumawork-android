@@ -101,6 +101,7 @@ internal fun VehicleEditor(
         confirmEnabled = validationError == null,
         errorMessage = errorMessage ?: validationError,
         maxWidth = 760.dp,
+        onBack = if (editingVehicle == null && stepIndex > 0) ({ stepIndex-- }) else null,
     ) {
         if (showingSummary) {
             item(key = "vehicle:summary") { VehicleSummary(editingVehicle, imageContent) }
@@ -112,7 +113,6 @@ internal fun VehicleEditor(
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("Шаг ${stepIndex + 1} из 5", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (stepIndex > 0) TextButton(onClick = { stepIndex-- }, enabled = !isSaving) { Text("Назад") }
                         }
                     }
                 }

@@ -46,6 +46,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import kotlin.math.roundToInt
 import ru.lumastack.lumawork.ui.adaptive.appFormHasPinnedActions
+import ru.lumastack.lumawork.ui.shell.AppBackButton
 
 /** Keep actions fixed when there is room; short windows scroll the entire form. */
 @Composable
@@ -60,6 +61,7 @@ fun AppFormDialog(
     maxWidth: Dp = 720.dp,
     errorMessage: String? = null,
     errorTitle: String? = null,
+    onBack: (() -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
     Dialog(
@@ -110,19 +112,20 @@ fun AppFormDialog(
                 .widthIn(max = maxWidth).fillMaxWidth()
                 .fillMaxHeight(.94f).padding(16.dp),
             shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
+            color = AppSurfaces.panel,
+            border = androidx.compose.foundation.BorderStroke(1.dp, AppSurfaces.border),
+            tonalElevation = 0.dp,
         ) {
             BoxWithConstraints(Modifier.padding(20.dp)) {
                 val pinned = appFormHasPinnedActions(maxHeight.value.roundToInt(), LocalDensity.current.fontScale)
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (pinned) FormHeader(title, dismissLabel, isBusy, onDismiss)
+                    if (pinned) FormHeader(title, dismissLabel, isBusy, onDismiss, onBack)
                     LazyColumn(
                         Modifier.weight(1f).fillMaxWidth(), state = listState,
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         if (!pinned) {
-                            item(key = "app-form:header") { FormHeader(title, dismissLabel, isBusy, onDismiss) }
+                            item(key = "app-form:header") { FormHeader(title, dismissLabel, isBusy, onDismiss, onBack) }
                         }
                         body()
                         if (!pinned) {
@@ -137,8 +140,9 @@ fun AppFormDialog(
 }
 
 @Composable
-private fun FormHeader(title: String, dismissLabel: String, isBusy: Boolean, onDismiss: () -> Unit) {
+private fun FormHeader(title: String, dismissLabel: String, isBusy: Boolean, onDismiss: () -> Unit, onBack: (() -> Unit)?) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (onBack != null) AppBackButton(onBack, enabled = !isBusy)
         Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
         TextButton(onClick = onDismiss, enabled = !isBusy) { Text(dismissLabel) }
     }
@@ -158,7 +162,7 @@ private fun FormConfirm(label: String, isBusy: Boolean, enabled: Boolean, onConf
         modifier = Modifier.fillMaxWidth(),
     ) {
         if (isBusy) {
-            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = androidx.compose.material3.LocalContentColor.current)
             Spacer(Modifier.width(8.dp))
         }
         Text(label)

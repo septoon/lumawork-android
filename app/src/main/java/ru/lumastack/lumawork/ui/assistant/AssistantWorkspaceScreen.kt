@@ -43,10 +43,14 @@ import ru.lumastack.lumawork.data.wiki.WikiRepository
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
+import ru.lumastack.lumawork.ui.shell.AppHeaderSegments
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import ru.lumastack.lumawork.ui.wiki.WikiRoute
 import java.io.File
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @Composable
 fun AssistantWorkspaceRoute(session: AppSession, offline: Boolean, wiki: WikiRepository, simpleOne: SimpleOneRepository,
@@ -65,10 +69,10 @@ fun AssistantWorkspaceRoute(session: AppSession, offline: Boolean, wiki: WikiRep
         model.notice(null)
         if (result == SnackbarResult.ActionPerformed) model.retry()
     } }
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    AppHeaderSegments(listOf("Чат", "Вики"), if (section == "wiki") 1 else 0,
+        { keyboard?.hide(); onSection(if (it == 0) "chat" else "wiki") })
+    Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            AppSegmentedControl(listOf("Чат", "Вики"), if (section == "wiki") 1 else 0,
-                { keyboard?.hide(); onSection(if (it == 0) "chat" else "wiki") }, Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             if (section != "wiki") Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
                 if (state.messages.isNotEmpty() || state.conversation != null) TextButton(onClick = { model.newChat() }, enabled = !state.initializing) { Text("Новый чат") }
                 TextButton(onClick = { keyboard?.hide(); history = true; model.history() }, enabled = !state.initializing) { Text("Предыдущие чаты") }
@@ -140,7 +144,7 @@ private fun AssistantChat(model: AssistantViewModel, state: AssistantState, offl
                 state.activity?.let { activity -> item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Text(activity, style = MaterialTheme.typography.bodyMedium)
                 } } }
-                if (state.full) item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {
+                if (state.full) item { AppCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {
                     Text("Лимит этого чата исчерпан. Создайте новый чат.")
                     TextButton(onClick = model::newChat) { Text("Новый чат") }
                 } } }
@@ -181,7 +185,7 @@ private fun AssistantChat(model: AssistantViewModel, state: AssistantState, offl
                 }, enabled = !state.sending && !state.initializing && !state.full && !state.preparingAttachment) { Text(if (listening) "Завершить" else "Голос") }
                 Spacer(Modifier.weight(1f))
                 if (state.sending) TextButton(onClick = model::stop) { Text("Стоп") }
-                else Button(onClick = { dictation.close(); keyboard?.hide(); model.send() }, enabled = !offline && !state.initializing && !state.loadingMessages && !state.full && !state.preparingAttachment && !listening && state.saved.conversationId !in state.deleting && (state.saved.draft.isNotBlank() || state.attachment != null)) { Text("Отправить") }
+                else AppButton(onClick = { dictation.close(); keyboard?.hide(); model.send() }, enabled = !offline && !state.initializing && !state.loadingMessages && !state.full && !state.preparingAttachment && !listening && state.saved.conversationId !in state.deleting && (state.saved.draft.isNotBlank() || state.attachment != null)) { Text("Отправить") }
             }
             if (state.canRetry) TextButton(onClick = model::retry, enabled = !offline) { Text("Повторить последний запрос") }
         }
@@ -229,14 +233,14 @@ private fun sourceName(value: String) = when (value.lowercase()) {
 private fun AssistantHistory(model: AssistantViewModel, state: AssistantState, offline: Boolean, onClose: () -> Unit) {
     var rename by remember { mutableStateOf<AssistantConversation?>(null) }; var title by remember { mutableStateOf("") }
     var delete by remember { mutableStateOf<AssistantConversation?>(null) }
-    ModalBottomSheet(onDismissRequest = onClose) {
+    ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onClose) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).padding(horizontal = 16.dp)) {
             Text("Предыдущие чаты", style = MaterialTheme.typography.titleLarge)
             TextButton(onClick = { model.newChat(); onClose() }) { Text("Новый чат") }
             AppRefreshContainer(Modifier.weight(1f), state.loadingHistory, { model.history() }, enabled = !offline) {
                 LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
                     if (state.saved.conversations.isEmpty() && !state.loadingHistory) item { Text("Предыдущих чатов пока нет.") }
-                    items(state.saved.conversations, key = { it.id }) { conversation -> Card(Modifier.fillMaxWidth()) {
+                    items(state.saved.conversations, key = { it.id }) { conversation -> AppCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
                             TextButton(onClick = { model.open(conversation.id); onClose() }, enabled = conversation.id !in state.deleting) { Text(conversation.title, fontWeight = FontWeight.SemiBold) }
                             Text(conversation.preview, maxLines = 2, style = MaterialTheme.typography.bodyMedium)

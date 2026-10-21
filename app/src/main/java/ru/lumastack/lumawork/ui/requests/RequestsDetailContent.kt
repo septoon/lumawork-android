@@ -62,7 +62,6 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
     }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = actions.onCloseRequest) { Text("Назад") }
             Text("Детали", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             if (state.isDetailLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         }

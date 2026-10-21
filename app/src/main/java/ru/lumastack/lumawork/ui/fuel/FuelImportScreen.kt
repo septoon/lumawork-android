@@ -46,6 +46,10 @@ import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.appTopBarColors
+import androidx.compose.foundation.background
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,9 +88,9 @@ fun FuelImportScreen(
     }
     val importableCount = model.items.count { it.canImport(model.correction(it), model.replacements) }
     BackHandler { if (!model.busy) { model.reset(); onDismiss() } }
-    Scaffold(
+    Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
-            TopAppBar(title = { Text("Импорт отчётов") }, navigationIcon = {
+            TopAppBar(colors = appTopBarColors(), title = { Text("Импорт отчётов") }, navigationIcon = {
                 IconButton(enabled = !model.busy, onClick = { model.reset(); onDismiss() }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Закрыть")
                 }
@@ -197,7 +201,7 @@ private fun ImportMonthCard(
         FuelImportStatus.Ready -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+    AppPanel {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(importMonthTitle(correction.period), style = MaterialTheme.typography.titleMedium)
             Text(item.status.title, style = MaterialTheme.typography.labelLarge, color = statusColor)

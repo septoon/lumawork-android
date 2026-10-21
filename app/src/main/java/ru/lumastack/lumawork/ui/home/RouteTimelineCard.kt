@@ -1,5 +1,8 @@
 package ru.lumastack.lumawork.ui.home
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+
 import android.content.ClipData
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -16,14 +19,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,9 +31,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -76,6 +74,8 @@ import ru.lumastack.lumawork.domain.route.RouteWorkType
 import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @Composable
 internal fun RouteTimelineCard(
@@ -85,6 +85,7 @@ internal fun RouteTimelineCard(
     onRemoveStop: (String) -> Unit,
     onReorderStop: (String, String) -> Unit,
     onEndpointSelect: (RouteEndpointRole, RouteEndpointKind) -> Unit,
+    compact: Boolean = false,
 ) {
     val bounds = remember(state.record.date, state.record.workType) { mutableStateMapOf<String, Rect>() }
     var draggedId by remember(state.record.date, state.record.workType) { mutableStateOf<String?>(null) }
@@ -94,10 +95,11 @@ internal fun RouteTimelineCard(
     val reorder by rememberUpdatedState(onReorderStop)
     val haptics = LocalHapticFeedback.current
 
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = .96f))) {
-        Column(Modifier.padding(horizontal = 20.dp)) {
-            RouteEndpointSection(RouteEndpointRole.Start, state, onEndpointSelect)
+    AppCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(if (compact) 20.dp else 28.dp)) {
+        Column(Modifier.padding(horizontal = if (compact) 16.dp else 20.dp)) {
+            if (compact) Text("Маршрут", Modifier.padding(top = 16.dp, bottom = 4.dp),
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            RouteEndpointSection(RouteEndpointRole.Start, state, onEndpointSelect, compact)
             HorizontalDivider()
             middleStops.forEachIndexed { index, stop ->
                 key(stop.id) {
@@ -165,7 +167,7 @@ internal fun RouteTimelineCard(
                 Text("Добавить точку", Modifier.padding(start = 8.dp))
             }
             HorizontalDivider()
-            RouteEndpointSection(RouteEndpointRole.Finish, state, onEndpointSelect)
+            RouteEndpointSection(RouteEndpointRole.Finish, state, onEndpointSelect, compact)
         }
     }
     if (pendingDelete != null) AlertDialog(onDismissRequest = { pendingDelete = null },
@@ -175,14 +177,43 @@ internal fun RouteTimelineCard(
 }
 
 @Composable
-private fun RouteEndpointSection(role: RouteEndpointRole, state: RouteUiState, onSelect: (RouteEndpointRole, RouteEndpointKind) -> Unit) {
+private fun RouteEndpointSection(role: RouteEndpointRole, state: RouteUiState, onSelect: (RouteEndpointRole, RouteEndpointKind) -> Unit, compact: Boolean = false) {
     val stop = if (role == RouteEndpointRole.Start) state.record.stops.first() else state.record.stops.last()
     val isHome = state.settings.homeAddress.isNotBlank() && stop.address.trim().equals(state.settings.homeAddress.trim(), ignoreCase = true)
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     fun copyAddress(address: String) { if (address.isNotBlank()) scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Адрес", address))) } }
     var copyMenuOpen by remember { mutableStateOf(false) }
-    Column(Modifier.padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var endpointMenuOpen by remember { mutableStateOf(false) }
+    if (compact) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(role.title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box {
+                    androidx.compose.material3.OutlinedButton(onClick = { endpointMenuOpen = true },
+                        shape = RoundedCornerShape(10.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                        Text(if (isHome) "Дом" else "Склад")
+                        Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, null, Modifier.size(18.dp))
+                    }
+                    DropdownMenu(endpointMenuOpen, onDismissRequest = { endpointMenuOpen = false }) {
+                        RouteEndpointKind.entries.forEach { kind ->
+                            val available = state.settings.address(kind).isNotBlank()
+                            DropdownMenuItem(text = { Text(if (available) kind.title else "${kind.title} · адрес не задан") },
+                                enabled = available, onClick = { endpointMenuOpen = false; onSelect(role, kind) })
+                        }
+                    }
+                }
+            }
+            Text(stop.address.ifBlank { "Адрес не указан" }, style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.fillMaxWidth().combinedClickable(onClick = { copyMenuOpen = true }, onLongClick = { copyAddress(stop.address) }))
+            DropdownMenu(copyMenuOpen, onDismissRequest = { copyMenuOpen = false }) {
+                DropdownMenuItem(text = { Text("Копировать адрес") }, enabled = stop.address.isNotBlank(),
+                    onClick = { copyAddress(stop.address); copyMenuOpen = false })
+            }
+        }
+        return
+    }
+    Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Box {
             Text(role.title, style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.combinedClickable(onClick = { copyMenuOpen = true }, onLongClick = { copyAddress(stop.address) }))
@@ -193,14 +224,14 @@ private fun RouteEndpointSection(role: RouteEndpointRole, state: RouteUiState, o
                 }
             }
         }
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            RouteEndpointKind.entries.forEachIndexed { index, kind ->
-                SegmentedButton(selected = isHome == (kind == RouteEndpointKind.Home),
-                    onClick = { onSelect(role, kind) }, enabled = kind != RouteEndpointKind.Home || state.settings.homeAddress.isNotBlank(),
-                    shape = SegmentedButtonDefaults.itemShape(index, RouteEndpointKind.entries.size),
-                    modifier = Modifier.weight(1f).combinedClickable(onClick = { onSelect(role, kind) }, onLongClick = { copyAddress(state.settings.address(kind)) })) { Text(kind.title) }
-            }
-        }
+        AppSegmentedControl(
+            titles = RouteEndpointKind.entries.map { it.title },
+            selectedIndex = RouteEndpointKind.entries.indexOfFirst { isHome == (it == RouteEndpointKind.Home) },
+            onSelect = { onSelect(role, RouteEndpointKind.entries[it]) },
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+            isSegmentEnabled = { RouteEndpointKind.entries[it] != RouteEndpointKind.Home || state.settings.homeAddress.isNotBlank() },
+            onLongClick = { copyAddress(state.settings.address(RouteEndpointKind.entries[it])) },
+        )
     }
 }
 
@@ -213,7 +244,7 @@ internal fun RouteStopEditor(stop: RouteStop, number: Int, date: String, onDismi
     var requestNumber by rememberSaveable(date, workType, stop.id) { mutableStateOf(stop.requestNumber) }
     var officePickerOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 560.dp) {
+    ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 560.dp) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Text("Точка $number", Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
@@ -240,7 +271,7 @@ internal fun RouteStopEditor(stop: RouteStop, number: Int, date: String, onDismi
         }
     }
 
-    if (officePickerOpen) ModalBottomSheet(onDismissRequest = { officePickerOpen = false },
+    if (officePickerOpen) ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = { officePickerOpen = false },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 680.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

@@ -44,6 +44,11 @@ import ru.lumastack.lumawork.domain.auto.Vehicle
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.auto.VehicleImage
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.appTopBarColors
+import androidx.compose.foundation.background
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -159,9 +164,9 @@ fun GsmProfileSettingsScreen(
 
     val draft = editor.draft
     val enabled = !saving && !importing && !loading && !offline && profileReady
-    Scaffold(
+    Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
-            TopAppBar(
+            TopAppBar(colors = appTopBarColors(),
                 title = { Text("ГСМ профиль") },
                 navigationIcon = { IconButton(onClick = requestBack, enabled = !saving) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Назад") } },
                 actions = {
@@ -174,14 +179,20 @@ fun GsmProfileSettingsScreen(
                                     throw GsmProfileFailure.Validation("Введите положительную норму топлива.")
                                 if (odometerInput.toIntOrNull()?.let { it >= 0 } != true)
                                     throw GsmProfileFailure.Validation("Введите стартовый одометр целым неотрицательным числом.")
-                                val saved = repository.save(owner, session.token, editor.draft)
+                                val saved = repository.saveWithVehicle(session, editor.draft, autoRepository)
                                 editor = editor.saved(saved, submittedRevision)
                                 drafts.edit().remove(owner).apply()
                                 // Consumers can update their local allowed-fuel list from the confirmed profile.
                                 currentOnSaved(saved.profile)
                                 currentOnBack()
                             } catch (error: CancellationException) { throw error }
-                            catch (error: Exception) { snackbars.showSnackbar(error.gsmMessage()) }
+                            catch (error: Exception) {
+                                repository.read(owner)?.let { persisted ->
+                                    editor = editor.loaded(persisted)
+                                    serverConfirmedEmpty = persisted.profile.isEmptyForOnboarding
+                                }
+                                snackbars.showSnackbar(error.gsmMessage())
+                            }
                             finally { saving = false }
                         }
                     }, modifier = Modifier.semantics { contentDescription = "Сохранить ГСМ профиль" }) {
@@ -216,7 +227,7 @@ fun GsmProfileSettingsScreen(
             }
             item {
                 GsmVehicleCard(
-                    selected = vehicles.firstOrNull { it.id == draft.vehicleId }, vehicles = vehicles, enabled = enabled,
+                    selected = draft.matchingVehicles(vehicles).singleOrNull(), profile = draft, vehicles = vehicles, enabled = enabled,
                     images = images, onSelect = { pendingVehicleId = it.id }, onAdd = onAddVehicle,
                 )
             }
@@ -280,10 +291,11 @@ fun GsmProfileSettingsScreen(
 
 @Composable
 private fun GsmVehicleCard(
-    selected: Vehicle?, vehicles: List<Vehicle>, enabled: Boolean, images: VehicleImageRepository,
+    selected: Vehicle?, profile: GsmProfile, vehicles: List<Vehicle>, enabled: Boolean, images: VehicleImageRepository,
     onSelect: (Vehicle) -> Unit, onAdd: (() -> Unit)?,
 ) {
-    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+    val profileVehicle = profile.carModel.isNotBlank() && profile.licensePlate.isNotBlank()
+    AppPanel {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Автомобиль для ГСМ-отчёта", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (selected != null) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -292,10 +304,14 @@ private fun GsmVehicleCard(
                     Text(selected.displayName, style = MaterialTheme.typography.titleMedium)
                     Text(selected.licensePlate ?: "Номер не указан", style = MaterialTheme.typography.bodyMedium)
                 }
+            } else if (profileVehicle) {
+                Text(profile.carModel, style = MaterialTheme.typography.titleMedium)
+                Text(profile.licensePlate, style = MaterialTheme.typography.bodyMedium)
+                Text("Автомобиль из ГСМ-профиля. Будет добавлен в «Авто» после нажатия «Сохранить».", style = MaterialTheme.typography.bodySmall)
             } else Text("Автомобиль не выбран", style = MaterialTheme.typography.titleMedium)
-            if (vehicles.isEmpty()) {
-                if (onAdd != null) Button(onClick = onAdd, enabled = enabled) { Text("Добавить автомобиль") }
-            } else {
+            if (vehicles.isEmpty() && !profileVehicle) {
+                if (onAdd != null) AppButton(onClick = onAdd, enabled = enabled) { Text("Добавить автомобиль") }
+            } else if (vehicles.isNotEmpty()) {
                 GsmChoiceMenu(null, "Выбрать другой автомобиль", enabled) { close ->
                     vehicles.forEach { vehicle -> DropdownMenuItem(text = { Text(vehicle.displayName) }, onClick = { onSelect(vehicle); close() }) }
                 }

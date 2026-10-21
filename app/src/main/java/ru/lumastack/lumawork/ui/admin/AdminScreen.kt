@@ -1,7 +1,6 @@
 package ru.lumastack.lumawork.ui.admin
 
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -23,18 +22,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -59,7 +53,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ru.lumastack.lumawork.data.admin.AdminGsmTemplate
-import ru.lumastack.lumawork.data.admin.AdminImageKind
 import ru.lumastack.lumawork.data.admin.AdminServerImage
 import ru.lumastack.lumawork.data.admin.AdminFailure
 import ru.lumastack.lumawork.data.admin.AdminRepository
@@ -73,6 +66,12 @@ import ru.lumastack.lumawork.data.feedback.FeedbackStatus
 import ru.lumastack.lumawork.domain.model.AdminPermission
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
+import ru.lumastack.lumawork.ui.shell.AppHeaderSegments
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppPanel
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
 
 private enum class AdminSection(val title: String) { Overview("Сводка"), Users("Пользователи"), Images("Изображения"), GsmTemplate("Шаблон ГСМ"), Feedback("Обратная связь") }
 
@@ -288,7 +287,7 @@ fun AdminRoute(
 
 @Composable
 private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: AppWidthClass, model: AdminViewModel, modifier: Modifier) {
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
     val sections = buildList {
         if (session.user.can(AdminPermission.ViewOverview)) add(AdminSection.Overview)
         if (session.user.can(AdminPermission.ViewUsers)) add(AdminSection.Users)
@@ -296,6 +295,10 @@ private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: Ap
         if (session.user.can(AdminPermission.ViewGsmTemplate)) add(AdminSection.GsmTemplate)
         if (session.user.can(AdminPermission.ViewFeedback)) add(AdminSection.Feedback)
     }
+    val selectedSection = runCatching { AdminSection.valueOf(state.section) }.getOrNull().takeIf { it in sections }
+        ?: sections.firstOrNull()
+    if (sections.isNotEmpty()) AppHeaderSegments(sections.map { it.title }, sections.indexOf(selectedSection),
+        { model.section(sections[it].name) })
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.loading, onRefresh = model::refresh,
         enabled = !state.saving, contentAlignment = Alignment.TopCenter) {
         LazyColumn(
@@ -308,27 +311,15 @@ private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: Ap
                     Text("Управление", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 }
             }
-            if (sections.isNotEmpty()) item {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    sections.forEach { section ->
-                        if (state.section == section.name) Button(onClick = { model.section(section.name) }) { Text(section.title) }
-                        else OutlinedButton(onClick = { model.section(section.name) }) { Text(section.title) }
-                    }
-                }
-            }
             state.error?.let { item { AdminCard("Ошибка", it, error = true) } }
             state.notice?.let { item { AdminCard("Готово", it) } }
             if (sections.isEmpty()) item { AdminCard("Нет доступных разделов", "У аккаунта нет разрешений просмотра.") }
-            val selectedSection = runCatching { AdminSection.valueOf(state.section) }.getOrNull().takeIf { it in sections }
-                ?: sections.firstOrNull()
             when (selectedSection) {
                 AdminSection.Overview -> overviewItems(state, widthClass)
                 AdminSection.Users -> {
                     items(state.snapshot.users, key = AdminUser::id) { user ->
-                        Surface(
+                        AppPanel(
                             Modifier.fillMaxWidth().clickable { model.openUser(user) },
-                            shape = RoundedCornerShape(18.dp),
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = .97f),
                         ) {
                             Column(Modifier.padding(15.dp)) {
                                 Text(user.email, fontWeight = FontWeight.Bold)
@@ -340,7 +331,7 @@ private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: Ap
                 AdminSection.Images -> {
                     if (state.snapshot.images.isEmpty()) item { AdminCard("Изображений нет", "Доступных изображений пока нет.") }
                     items(state.snapshot.images, key = { "${it.kind}-${it.id}" }) { image ->
-                        Surface(Modifier.fillMaxWidth().clickable { model.openImage(image) }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f)) {
+                        AppPanel(Modifier.fillMaxWidth().clickable { model.openImage(image) }) {
                             Column(Modifier.padding(15.dp)) {
                                 Text(image.title, fontWeight = FontWeight.Bold)
                                 Text("${image.kind.title} · ${if (image.isMissing) "файл не загружен" else bytes(image.sizeBytes?.toLong() ?: 0)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -353,10 +344,8 @@ private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: Ap
                 null -> Unit
                 AdminSection.Feedback -> {
                     items(state.feedback.messages, key = FeedbackMessage::id) { report ->
-                        Surface(
+                        AppPanel(
                             Modifier.fillMaxWidth().clickable { model.openFeedback(report) },
-                            shape = RoundedCornerShape(18.dp),
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = .97f),
                         ) {
                             Column(Modifier.padding(15.dp)) {
                                 Text("${report.number} · ${report.status.title}", fontWeight = FontWeight.Bold)
@@ -399,24 +388,24 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
         text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Text("Роль: ${user.roleTitle()}. ${if (user.isBlocked) "Заблокирован" else "Активен"}.") }
             if (session.user.can(AdminPermission.ManageUserPermissions) && !user.isProtectedAdmin && user.id != session.user.id) {
-                item { OutlinedButton(onClick = model::toggleAdmin, modifier = Modifier.fillMaxWidth()) { Text(if (user.role == "admin") "Сделать пользователем" else "Сделать администратором") } }
+                item { AppOutlinedButton(onClick = model::toggleAdmin, modifier = Modifier.fillMaxWidth()) { Text(if (user.role == "admin") "Сделать пользователем" else "Сделать администратором") } }
                 if (user.role == "admin") item {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         AdminPermission.entries.forEach { permission ->
-                            OutlinedButton(onClick = { model.togglePermission(permission) }, modifier = Modifier.fillMaxWidth()) {
+                            AppOutlinedButton(onClick = { model.togglePermission(permission) }, modifier = Modifier.fillMaxWidth()) {
                                 Text("${if (permission.rawValue in user.adminPermissions) "✓ " else ""}${permission.title()}")
                             }
                         }
                     }
                 }
             }
-            if (session.user.can(AdminPermission.BlockUsers) && !user.isProtectedAdmin && user.id != session.user.id) item { OutlinedButton(onClick = model::toggleBlock, modifier = Modifier.fillMaxWidth()) { Text(if (user.isBlocked) "Разблокировать" else "Заблокировать на год") } }
+            if (session.user.can(AdminPermission.BlockUsers) && !user.isProtectedAdmin && user.id != session.user.id) item { AppOutlinedButton(onClick = model::toggleBlock, modifier = Modifier.fillMaxWidth()) { Text(if (user.isBlocked) "Разблокировать" else "Заблокировать на год") } }
             if (session.user.can(AdminPermission.DeleteUsers) && !user.isProtectedAdmin && user.id != session.user.id) item {
                 AppTextField(state.deleteConfirmation, model::deleteConfirmation, label = "Email для удаления", modifier = Modifier.fillMaxWidth())
             }
         } },
         confirmButton = {
-            if (session.user.can(AdminPermission.DeleteUsers) && !user.isProtectedAdmin && user.id != session.user.id) Button(onClick = model::deleteUser, enabled = !state.saving) { Text("Удалить") }
+            if (session.user.can(AdminPermission.DeleteUsers) && !user.isProtectedAdmin && user.id != session.user.id) AppButton(onClick = model::deleteUser, enabled = !state.saving) { Text("Удалить") }
         },
         dismissButton = { TextButton(onClick = model::closeUser) { Text("Закрыть") } },
     )
@@ -431,12 +420,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
             if (session.user.can(AdminPermission.ManageFeedback)) {
                 item { AppTextField(state.adminNote, model::adminNote, label = "Внутренняя заметка", minLines = 2, modifier = Modifier.fillMaxWidth()) }
                 item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FeedbackStatus.entries.filterNot { it == FeedbackStatus.Draft }.forEach { status -> OutlinedButton(onClick = { model.updateFeedback(status, report.priority) }) { Text(status.title) } }
+                    FeedbackStatus.entries.filterNot { it == FeedbackStatus.Draft }.forEach { status -> AppOutlinedButton(onClick = { model.updateFeedback(status, report.priority) }) { Text(status.title) } }
                 } }
                 item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FeedbackPriority.entries.forEach { priority -> OutlinedButton(onClick = { model.updateFeedback(report.status, priority) }) { Text(priority.title) } }
+                    FeedbackPriority.entries.forEach { priority -> AppOutlinedButton(onClick = { model.updateFeedback(report.status, priority) }) { Text(priority.title) } }
                 } }
-                item { OutlinedButton(onClick = model::retryEmail, modifier = Modifier.fillMaxWidth()) { Text("Повторить отправку письма") } }
+                item { AppOutlinedButton(onClick = model::retryEmail, modifier = Modifier.fillMaxWidth()) { Text("Повторить отправку письма") } }
             }
         } },
         confirmButton = {},
@@ -460,8 +449,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
             image.sizeBytes?.let { item { Text("Размер: ${bytes(it.toLong())}") } }
             if (image.width != null && image.height != null) item { Text("Разрешение: ${image.width} × ${image.height}") }
             if (image.bindings.isNotEmpty()) item { Column { Text("Связанные переменные", fontWeight = FontWeight.Bold); image.bindings.forEach { Text("${it.name}: ${it.value}") } } }
-            if (canUpload) item { OutlinedButton(onClick = { picker.launch("image/*") }, enabled = !state.saving, modifier = Modifier.fillMaxWidth()) { Text(if (image.isMissing) "Загрузить изображение" else "Заменить изображение") } }
-            if (canDelete) item { OutlinedButton(onClick = model::deleteImage, enabled = !state.saving, modifier = Modifier.fillMaxWidth()) { Text("Удалить изображение") } }
+            if (canUpload) item { AppOutlinedButton(onClick = { picker.launch("image/*") }, enabled = !state.saving, modifier = Modifier.fillMaxWidth()) { Text(if (image.isMissing) "Загрузить изображение" else "Заменить изображение") } }
+            if (canDelete) item { AppOutlinedButton(onClick = model::deleteImage, enabled = !state.saving, modifier = Modifier.fillMaxWidth()) { Text("Удалить изображение") } }
         } },
         confirmButton = {},
         dismissButton = { TextButton(onClick = model::closeImage) { Text("Закрыть") } },
@@ -473,7 +462,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { readAdminUri(context, it, 20 * 1024 * 1024)?.let { file -> if (file.first.endsWith(".xltx", true)) model.replaceGsm(file.first, file.second) } }
     }
-    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f)) {
+    AppPanel {
         Column(Modifier.fillMaxWidth().padding(17.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text("Шаблон ГСМ-отчёта", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             if (template == null) Text("Шаблон недоступен", color = MaterialTheme.colorScheme.onSurfaceVariant) else {
@@ -481,8 +470,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
                 Text("XLTX · ${bytes(template.sizeBytes)} · обновлён ${template.updatedAt}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("SHA-256: ${template.sha256.take(12)}…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { model.downloadGsm(context) }, enabled = !saving) { Text("Скачать") }
-                    if (session.user.can(AdminPermission.ReplaceGsmTemplate)) Button(onClick = { picker.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.template", "application/octet-stream")) }, enabled = !saving) { Text("Заменить") }
+                    AppOutlinedButton(onClick = { model.downloadGsm(context) }, enabled = !saving) { Text("Скачать") }
+                    if (session.user.can(AdminPermission.ReplaceGsmTemplate)) AppButton(onClick = { picker.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.template", "application/octet-stream")) }, enabled = !saving) { Text("Заменить") }
                 }
             }
         }
@@ -490,11 +479,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
 }
 
 @Composable private fun AdminCard(title: String, value: String, error: Boolean = false) {
-    Surface(shape = RoundedCornerShape(18.dp), color = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface.copy(alpha = .97f)) {
+    AppPanel(color = if (error) MaterialTheme.colorScheme.errorContainer else AppSurfaces.card) {
         Column(Modifier.fillMaxWidth().padding(15.dp)) { Text(title, fontWeight = FontWeight.Bold); Text(value, color = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
-@Composable private fun AdminMetric(title: String, value: Double) { Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .97f)) { Column(Modifier.fillMaxWidth().padding(15.dp)) { Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant); Text("%.1f%%".format(value), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } } }
+@Composable private fun AdminMetric(title: String, value: Double) { AppPanel { Column(Modifier.fillMaxWidth().padding(15.dp)) { Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant); Text("%.1f%%".format(value), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) } } }
 private fun bytes(value: Long): String = when { value >= 1_073_741_824 -> "%.1f ГБ".format(value / 1_073_741_824.0); value >= 1_048_576 -> "%.1f МБ".format(value / 1_048_576.0); else -> "${value / 1024} КБ" }
 private fun AdminUser.roleTitle() = if (role == "admin") "Администратор" else "Пользователь"
 private fun AdminPermission.title() = when (this) {

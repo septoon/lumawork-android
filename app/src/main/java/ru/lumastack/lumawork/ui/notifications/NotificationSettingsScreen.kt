@@ -27,7 +27,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,6 +52,10 @@ import kotlinx.coroutines.launch
 import ru.lumastack.lumawork.data.notifications.NotificationPreference
 import ru.lumastack.lumawork.data.notifications.RequestNotificationsRuntime
 import ru.lumastack.lumawork.domain.model.AppSession
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.appTopBarColors
+import androidx.compose.foundation.background
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,10 +90,10 @@ fun NotificationSettingsScreen(session: AppSession, offline: Boolean, onBack: ()
             permission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
-    Scaffold(
+    Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            TopAppBar(title = { Text("Уведомления") }, navigationIcon = {
+            TopAppBar(colors = appTopBarColors(), title = { Text("Уведомления") }, navigationIcon = {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад") }
             }, windowInsets = WindowInsets(0, 0, 0, 0))
         },
@@ -105,7 +108,7 @@ fun NotificationSettingsScreen(session: AppSession, offline: Boolean, onBack: ()
             item {
                 Column(Modifier.widthIn(max = 680.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("На устройстве", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 8.dp))
-                    Surface(shape = MaterialTheme.shapes.large) {
+                    AppPanel(shape = MaterialTheme.shapes.large) {
                         Column {
                             NotificationToggle("Новая активная заявка", state.preferences.localNewRequests, state.ready) { change(NotificationPreference.LocalNewRequests, it) }
                             NotificationToggle("Изменение исполнителя", state.preferences.localAssigneeChanges, state.ready) { change(NotificationPreference.LocalAssigneeChanges, it) }
@@ -121,7 +124,7 @@ fun NotificationSettingsScreen(session: AppSession, offline: Boolean, onBack: ()
             item {
                 Column(Modifier.widthIn(max = 680.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("По электронной почте", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(horizontal = 8.dp))
-                    Surface(shape = MaterialTheme.shapes.large) {
+                    AppPanel(shape = MaterialTheme.shapes.large) {
                         Column {
                             ListItem(headlineContent = { Text("Получатель") }, supportingContent = { Text(session.user.email) })
                             NotificationToggle("Новая активная заявка", state.preferences.emailNewRequests, state.ready && !offline) { change(NotificationPreference.EmailNewRequests, it) }

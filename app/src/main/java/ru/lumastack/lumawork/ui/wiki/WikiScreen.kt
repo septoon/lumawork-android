@@ -1,12 +1,11 @@
 package ru.lumastack.lumawork.ui.wiki
 
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import androidx.activity.compose.BackHandler
+import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -30,16 +29,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,6 +55,12 @@ import ru.lumastack.lumawork.domain.wiki.WikiBlock
 import ru.lumastack.lumawork.domain.wiki.WikiSearchResult
 import ru.lumastack.lumawork.domain.wiki.cleanWikiText
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppPanel
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
 
 @Composable
 fun WikiRoute(
@@ -102,7 +102,7 @@ private fun WikiScreen(
     pdfUrl: () -> String?,
     modifier: Modifier = Modifier,
 ) {
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
     val searchState = rememberLazyListState()
     val articleState = rememberLazyListState()
     var displayedArticleId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -119,7 +119,7 @@ private fun WikiScreen(
                 WikiSearchPanel(state, onQueryChange, onRefresh, onOpen,
                     Modifier.widthIn(max = 680.dp).fillMaxSize(), listState = searchState)
             } else {
-                WikiArticlePanel(state, onCloseArticle, pdfUrl,
+                WikiArticlePanel(state, pdfUrl,
                     Modifier.widthIn(max = 760.dp).fillMaxSize(), listState = articleState)
             }
         } else {
@@ -132,16 +132,13 @@ private fun WikiScreen(
                     Modifier.weight(0.42f).fillMaxHeight().widthIn(max = 470.dp),
                     listState = searchState,
                 )
-                Surface(
+                AppPanel(
                     Modifier.weight(0.58f).fillMaxHeight(),
-                    shape = RoundedCornerShape(26.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-                    tonalElevation = 2.dp,
                 ) {
                     if (state.selectedResult == null) {
                         WikiEmpty("Выберите статью", "Содержание откроется здесь, а результаты поиска останутся слева.")
                     } else {
-                        WikiArticlePanel(state, onCloseArticle = null, pdfUrl = pdfUrl,
+                        WikiArticlePanel(state, pdfUrl = pdfUrl,
                             listState = articleState)
                     }
                 }
@@ -207,9 +204,7 @@ private fun WikiSearchPanel(
 
 @Composable
 private fun WikiQuickSearch(query: String, onQueryChange: (String) -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f)),
-        shape = RoundedCornerShape(20.dp),
+    AppCard(
     ) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("База знаний", fontWeight = FontWeight.Bold)
@@ -220,8 +215,8 @@ private fun WikiQuickSearch(query: String, onQueryChange: (String) -> Unit) {
             )
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 QUICK_QUERIES.forEach { value ->
-                    if (query.trim() == value) Button(onClick = { onQueryChange(value) }) { Text(value) }
-                    else OutlinedButton(onClick = { onQueryChange(value) }) { Text(value) }
+                    if (query.trim() == value) AppButton(onClick = { onQueryChange(value) }) { Text(value) }
+                    else AppOutlinedButton(onClick = { onQueryChange(value) }) { Text(value) }
                 }
             }
         }
@@ -230,12 +225,10 @@ private fun WikiQuickSearch(query: String, onQueryChange: (String) -> Unit) {
 
 @Composable
 private fun WikiResultCard(result: WikiSearchResult, selected: Boolean, onClick: () -> Unit) {
-    Surface(
+    AppPanel(
         Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
         color = if (selected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-        tonalElevation = 1.dp,
+        else AppSurfaces.card,
     ) {
         Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text(result.title, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -254,7 +247,6 @@ private fun WikiResultCard(result: WikiSearchResult, selected: Boolean, onClick:
 @Composable
 private fun WikiArticlePanel(
     state: WikiUiState,
-    onCloseArticle: (() -> Unit)?,
     pdfUrl: () -> String?,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
@@ -269,7 +261,6 @@ private fun WikiArticlePanel(
     ) {
         item(key = "article-header") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (onCloseArticle != null) TextButton(onClick = onCloseArticle) { Text("Назад") }
                 Column(Modifier.weight(1f)) {
                     Text(state.document?.title ?: result.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(state.document?.section ?: result.section, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -290,16 +281,16 @@ private fun WikiArticlePanel(
         state.article?.let { article ->
             item(key = "actions") {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
+                    AppOutlinedButton(
                         onClick = { openUrl(context, state.document?.sourceUrl ?: article.sourceUrl) },
                         modifier = Modifier.weight(1f),
                     ) { Text("Источник") }
-                    OutlinedButton(
+                    AppOutlinedButton(
                         onClick = { copyText(context, article.content) },
                         modifier = Modifier.weight(1f),
                     ) { Text("Копировать") }
                     if (state.isPdfAvailable) {
-                        OutlinedButton(
+                        AppOutlinedButton(
                             onClick = { pdfUrl()?.let { openUrl(context, it) } },
                             modifier = Modifier.weight(1f),
                         ) { Text("PDF") }

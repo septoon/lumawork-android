@@ -223,6 +223,9 @@ private fun item(id: String) = BackpackItem(id, "Pax D200", "SN", "Инжене�
 private fun testPhotos() = BackpackPhotoRepository("https://photo.test", object : BackpackPhotoCatalogCache {
     override suspend fun read() = BackpackPhotoCatalog()
     override suspend fun save(catalog: BackpackPhotoCatalog) = Unit
+}, equipmentCache = object : BackpackPhotoCatalogCache {
+    override suspend fun read() = BackpackPhotoCatalog()
+    override suspend fun save(catalog: BackpackPhotoCatalog) = Unit
 }, client = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
     okhttp3.Response.Builder().request(chain.request()).protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("OK")
         .body("{\"items\":[]}".toResponseBody()).build()

@@ -4,7 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
-import androidx.activity.compose.BackHandler
+import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -44,7 +44,8 @@ import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.requests.*
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
+import ru.lumastack.lumawork.ui.shell.AppHeaderSegments
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @Composable
 fun CoordinationRoute(ownerUserId: String, startOffline: Boolean, simpleOneState: SimpleOneUiState,
@@ -95,6 +96,14 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
         (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Координация", text))
         if (Build.VERSION.SDK_INT < 33) scope.launch { snackbar.showSnackbar("Скопировано") }
     }
+    if (state.selectedRequest == null && state.selectedEngineerId == null && !state.isArchiveOpen) {
+        AppHeaderSegments(CoordinationSection.entries.map { it.title }, state.section.ordinal,
+            { model.selectSection(CoordinationSection.entries[it]) }, actions = {
+                IconButton(onClick = model::openArchive, enabled = state.isAuthorized && archive != null) {
+                    Icon(painterResource(R.drawable.ic_nav_assignment), "Закрытые заявки группы")
+                }
+            })
+    }
     BackHandler(state.selectedRequest != null || state.selectedEngineerId != null || state.isArchiveOpen, model::back)
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         val selected = state.selectedRequest
@@ -107,16 +116,12 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
             SimpleOneRequestDetailContent(selected, width, state.isDetailLoading, state.detailErrorMessage, model::back)
         } else if (state.isArchiveOpen) {
             holder.SaveableStateProvider("closed-group-${state.simpleOneUserId}") {
-                CoordinationGroupClosedContent("$owner-${state.simpleOneUserId}", archiveState, state.isAuthorized, offline, model::back,
+                CoordinationGroupClosedContent("$owner-${state.simpleOneUserId}", archiveState, state.isAuthorized, offline,
                     onRefresh = { scope.launch { archive?.refresh(forceFull = true) } }, onOpen = { model.openRequest(it) }, copy = copy)
             }
         } else {
             Column(Modifier.widthIn(max = 1100.dp).fillMaxSize()) {
-                if (state.selectedEngineerId == null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    AppSegmentedControl(CoordinationSection.entries.map { it.title }, state.section.ordinal, { model.selectSection(CoordinationSection.entries[it]) }, Modifier.weight(1f))
-                    IconButton(onClick = model::openArchive, enabled = state.isAuthorized && archive != null) { Icon(painterResource(R.drawable.ic_nav_assignment), "Закрытые заявки группы") }
-                } else Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = model::back) { Text("Назад") }
+                if (state.selectedEngineerId != null) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     val engineer = coordinationEngineers(state.currentGroup?.requests.orEmpty()).firstOrNull { it.id == state.selectedEngineerId }
                     Text(engineer?.name ?: "Заявки", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 2)
                     IconButton(onClick = model::refresh, enabled = state.isAuthorized && !offline && !state.isLoading) { Icon(Icons.Default.Refresh, "Обновить заявки инженера") }
@@ -173,7 +178,7 @@ private fun CoordinationActiveContent(state: CoordinationUiState, userName: Stri
             }) }
             !detail && !returning -> {
                 item("engineers-title", span = { GridItemSpan(maxLineSpan) }) { Column { Text("Распределение", style = MaterialTheme.typography.titleMedium); Text("По инженерам и без назначения", style = MaterialTheme.typography.bodySmall) } }
-                items(engineers, key = { it.id }) { engineer -> Card(onClick = { onEngineer(engineer.id) }) {
+                items(engineers, key = { it.id }) { engineer -> AppCard(onClick = { onEngineer(engineer.id) }) {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         if (engineer.isUnassigned) Icon(painterResource(R.drawable.ic_nav_groups), null, tint = MaterialTheme.colorScheme.primary)
                         else Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.primary)
@@ -194,7 +199,7 @@ private fun CoordinationActiveContent(state: CoordinationUiState, userName: Stri
 @Composable
 private fun CoordinationSummary(state: CoordinationUiState, userName: String, engineers: List<CoordinationEngineer>, detail: Boolean, onRegion: (CoordinationRegion) -> Unit) {
     var menu by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    AppCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 if (state.section == CoordinationSection.Distribution) {
@@ -220,7 +225,7 @@ private fun CoordinationSummary(state: CoordinationUiState, userName: String, en
 @Composable
 private fun CoordinationRequestCard(request: SimpleOneRequest, loading: Boolean, returning: Boolean, open: () -> Unit, copy: (String) -> Unit) {
     val data = remember(request, loading, returning) { CoordinationRequestPresentation(request, loading, usesMulticardStatus = !returning) }
-    Card(onClick = open, modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    AppCard(onClick = open, modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SelectionContainer(Modifier.weight(1f)) { Text(data.primaryNumber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium) }
             data.secondaryNumber?.let { Text("| $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -255,7 +260,7 @@ private fun CoordinationCopyField(title: String, display: String, value: String,
 }
 @Composable
 internal fun CoordinationMessage(title: String, message: String, modifier: Modifier = Modifier) {
-    Card(modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    AppCard(modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium); Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } }
 }

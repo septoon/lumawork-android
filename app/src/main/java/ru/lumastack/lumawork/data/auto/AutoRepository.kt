@@ -48,6 +48,14 @@ class AutoRepository(
         if (previous.vehicles.any { it.id == vehicleId }) previous.copy(selectedVehicleId = vehicleId) else previous
     }
 
+    /** Publish settings already confirmed by PUT /gsm/profile to the existing Auto screen. */
+    suspend fun applyGsmSettings(ownerUserId: String, vehicleId: String, settings: VehicleGsmSettings): AutoSnapshot =
+        update(ownerUserId, mutation = true) { previous ->
+            if (previous.vehicles.none { it.id == vehicleId }) previous
+            else previous.copy(vehicles = previous.vehicles.map { if (it.id == vehicleId) it.copy(gsmSettings = settings) else it },
+                selectedVehicleId = vehicleId)
+        }
+
     suspend fun createVehicle(session: AppSession, draft: VehicleDraft): AutoSnapshot {
         beginMutation(session.user.id)
         val created = api.createVehicle(session.token, draft)

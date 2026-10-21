@@ -11,7 +11,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -34,6 +33,10 @@ import ru.lumastack.lumawork.ui.theme.AppTextField
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import ru.lumastack.lumawork.ui.shell.AppHeaderSegments
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import androidx.compose.foundation.background
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 private enum class ToolsSection(val title: String) { Device("Устройство"), Firmware("Прошивки"), Logs("Логи"), History("История") }
 private enum class FileFilter(val title: String) { All("Все файлы"), Update("update.zip"), Previous("Выбран ранее") }
@@ -92,11 +95,9 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
     // Entering this route again (including return from FTP) starts the lifecycle block above and revalidates the selection.
     LaunchedEffect(section) { if (section == ToolsSection.Firmware) model.refresh() }
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it); model.notice(null) } }
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    AppHeaderSegments(ToolsSection.entries.map { it.title }, section.ordinal, { section = ToolsSection.entries[it] })
+    Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.padding(padding).widthIn(max = if (widthClass == AppWidthClass.Expanded) 1180.dp else 720.dp).fillMaxSize()) {
-            SecondaryScrollableTabRow(selectedTabIndex = section.ordinal, edgePadding = 8.dp) {
-                ToolsSection.entries.forEach { item -> Tab(selected = item == section, onClick = { section = item }, text = { Text(item.title) }) }
-            }
             AppRefreshContainer(Modifier.fillMaxSize(), isRefreshing = state.loading, onRefresh = { model.usb.scan(); model.refresh() }) {
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item { Text("Операция: ${state.snapshot.operation.phase.title}", style = MaterialTheme.typography.labelLarge) }
@@ -163,7 +164,7 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
                             if (visible.isEmpty() && state.files.isNotEmpty()) item { Text("По заданным условиям файлы не найдены.") }
                             items(visible, key = { it.id }) { file ->
                                 val selected = state.snapshot.selection?.takeIf { it.file.id == file.id }
-                                Card(onClick = { model.inspect(file) }, enabled = !file.downloading && !state.checking && !state.loading, modifier = Modifier.fillMaxWidth()) {
+                                AppCard(onClick = { model.inspect(file) }, enabled = !file.downloading && !state.checking && !state.loading, modifier = Modifier.fillMaxWidth()) {
                                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                         Text(file.name, style = MaterialTheme.typography.titleMedium)
                                         if (selected != null) Text("Выбран ранее · ${toolDate(selected.selectedAt)}", color = MaterialTheme.colorScheme.primary)
@@ -241,7 +242,7 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
 }
 
 @Composable private fun ToolCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    AppCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium); content()
     } }
 }

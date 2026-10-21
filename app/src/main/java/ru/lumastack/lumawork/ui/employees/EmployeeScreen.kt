@@ -1,8 +1,7 @@
 package ru.lumastack.lumawork.ui.employees
 
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-
-import androidx.activity.compose.BackHandler
+import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,13 +25,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -46,7 +42,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -62,6 +57,11 @@ import ru.lumastack.lumawork.domain.employees.EmployeeAddress
 import ru.lumastack.lumawork.domain.employees.employeeCountWord
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.AppPanel
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
 
 @Composable
 fun EmployeeRoute(
@@ -120,7 +120,7 @@ private fun EmployeeScreen(
     canRefresh: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
     val directoryState = rememberLazyListState()
     val detailState = rememberLazyListState()
     var displayedEmployeeId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -147,7 +147,6 @@ private fun EmployeeScreen(
                     employee = state.selectedEmployee,
                     isLoading = state.isDetailLoading,
                     errorMessage = state.detailErrorMessage,
-                    onBack = onCloseEmployee,
                     onRefresh = onRefreshEmployee, canRefresh = canRefresh && state.isAuthorized, onActionError = onActionError,
                     modifier = Modifier.fillMaxSize(),
                     listState = detailState,
@@ -168,11 +167,8 @@ private fun EmployeeScreen(
                 modifier = Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                Surface(
+                AppPanel(
                     modifier = Modifier.weight(0.44f).fillMaxHeight().widthIn(max = 500.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-                    shape = RoundedCornerShape(26.dp),
-                    tonalElevation = 2.dp,
                 ) {
                     EmployeeDirectoryContent(
                         state = state,
@@ -185,18 +181,14 @@ private fun EmployeeScreen(
                         listState = directoryState,
                     )
                 }
-                Surface(
+                AppPanel(
                     modifier = Modifier.weight(0.56f).fillMaxHeight(),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-                    shape = RoundedCornerShape(26.dp),
-                    tonalElevation = 2.dp,
                 ) {
                     state.selectedEmployee?.let { employee ->
                         EmployeeDetail(
                             employee = employee,
                             isLoading = state.isDetailLoading,
                             errorMessage = state.detailErrorMessage,
-                            onBack = null,
                             onRefresh = onRefreshEmployee, canRefresh = canRefresh && state.isAuthorized, onActionError = onActionError,
                             modifier = Modifier.fillMaxSize(),
                             listState = detailState,
@@ -313,15 +305,12 @@ private fun EmployeeHero(
     onOpenAddressPicker: () -> Unit,
 ) {
     val address = state.snapshot.selectedAddress
-    Card(
+    AppCard(
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-        shape = RoundedCornerShape(24.dp),
     ) {
         Column(
             Modifier.background(
-                Brush.linearGradient(
-                    listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary),
-                ),
+                AppSurfaces.hero,
             ).padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -375,7 +364,7 @@ private fun EmployeeHero(
                         }
                     }
                 }
-                Button(
+                AppButton(
                     onClick = onOpenAddressPicker,
                     modifier = Modifier.weight(1f),
                 ) { Text("Сменить населённый пункт", maxLines = 2) }
@@ -402,13 +391,11 @@ private fun EmployeeLetterHeader(letter: String, count: Int) {
 
 @Composable
 private fun EmployeeRow(employee: Employee, isCurrentUser: Boolean, isSelected: Boolean, onClick: () -> Unit) {
-    Surface(
+    AppPanel(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            else AppSurfaces.card,
         border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
-        shape = RoundedCornerShape(18.dp),
-        tonalElevation = 1.dp,
     ) {
         Row(
             Modifier.fillMaxWidth().padding(12.dp),
@@ -553,10 +540,9 @@ private fun AddressRow(
     onSelect: () -> Unit,
     onRemove: (() -> Unit)?,
 ) {
-    Surface(
+    AppPanel(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onSelect),
         color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        shape = RoundedCornerShape(16.dp),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),

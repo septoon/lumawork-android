@@ -3,11 +3,19 @@ package ru.lumastack.lumawork.ui.timereport
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -30,6 +38,7 @@ import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.requests.RequestsActions
 import ru.lumastack.lumawork.ui.requests.RequestsBrowser
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
+import ru.lumastack.lumawork.ui.shell.AppHeaderActions
 import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import ru.lumastack.lumawork.ui.theme.AppTextField
@@ -150,15 +159,22 @@ fun TimeReportRoute(
             }
         } else TimeReportScreen(state, widthClass, ::refresh, model::openMonth, model::closeMonth,
             model::deleteAll, model::deleteRange,
-            toolbar = { deleteRange, deleteAll ->
-                var monthsOpen by remember { mutableStateOf(false) }
+            toolbar = {
+                if (!state.isAuthorized && !startOffline) ru.lumastack.lumawork.ui.requests.SimpleOneConnectionCard(
+                    simpleOneState.copy(isLoading = simpleOneState.isLoading || simpleOneState.isResolvingUser),
+                    requestsActions.copy(onSignIn = { loginSubmitted = true; requestsActions.onSignInIdentityOnly() }),
+                )
+            }, headerActions = { deleteRange, deleteAll ->
                 var menuOpen by remember { mutableStateOf(false) }
+                var monthsOpen by remember { mutableStateOf(false) }
                 val busy = state.isLoading || state.isDeleting || fileBusy
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f)) {
-                        TextButton(onClick = { monthsOpen = true }) {
-                            Text(state.filterMonthId?.let(::timeReportMonthTitle) ?: "Весь период ▾")
+                AppHeaderActions(title = {
+                    Box(Modifier.widthIn(max = 280.dp)) {
+                        TextButton(onClick = { monthsOpen = true }, modifier = Modifier.semantics { contentDescription = "Период трудозатрат" }) {
+                            Text(state.filterMonthId?.let(::timeReportMonthTitle) ?: "Весь период",
+                                modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Icon(Icons.Default.KeyboardArrowDown, null, Modifier.padding(start = 4.dp).size(18.dp))
                         }
                         DropdownMenu(expanded = monthsOpen, onDismissRequest = { monthsOpen = false }) {
                             DropdownMenuItem(text = { Text("Весь период") }, onClick = { model.filterMonth(null); monthsOpen = false })
@@ -166,8 +182,9 @@ fun TimeReportRoute(
                                 onClick = { model.filterMonth(group.monthId); monthsOpen = false }) }
                         }
                     }
+                }) {
                     Box {
-                        TextButton(onClick = { menuOpen = true }, enabled = !busy) { Text("Меню") }
+                        IconButton(onClick = { menuOpen = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, "Меню трудозатрат", Modifier.rotate(90f)) }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(text = { Text("Создать") }, onClick = { menuOpen = false; openBrowser() }, enabled = !startOffline)
                             DropdownMenuItem(text = { Text("Обновить из SimpleOne") }, onClick = { menuOpen = false; refresh() }, enabled = !startOffline)
@@ -181,11 +198,6 @@ fun TimeReportRoute(
                                 enabled = state.snapshot?.entries?.isNotEmpty() == true, onClick = { menuOpen = false; deleteAll() })
                         }
                     }
-                }
-                if (!state.isAuthorized && !startOffline) ru.lumastack.lumawork.ui.requests.SimpleOneConnectionCard(
-                    simpleOneState.copy(isLoading = simpleOneState.isLoading || simpleOneState.isResolvingUser),
-                    requestsActions.copy(onSignIn = { loginSubmitted = true; requestsActions.onSignInIdentityOnly() }),
-                )
                 }
             }, onOpenEntry = ::openBrowser)
         SnackbarHost(snackbars, Modifier.align(Alignment.BottomCenter))

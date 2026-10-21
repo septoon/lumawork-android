@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -28,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.lumastack.lumawork.data.auto.VehicleImageRepository
 import ru.lumastack.lumawork.domain.model.AppUser
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @Composable
 internal fun ProfileOverview(
@@ -54,7 +54,7 @@ internal fun ProfileOverview(
     ).populated()
     LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item(key = "identity") {
-            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+            AppPanel {
                 Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     ProfileAvatar(user, images, 68.dp)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -66,7 +66,7 @@ internal fun ProfileOverview(
             }
         }
         item(key = "statistics") {
-            Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+            AppPanel {
                 ProfileCompletedWorkSection(completedRecords, statisticsLoading, hasArchive, Modifier.padding(12.dp))
             }
         }
@@ -94,7 +94,7 @@ private fun ProfileInfoSection(title: String, values: List<Pair<String, String>>
     val haptic = LocalHapticFeedback.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+        AppPanel {
             Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (values.isEmpty()) Text(emptyText, Modifier.padding(6.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 values.forEach { (label, value) ->
@@ -123,7 +123,7 @@ private fun String?.withUnit(unit: String): String? = this?.trim()?.takeIf(Strin
 
 @Composable
 internal fun ProfileDocumentsLink(count: Int, canManage: Boolean, onClick: () -> Unit) {
-    Surface(onClick = onClick, shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+    AppPanel(onClick = onClick) {
         Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(if (canManage) "Управление документами" else "Открыть документы", fontWeight = FontWeight.SemiBold)

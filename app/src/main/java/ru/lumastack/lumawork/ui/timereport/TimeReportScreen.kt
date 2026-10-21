@@ -1,7 +1,6 @@
 package ru.lumastack.lumawork.ui.timereport
 
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,11 +19,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,6 +42,8 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.timereport.TimeReportMonthGroup
 import ru.lumastack.lumawork.domain.timereport.TimeReportSnapshot
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @Composable
 internal fun TimeReportScreen(
@@ -56,7 +54,8 @@ internal fun TimeReportScreen(
     onBack: () -> Unit,
     onDeleteAll: () -> Unit,
     onDeleteRange: (LocalDate, LocalDate) -> Unit,
-    toolbar: @Composable (() -> Unit, () -> Unit) -> Unit,
+    toolbar: @Composable () -> Unit,
+    headerActions: @Composable (() -> Unit, () -> Unit) -> Unit,
     onOpenEntry: (TimeReportEntry) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -67,7 +66,9 @@ internal fun TimeReportScreen(
     var deleteAllPresented by remember { mutableStateOf(false) }
     var deleteRangePresented by remember { mutableStateOf(false) }
     var cleanupPeriod by remember { mutableStateOf<ru.lumastack.lumawork.domain.requests.ClosedRequestsPeriod?>(null) }
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
+
+    if (selectedMonth == null) headerActions({ deleteRangePresented = true }, { deleteAllPresented = true })
 
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
         enabled = state.isAuthorized && !state.isDeleting && !state.isLoading, contentAlignment = Alignment.TopCenter) {
@@ -76,15 +77,15 @@ internal fun TimeReportScreen(
                 state = state,
                 widthClass = widthClass,
                 monthGroups = visibleGroups,
-                toolbar = { toolbar({ deleteRangePresented = true }, { deleteAllPresented = true }) },
+                toolbar = toolbar,
                 onOpenMonth = onOpenMonth,
             )
         } else {
-            TimeReportMonthDetails(selectedMonth, widthClass, onBack, onOpenEntry)
+            TimeReportMonthDetails(selectedMonth, widthClass, onOpenEntry)
         }
     }
 
-    androidx.activity.compose.BackHandler(enabled = selectedMonth != null, onBack = onBack)
+    ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler(enabled = selectedMonth != null, onBack = onBack)
 
     if (deleteAllPresented) {
         AlertDialog(
@@ -186,9 +187,7 @@ private fun TimeReportSummary(
     travelMinutes: Int,
     entryCount: Int,
 ) {
-    Card(
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(22.dp),
+    AppCard(
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Row(
@@ -245,10 +244,8 @@ private fun SummaryMetric(title: String, value: String, modifier: Modifier = Mod
 
 @Composable
 private fun MonthCard(month: TimeReportMonthGroup, onClick: () -> Unit) {
-    Card(
+    AppCard(
         onClick = onClick,
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(20.dp),
     ) {
         Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(monthTitle(month.monthId), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
@@ -257,6 +254,8 @@ private fun MonthCard(month: TimeReportMonthGroup, onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
+            Text("Всего ${formatMinutes(month.workMinutes + month.travelMinutes)}",
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("Работа ${formatMinutes(month.workMinutes)}", color = MaterialTheme.colorScheme.primary)
                 Text("Дорога ${formatMinutes(month.travelMinutes)}", color = MaterialTheme.colorScheme.secondary)
@@ -269,7 +268,6 @@ private fun MonthCard(month: TimeReportMonthGroup, onClick: () -> Unit) {
 private fun TimeReportMonthDetails(
     month: TimeReportMonthGroup,
     widthClass: AppWidthClass,
-    onBack: () -> Unit,
     onOpenEntry: (TimeReportEntry) -> Unit,
 ) {
     var expandedDay by androidx.compose.runtime.saveable.rememberSaveable(month.monthId) { mutableStateOf<String?>(null) }
@@ -288,7 +286,6 @@ private fun TimeReportMonthDetails(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    OutlinedButton(onClick = onBack) { Text("Назад") }
                     Text(monthTitle(month.monthId), style = MaterialTheme.typography.headlineSmall)
                     Text(
                         "${month.days.size} дней · ${month.entryCount} строк · ${formatMinutes(month.workMinutes + month.travelMinutes)}",
@@ -311,10 +308,8 @@ private fun TimeReportMonthDetails(
 
 @Composable
 private fun DayCard(day: TimeReportDaySummary, expanded: Boolean, onToggle: () -> Unit) {
-    Card(
+    AppCard(
         onClick = onToggle,
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(20.dp),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -362,9 +357,7 @@ private fun TimeReportEntryRow(entry: TimeReportEntry, onClick: () -> Unit) {
 
 @Composable
 private fun MessageCard(title: String, message: String) {
-    Card(
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(20.dp),
+    AppCard(
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)

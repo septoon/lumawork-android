@@ -32,6 +32,8 @@ import java.util.Locale
 import ru.lumastack.lumawork.data.workschedule.WorkScheduleRepository
 import ru.lumastack.lumawork.domain.workschedule.*
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
 
 @Composable
 fun WorkScheduleRoute(
@@ -74,7 +76,7 @@ internal fun WorkScheduleScreen(
         val offset = WorkScheduleViewport.initialVisibleDay(journal, today) - 1
         horizontal.scrollTo(with(density) { (dayWidth * offset).roundToPx() })
     }
-    BoxWithConstraints(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.TopCenter) {
+    BoxWithConstraints(modifier.fillMaxSize().background(appScreenBackground()), contentAlignment = Alignment.TopCenter) {
         val employeeWidth = if (maxWidth < 400.dp) 132.dp else 180.dp
         val rowHeight = 76.dp * density.fontScale.coerceAtLeast(1f)
         AppRefreshContainer(
@@ -191,7 +193,7 @@ internal fun WorkScheduleScreen(
 private fun CityMenu(state: WorkScheduleUiState, onCity: (String) -> Unit, modifier: Modifier) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
-        OutlinedButton(onClick = { expanded = true }, enabled = state.snapshot.journals.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+        AppOutlinedButton(onClick = { expanded = true }, enabled = state.snapshot.journals.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
             Text(state.selection.cityName.ifBlank { "Город" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DropdownMenu(expanded, { expanded = false }) {
@@ -206,7 +208,7 @@ private fun CityMenu(state: WorkScheduleUiState, onCity: (String) -> Unit, modif
 private fun PeriodMenu(state: WorkScheduleUiState, onPeriod: (Int, Int) -> Unit, modifier: Modifier) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
-        OutlinedButton(onClick = { expanded = true }, enabled = state.snapshot.journals.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+        AppOutlinedButton(onClick = { expanded = true }, enabled = state.snapshot.journals.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
             Text("${monthName(state.selection.month)} ${state.selection.year.takeIf { it > 0 } ?: ""}", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DropdownMenu(expanded, { expanded = false }) {

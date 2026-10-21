@@ -13,6 +13,7 @@ import ru.lumastack.lumawork.domain.backpack.*
 data class BackpackUiState(
     val simpleOneUserId: String = "", val isAuthorized: Boolean = false,
     val snapshot: BackpackSnapshot? = null, val photoCatalog: BackpackPhotoCatalog = BackpackPhotoCatalog(),
+    val officePhotoCatalog: BackpackPhotoCatalog = BackpackPhotoCatalog(),
     val query: String = "", val selectedGroupId: String? = null, val locationFilter: BackpackLocation? = null,
     val isLoading: Boolean = false, val loadingDetailIds: Set<String> = emptySet(), val isLoadingReturns: Boolean = false,
     val officeOpen: Boolean = false, val officeQuery: String = "", val isLoadingOffice: Boolean = false,
@@ -34,6 +35,7 @@ class BackpackViewModel(
 
     init { viewModelScope.launch {
         runCatching { photoRepository.cached() }.getOrNull()?.let { catalog -> mutableState.update { it.copy(photoCatalog = catalog) } }
+        runCatching { photoRepository.cachedEquipment() }.getOrNull()?.let { catalog -> mutableState.update { it.copy(officePhotoCatalog = catalog) } }
     } }
 
     fun activate(simpleOneUserId: String, isAuthorized: Boolean) {
@@ -51,7 +53,8 @@ class BackpackViewModel(
         }
         val revision = ++generation
         loadJob?.cancel(); secondaryJob?.cancel(); officeJob?.cancel(); detailJob?.cancel()
-        mutableState.value = BackpackUiState(simpleOneUserId = simpleOneUserId, isAuthorized = isAuthorized, photoCatalog = old.photoCatalog, isLoading = simpleOneUserId.isNotBlank())
+        mutableState.value = BackpackUiState(simpleOneUserId = simpleOneUserId, isAuthorized = isAuthorized,
+            photoCatalog = old.photoCatalog, officePhotoCatalog = old.officePhotoCatalog, isLoading = simpleOneUserId.isNotBlank())
         if (simpleOneUserId.isBlank()) return
         loadJob = viewModelScope.launch {
             val cached = repository.read(ownerUserId, simpleOneUserId)
@@ -88,11 +91,16 @@ class BackpackViewModel(
     fun updateOfficeQuery(value: String) { mutableState.update { it.copy(officeQuery = value) } }
     fun closeOfficeItem() { detailJob?.cancel(); mutableState.update { it.copy(selectedOfficeItem = null, isLoadingOfficeDetails = false) } }
     fun refreshOffice() {
-        if (!state.value.isAuthorized || startOffline || state.value.isLoadingOffice) return
+        if (!state.value.isAuthorized || startOffline || state.value.isLoadingOffice || officeJob?.isActive == true) return
         val user = state.value.simpleOneUserId
         val revision = generation
         mutableState.update { it.copy(isLoadingOffice = true, officeError = null) }
         officeJob = viewModelScope.launch {
+            launch {
+                photoRepository.refreshEquipment()?.let { catalog ->
+                    if (generation == revision) mutableState.update { it.copy(officePhotoCatalog = catalog) }
+                }
+            }
             try {
                 val snapshot = repository.refreshOffice(ownerUserId, user)
                 if (generation == revision) mutableState.update { it.copy(snapshot = (it.snapshot ?: snapshot).copy(officeEquipment = snapshot.officeEquipment, officeUpdatedAtEpochMillis = snapshot.officeUpdatedAtEpochMillis)) }

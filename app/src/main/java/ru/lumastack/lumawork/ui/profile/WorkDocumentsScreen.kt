@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
@@ -40,7 +39,6 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -80,6 +78,10 @@ import ru.lumastack.lumawork.domain.profile.*
 import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.appTopBarColors
+import androidx.compose.foundation.background
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @Composable
 fun WorkDocumentsScreen(
@@ -254,8 +256,9 @@ private fun WorkDocumentsContent(session: AppSession, offline: Boolean, canManag
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = { TopAppBar(title = { Text("Документы для работы") }, navigationIcon = {
+        modifier = Modifier.background(appScreenBackground()),
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        topBar = { TopAppBar(colors = appTopBarColors(), title = { Text("Документы для работы") }, navigationIcon = {
             IconButton(onClick = onDismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
         }, actions = {
             IconButton(onClick = ::refresh, enabled = !offline && !loading && !busy) { Icon(Icons.Default.Refresh, "Обновить документы") }
@@ -272,7 +275,7 @@ private fun WorkDocumentsContent(session: AppSession, offline: Boolean, canManag
                     } else LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 if (documents.isEmpty() && !loading) item {
-                    Surface(shape = RoundedCornerShape(18.dp)) {
+                    AppPanel {
                         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(if (loadError != null) "Не удалось загрузить документы" else "Документов пока нет", fontWeight = FontWeight.SemiBold)
                             Text(loadError ?: if (canManage) "Добавьте договоры, справки, положения и другие рабочие файлы." else "Документы можно добавить в настройках профиля.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -360,7 +363,7 @@ private fun WorkDocumentRow(context: Context, document: WorkDocument, busy: Bool
     onOpen: () -> Unit, onShare: () -> Unit, onSave: () -> Unit,
     onEdit: (() -> Unit)?, onReplace: (() -> Unit)?, onDelete: (() -> Unit)?) {
     var menu by remember(document.id) { mutableStateOf(false) }
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+    AppPanel {
         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).clickable(enabled = enabled, onClick = onOpen).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(document.title, fontWeight = FontWeight.SemiBold)

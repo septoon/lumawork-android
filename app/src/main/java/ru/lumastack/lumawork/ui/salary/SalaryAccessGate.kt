@@ -27,9 +27,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,7 +53,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -75,6 +73,8 @@ import ru.lumastack.lumawork.BuildConfig
 import ru.lumastack.lumawork.data.auth.OkHttpAuthApi
 import ru.lumastack.lumawork.data.salary.SalaryPasscodeStore
 import ru.lumastack.lumawork.domain.model.AppSession
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppButton
 
 val LocalSalaryBiometricEnabled = androidx.compose.runtime.staticCompositionLocalOf { true }
 
@@ -220,6 +220,9 @@ fun SalaryAccessGate(
             state = state.returnToPin()
         } else leave()
     }
+    ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler(
+        enabled = !hasUnlockedOnce && state.phase == SalaryAccessPhase.RecoveryCode,
+    ) { cancelPending(); state = state.returnToPin() }
 
     val lockContent: @Composable () -> Unit = { SalaryAccessScreen(
         state = state,
@@ -227,6 +230,7 @@ fun SalaryAccessGate(
         offline = startOffline,
         biometricAvailable = biometricAvailable && state.savedPin != null,
         biometricBusy = activeBiometric != null,
+        showBackButton = hasUnlockedOnce,
         onCancel = ::leave,
         onBack = { cancelPending(); state = state.returnToPin() },
         onDigit = { digit ->
@@ -262,6 +266,7 @@ private fun SalaryAccessScreen(
     offline: Boolean,
     biometricAvailable: Boolean,
     biometricBusy: Boolean,
+    showBackButton: Boolean,
     onCancel: () -> Unit,
     onBack: () -> Unit,
     onDigit: (Int) -> Unit,
@@ -280,7 +285,7 @@ private fun SalaryAccessScreen(
         SalaryAccessPhase.RecoveryCode -> "Восстановление PIN"
     }
     Box(
-        modifier.fillMaxSize().background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.surfaceVariant))).safeDrawingPadding(),
+        modifier.fillMaxSize().background(appScreenBackground()).safeDrawingPadding(),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -289,8 +294,8 @@ private fun SalaryAccessScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (state.phase == SalaryAccessPhase.RecoveryCode) IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Назад к вводу PIN")
+                if (showBackButton && state.phase == SalaryAccessPhase.RecoveryCode) IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад к вводу PIN")
                 }
                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 IconButton(onClick = onCancel) { Icon(Icons.Default.Close, contentDescription = "Закрыть ввод PIN") }
@@ -308,7 +313,7 @@ private fun SalaryAccessScreen(
                     enabled = !state.isBusy,
                     isError = state.error != null,
                 )
-                Button(onClick = onVerifyRecovery, enabled = !state.isBusy && state.recoveryCode.length == 6 && !offline) { Text("Подтвердить код") }
+                AppButton(onClick = onVerifyRecovery, enabled = !state.isBusy && state.recoveryCode.length == 6 && !offline) { Text("Подтвердить код") }
                 TextButton(onClick = onRequestRecovery, enabled = !state.isBusy && !offline) { Text("Отправить код повторно") }
             } else {
                 Row(

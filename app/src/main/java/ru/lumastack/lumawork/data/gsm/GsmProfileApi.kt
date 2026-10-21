@@ -24,6 +24,9 @@ interface GsmProfileApi {
 
 sealed class GsmProfileFailure(message: String) : Exception(message) {
     class Validation(message: String) : GsmProfileFailure(message)
+    class VehicleSync(cause: Exception) : GsmProfileFailure("ГСМ-профиль сохранён, но не удалось завершить сохранение автомобиля. Нажмите «Сохранить» ещё раз.") {
+        init { initCause(cause) }
+    }
     data object Unauthorized : GsmProfileFailure("Сессия приложения «Инженер» истекла.")
     data object Network : GsmProfileFailure("Не удалось подключиться. Проверьте подключение к интернету.")
     data object InvalidResponse : GsmProfileFailure("Не удалось загрузить ГСМ профиль.")

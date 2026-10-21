@@ -33,13 +33,16 @@ class ProfileApiTest {
                 assertEquals("image/jpeg", payload["mimeType"]?.jsonPrimitive?.content)
             }
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                .body("""{"user":{"id":"1","email":"user@example.com","role":"user","avatarUrl":"https://example.com/avatar.webp","profile":{"city":"Симферополь"}}}""".toResponseBody()).build()
+                .body("""{"user":{"id":"1","email":"user@example.com","role":"user","avatarUrl":"https://example.com/avatar.webp","profile":{"city":"Симферополь","routeWarehouseAddress":"Склад, 1","routeHomeAddress":"Ленина, 1"}}}""".toResponseBody()).build()
         }.build()
         val api = OkHttpAuthApi("https://api.test", client)
 
         assertEquals("Симферополь", api.updateProfile("session-token", UserProfile(city = "Симферополь", personalPhone = "", routeHomeAddress = "Ленина, 1")).profile?.city)
+        val restored = api.currentUser("session-token").profile
+        assertEquals("Ленина, 1", restored?.routeHomeAddress)
+        assertEquals("Склад, 1", restored?.routeWarehouseAddress)
         assertEquals("https://example.com/avatar.webp", api.uploadAvatar("session-token", byteArrayOf(1, 2, 3)).avatarUrl)
         api.deleteAvatar("session-token")
-        assertEquals(listOf("PUT /api/v2/profile", "POST /api/v2/profile/avatar", "DELETE /api/v2/profile/avatar"), calls)
+        assertEquals(listOf("PUT /api/v2/profile", "GET /me", "POST /api/v2/profile/avatar", "DELETE /api/v2/profile/avatar"), calls)
     }
 }

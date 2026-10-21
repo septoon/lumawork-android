@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -31,7 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -70,6 +68,7 @@ import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @Composable
 fun VehicleDocumentsSection(
@@ -152,7 +151,7 @@ private fun VehicleDocumentsContent(
             Text("ПРИКРЕПЛЁННЫЕ ДОКУМЕНТЫ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (documents.isNotEmpty()) Text(documents.size.toString(), style = MaterialTheme.typography.labelMedium)
         }
-        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surface) {
+        AppPanel {
             if (documents.isEmpty()) {
                 Text("Добавьте полис ОСАГО, сканы СТС и ПТС или другой документ автомобиля.", Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else Column {

@@ -33,6 +33,9 @@ import ru.lumastack.lumawork.domain.requests.*
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.*
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @Composable
 fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, onRefresh: () -> Unit, modifier: Modifier = Modifier) {
@@ -49,7 +52,7 @@ fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, onRefres
             state.errorMessage?.let { snackbar.showSnackbar(it) }
         }
     }
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isClosedLoading,
         enabled = state.isAuthorized && !state.isOffline && state.initialArchiveReady && !state.isInitializing,
         onRefresh = { requestedRefresh = true; onRefresh() }) {
@@ -82,7 +85,7 @@ fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, onRefres
                     }
                 }
                 item(key = "months-header") {
-                    Surface(shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp), color = MaterialTheme.colorScheme.surface) {
+                    Surface(shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp), color = AppSurfaces.card) {
                         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             SectionTitle("Распределение по месяцам", "Сколько выполненных заявок закрыто в каждом месяце")
                             if (analytics.months.isNotEmpty()) Text("Нажмите на месяц, чтобы открыть календарь дней.",
@@ -91,8 +94,8 @@ fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, onRefres
                     }
                 }
                 if (analytics.months.isEmpty()) item(key = "months-empty") {
-                    Surface(Modifier.padding(bottom = 14.dp), shape = RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp),
-                        color = MaterialTheme.colorScheme.surface) {
+                    Surface(Modifier.padding(bottom = 14.dp), shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
+                        color = AppSurfaces.card) {
                         Box(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, bottom = 18.dp)) {
                             EmptyText("Нет данных для построения распределения по месяцам.")
                         }
@@ -100,8 +103,8 @@ fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, onRefres
                 }
                 items(analytics.months, key = { "month:${it.id}" }) { month ->
                     val last = month.id == analytics.months.last().id
-                    Surface(Modifier.padding(bottom = if (last) 14.dp else 0.dp), color = MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(bottomStart = if (last) 22.dp else 0.dp, bottomEnd = if (last) 22.dp else 0.dp)) {
+                    Surface(Modifier.padding(bottom = if (last) 14.dp else 0.dp), color = AppSurfaces.card,
+                        shape = RoundedCornerShape(bottomStart = if (last) 28.dp else 0.dp, bottomEnd = if (last) 28.dp else 0.dp)) {
                         MonthAccordion(month, analytics.maxMonthCount, month.id == analytics.latestMonth?.id, month.id == selectedMonth,
                             onToggle = { selectedMonth = if (selectedMonth == month.id) null else month.id })
                     }
@@ -150,7 +153,7 @@ private fun SummaryCard(title: String, value: String, subtitle: String, modifier
 
 @Composable
 private fun AnalyticsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface) {
+    AppPanel(modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }

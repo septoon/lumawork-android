@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,8 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -76,6 +76,9 @@ import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,7 +103,7 @@ fun HomeScreen(
     val state by model.state.collectAsStateWithLifecycle()
     LaunchedEffect(model) { model.selectDate(LocalDate.parse(selectedDate)) }
     LaunchedEffect(model, session.user.profile) { model.updateSettings(ru.lumastack.lumawork.domain.route.RouteSettings.from(session.user.profile)) }
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
     val maxContentWidth = when (widthClass) {
         AppWidthClass.Compact -> 560.dp
         AppWidthClass.Medium -> 920.dp
@@ -134,45 +137,95 @@ fun HomeScreen(
     var calendarOpen by rememberSaveable { mutableStateOf(false) }
     var editorId by rememberSaveable(state.record.date, state.record.workType) { mutableStateOf<String?>(null) }
     var sendConfirmation by rememberSaveable(state.record.date, state.record.workType) { mutableStateOf(false) }
+    val tablet = widthClass != AppWidthClass.Compact
+    var archiveRefreshRevision by remember(session.user.id) { mutableStateOf(0) }
+    var archiveMessage by remember { mutableStateOf<String?>(null) }
+    val sendReport = { keyboard?.hide(); if (state.canSend) sendConfirmation = true else model.send(); Unit }
+    val requestsCard: @Composable () -> Unit = {
+        ActiveRequestsCard(simpleOneState, onOpenRequests = {
+            requestsActions.onCloseRequest(); requestsActions.onModeChange(RequestsMode.Active)
+            onOpenDestination(AppDestination.Requests)
+        }, onOpenRequest = { requestsActions.onOpenRequest(it); detailOpen = true }, compact = tablet)
+    }
+    val dayCard: @Composable () -> Unit = {
+        if (tablet) TabletWorkDayCard(state, onOpenCalendar = { calendarOpen = true },
+            onDistanceChange = model::updateDistance, onAddFuel = { fuelOpen = true }, onOpenMap = ::openMap, onSend = sendReport)
+        else WorkDayCard(state, onOpenCalendar = { calendarOpen = true },
+            onDistanceChange = model::updateDistance, onAddFuel = { fuelOpen = true },
+            onOpenArchive = { archiveOpen = true }, onOpenMap = ::openMap)
+    }
+    val routeCard: @Composable () -> Unit = {
+        RouteTimelineCard(state, onEditStop = { editorId = it }, onAddStop = model::addStop,
+            onRemoveStop = model::removeStop, onReorderStop = model::reorderStop,
+            onEndpointSelect = model::updateEndpoint, compact = tablet)
+    }
+    val archiveCard: @Composable (Modifier) -> Unit = { archiveModifier ->
+        AppCard(archiveModifier, shape = RoundedCornerShape(20.dp)) {
+            RouteArchiveSheet(state, session, isOffline, routeRepository,
+                onDismiss = {}, onOdometerChange = model::updateOdometer,
+                embedded = true, modifier = Modifier.fillMaxWidth(), refreshRevision = archiveRefreshRevision,
+                onReportMessage = { archiveMessage = it })
+        }
+    }
 
-    Column(modifier.fillMaxSize().background(background), horizontalAlignment = Alignment.CenterHorizontally) {
-        AppRefreshContainer(Modifier.weight(1f).widthIn(max = maxContentWidth).fillMaxWidth(),
-            isRefreshing = state.isRefreshing || simpleOneState.isLoading,
-            enabled = !state.isSending,
-            onRefresh = { model.refresh(); onRefreshRequests() }) {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                state.notice?.let { item { Snackbar { Text(it) } } }
-                state.errorMessage?.let { item { Snackbar { Text(it) } } }
-                if (state.record.workType == RouteWorkType.Pos) item {
-                    ActiveRequestsCard(simpleOneState, onOpenRequests = {
-                        requestsActions.onCloseRequest(); requestsActions.onModeChange(RequestsMode.Active)
-                        onOpenDestination(AppDestination.Requests)
-                    }, onOpenRequest = { requestsActions.onOpenRequest(it); detailOpen = true })
+    Box(modifier.fillMaxSize().background(background), contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            AppRefreshContainer(Modifier.weight(1f).widthIn(max = if (tablet) 1200.dp else maxContentWidth).fillMaxWidth(),
+                isRefreshing = state.isRefreshing || simpleOneState.isLoading,
+                enabled = !state.isSending,
+                onRefresh = { model.refresh(); onRefreshRequests(); archiveRefreshRevision++ }) {
+                if (tablet) {
+                    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        dayCard()
+                        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                        val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
+                        if (maxWidth / fontScale >= 760.dp) Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                state.notice?.let { item { Snackbar { Text(it) } } }
+                                state.errorMessage?.let { item { Snackbar { Text(it) } } }
+                                if (state.record.workType == RouteWorkType.Pos) item { requestsCard() }
+                                item { routeCard() }
+                            }
+                            archiveCard(Modifier.weight(1f))
+                        } else LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            state.notice?.let { item { Snackbar { Text(it) } } }
+                            state.errorMessage?.let { item { Snackbar { Text(it) } } }
+                            if (state.record.workType == RouteWorkType.Pos) item { requestsCard() }
+                            item { archiveCard(Modifier.fillMaxWidth().heightIn(max = 900.dp)) }
+                            item { routeCard() }
+                        }
+                            }
+                    }
+                } else LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    state.notice?.let { item { Snackbar { Text(it) } } }
+                    state.errorMessage?.let { item { Snackbar { Text(it) } } }
+                    if (state.record.workType == RouteWorkType.Pos) item {
+                        requestsCard()
+                    }
+                    item {
+                        dayCard()
+                    }
+                    item {
+                        routeCard()
+                    }
                 }
-                item {
-                    WorkDayCard(state, onOpenCalendar = { calendarOpen = true },
-                        onDistanceChange = model::updateDistance, onAddFuel = { fuelOpen = true },
-                        onOpenArchive = { archiveOpen = true }, onOpenMap = ::openMap)
-                }
-                item {
-                    RouteTimelineCard(state, onEditStop = { editorId = it }, onAddStop = model::addStop,
-                        onRemoveStop = model::removeStop, onReorderStop = model::reorderStop, onEndpointSelect = model::updateEndpoint)
+            }
+            if (!tablet) Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = .96f)) {
+                Box(Modifier.widthIn(max = maxContentWidth).fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                    AppButton(onClick = { keyboard?.hide(); if (state.canSend) sendConfirmation = true else model.send() },
+                        enabled = !state.isSending, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(50)) {
+                        if (state.isSending) CircularProgressIndicator(Modifier.size(18.dp), color = androidx.compose.material3.LocalContentColor.current, strokeWidth = 2.dp)
+                        else Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(if (state.isSending) "Отправляю…" else "Отправить", Modifier.padding(start = 10.dp))
+                    }
                 }
             }
         }
-        Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = .96f)) {
-            Box(Modifier.widthIn(max = maxContentWidth).fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                AppButton(onClick = { keyboard?.hide(); if (state.canSend) sendConfirmation = true else model.send() },
-                    enabled = !state.isSending, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(50)) {
-                    if (state.isSending) CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
-                    else Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text(if (state.isSending) "Отправляю…" else "Отправить", Modifier.padding(start = 10.dp))
-                }
-            }
-        }
+        RouteReportMessage(archiveMessage, onDismiss = { archiveMessage = null }, modifier = Modifier.align(Alignment.BottomCenter))
     }
     if (calendarOpen) RouteCalendar(state.record.date, onDismiss = { calendarOpen = false }) {
         selectedDate = it.toString()
@@ -195,7 +248,7 @@ fun HomeScreen(
     state.sentReport?.let { sent ->
         LaunchedEffect(sent) { delay(2400); model.dismissSentReport() }
         androidx.compose.ui.window.Dialog(onDismissRequest = model::dismissSentReport) {
-            Card(shape = RoundedCornerShape(28.dp)) {
+            AppCard {
                 Column(Modifier.padding(28.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text("✓", style = MaterialTheme.typography.displayMedium, color = MaterialTheme.colorScheme.primary)
@@ -209,11 +262,11 @@ fun HomeScreen(
     if (archiveOpen) RouteArchiveSheet(state, session, isOffline, routeRepository,
         onDismiss = { archiveOpen = false }, onOdometerChange = model::updateOdometer)
     if (fuelOpen) HomeFuelEntry(session, isOffline, fuelRepository, onDismiss = { fuelOpen = false })
-    if (detailOpen) ModalBottomSheet(onDismissRequest = { detailOpen = false; requestsActions.onCloseRequest() },
+    if (detailOpen) ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = { detailOpen = false; requestsActions.onCloseRequest() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 980.dp) {
         simpleOneState.selectedRequest?.let { request ->
             SimpleOneRequestDetailContent(request, widthClass, simpleOneState.isDetailLoading, simpleOneState.detailErrorMessage,
-                onBack = { detailOpen = false; requestsActions.onCloseRequest() })
+                onBack = { detailOpen = false; requestsActions.onCloseRequest() }, showBackButton = true)
         }
     }
     mapError?.let { message -> AlertDialog(onDismissRequest = { mapError = null }, title = { Text("Маршрут") },
@@ -223,8 +276,7 @@ fun HomeScreen(
 
 @Composable
 private fun WorkDayCard(state: RouteUiState, onOpenCalendar: () -> Unit, onDistanceChange: (String) -> Unit, onAddFuel: () -> Unit, onOpenArchive: () -> Unit, onOpenMap: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = .96f)),
-        shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth()) {
+    AppCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).clickable(onClick = onOpenCalendar).semantics { contentDescription = "Дата маршрута" }) {
@@ -245,6 +297,54 @@ private fun WorkDayCard(state: RouteUiState, onOpenCalendar: () -> Unit, onDista
             TextButton(onClick = onOpenArchive, modifier = Modifier.fillMaxWidth()) {
                 Text("Архив маршрутов", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
                 Text("›", style = MaterialTheme.typography.titleLarge)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabletWorkDayCard(state: RouteUiState, onOpenCalendar: () -> Unit, onDistanceChange: (String) -> Unit,
+    onAddFuel: () -> Unit, onOpenMap: () -> Unit, onSend: () -> Unit) {
+    AppCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().padding(16.dp)) {
+            val wide = maxWidth >= 900.dp
+            val send: @Composable () -> Unit = {
+                AppButton(onClick = onSend, enabled = !state.isSending,
+                    modifier = Modifier.width(184.dp).heightIn(min = 52.dp), shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp)) {
+                    if (state.isSending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp,
+                        color = androidx.compose.material3.LocalContentColor.current)
+                    else Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
+                    Text(if (state.isSending) "Отправляю…" else "Отправить", Modifier.padding(start = 8.dp), fontWeight = FontWeight.Bold)
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(Modifier.weight(1f).clickable(onClick = onOpenCalendar).semantics { contentDescription = "Дата маршрута" }) {
+                        Text("Рабочий день", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(state.dateTitle, style = MaterialTheme.typography.titleLarge)
+                            Icon(Icons.Default.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    Box(Modifier.width(230.dp)) { RouteNumberField(state.distanceText, "Пробег дня", onDistanceChange) }
+                    IconButton(onClick = onOpenMap) {
+                        androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(ru.lumastack.lumawork.R.drawable.ic_yandex_maps),
+                            "Составить маршрут в Яндекс.Картах", Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)))
+                    }
+                    if (wide) {
+                        TextButton(onClick = onAddFuel) { Text("Добавить заправку") }
+                        send()
+                    }
+                }
+                if (!wide) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onAddFuel) { Text("Добавить заправку") }
+                    androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                    send()
+                }
             }
         }
     }

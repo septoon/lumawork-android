@@ -6,10 +6,13 @@ import ru.lumastack.lumawork.ui.profile.ProfileRoute
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,20 +24,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import ru.lumastack.lumawork.ui.workschedule.WorkScheduleRoute
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.CompositionLocalProvider
@@ -69,6 +71,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -113,6 +116,7 @@ import ru.lumastack.lumawork.ui.salary.SalaryRoute
 import ru.lumastack.lumawork.ui.feedback.FeedbackRoute
 import ru.lumastack.lumawork.ui.analytics.AnalyticsScreen
 import ru.lumastack.lumawork.ui.admin.AdminRoute
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
 
 enum class AppDestination(
     val title: String,
@@ -362,13 +366,22 @@ private fun AppDrawerShell(
         if (selected != AppDestination.Employees || !simpleOneState.isAuthorized) workScheduleOpen = false
     }
     val groupProgress = coordinationRepository.groupClosedRepository?.state?.collectAsStateWithLifecycle()?.value
+    val header = remember(selected) { AppHeaderState() }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val drawerConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
+    val squareDrawer = appContentWidthClass(drawerConfiguration.screenWidthDp, drawerConfiguration.screenHeightDp,
+        androidx.compose.ui.platform.LocalDensity.current.fontScale) != ru.lumastack.lumawork.ui.adaptive.AppWidthClass.Compact
     val scope = rememberCoroutineScope()
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        scrimColor = ru.lumastack.lumawork.ui.theme.AppSurfaces.scrim,
         drawerContent = {
-            ModalDrawerSheet(modifier = Modifier.width(320.dp)) {
+            ModalDrawerSheet(modifier = Modifier.width(320.dp),
+                drawerShape = if (squareDrawer) androidx.compose.ui.graphics.RectangleShape else androidx.compose.material3.DrawerDefaults.shape,
+                drawerContainerColor = if (ru.lumastack.lumawork.ui.theme.LocalAppDarkTheme.current)
+                    androidx.compose.ui.graphics.Color.Black else androidx.compose.ui.graphics.Color.White,
+                drawerTonalElevation = 0.dp) {
                 NavigationMenu(
                     groupArchiveLoading = groupProgress?.isLoading == true && groupProgress.ownerUserId == session.user.id && groupProgress.simpleOneUserId == simpleOneState.snapshot.currentUser?.sysId,
                     onOpenSettings = { scope.launch { drawerState.close(); onOpenSettings() } },
@@ -384,55 +397,60 @@ private fun AppDrawerShell(
             }
         },
     ) {
-        Scaffold(
-            topBar = {
-                AppTopBar(
-                    destination = selected,
-                    session = session,
-                    images = vehicleImageRepository,
-                    onOpenProfile = onOpenProfile,
-                    onOpenNavigation = { if (workScheduleOpen) workScheduleOpen = false else scope.launch { drawerState.open() } },
-                    workScheduleOpen = workScheduleOpen,
-                    onOpenWorkSchedule = { workScheduleOpen = true },
-                    requestsState = simpleOneState,
-                    requestsActions = simpleOneActions,
-                    routeRepository = routeRepository,
-                    isOffline = isOffline,
-                )
-            },
-        ) { padding ->
-            contentStateHolder.SaveableStateProvider(selected.name) {
-                DestinationContent(
-                    destination = selected,
-                    assistantModels = assistantModels,
-                    session = session,
-                    isOffline = isOffline,
-                    routeRepository = routeRepository,
-                    simpleOneRepository = simpleOneRepository,
-                    coordinationRepository = coordinationRepository,
-                    timeReportRepository = timeReportRepository,
-                    backpackRepository = backpackRepository,
-                    backpackPhotoRepository = backpackPhotoRepository,
-                    backpackImageRepository = backpackImageRepository,
-                    employeeRepository = employeeRepository,
-                    workScheduleRepository = workScheduleRepository,
-                    autoRepository = autoRepository,
-                    vehicleImageRepository = vehicleImageRepository,
-                    fuelRepository = fuelRepository,
-                    wikiRepository = wikiRepository,
-                    ftpRepository = ftpRepository,
-                    salaryRepository = salaryRepository,
-                    feedbackRepository = feedbackRepository,
-                    adminRepository = adminRepository,
-                    simpleOneState = simpleOneState,
-                    simpleOneActions = simpleOneActions,
-                    onSelect = onSelect,
-                    workScheduleOpen = workScheduleOpen,
-                    onCloseWorkSchedule = { workScheduleOpen = false },
-                    assistantSection = assistantSection,
-                    onAssistantSection = { assistantSection = it },
-                    modifier = Modifier.padding(padding),
-                )
+        CompositionLocalProvider(LocalAppHeader provides header) {
+            Scaffold(
+                modifier = Modifier.background(appScreenBackground()),
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                topBar = {
+                    AppTopBar(
+                        header = header,
+                        destination = selected,
+                        session = session,
+                        images = vehicleImageRepository,
+                        onOpenProfile = onOpenProfile,
+                        onOpenNavigation = { if (workScheduleOpen) workScheduleOpen = false else scope.launch { drawerState.open() } },
+                        workScheduleOpen = workScheduleOpen,
+                        onOpenWorkSchedule = { workScheduleOpen = true },
+                        requestsState = simpleOneState,
+                        requestsActions = simpleOneActions,
+                        routeRepository = routeRepository,
+                        isOffline = isOffline,
+                    )
+                },
+            ) { padding ->
+                contentStateHolder.SaveableStateProvider(selected.name) {
+                    DestinationContent(
+                        destination = selected,
+                        assistantModels = assistantModels,
+                        session = session,
+                        isOffline = isOffline,
+                        routeRepository = routeRepository,
+                        simpleOneRepository = simpleOneRepository,
+                        coordinationRepository = coordinationRepository,
+                        timeReportRepository = timeReportRepository,
+                        backpackRepository = backpackRepository,
+                        backpackPhotoRepository = backpackPhotoRepository,
+                        backpackImageRepository = backpackImageRepository,
+                        employeeRepository = employeeRepository,
+                        workScheduleRepository = workScheduleRepository,
+                        autoRepository = autoRepository,
+                        vehicleImageRepository = vehicleImageRepository,
+                        fuelRepository = fuelRepository,
+                        wikiRepository = wikiRepository,
+                        ftpRepository = ftpRepository,
+                        salaryRepository = salaryRepository,
+                        feedbackRepository = feedbackRepository,
+                        adminRepository = adminRepository,
+                        simpleOneState = simpleOneState,
+                        simpleOneActions = simpleOneActions,
+                        onSelect = onSelect,
+                        workScheduleOpen = workScheduleOpen,
+                        onCloseWorkSchedule = { workScheduleOpen = false },
+                        assistantSection = assistantSection,
+                        onAssistantSection = { assistantSection = it },
+                        modifier = Modifier.padding(padding).consumeWindowInsets(padding),
+                    )
+                }
             }
         }
     }
@@ -441,6 +459,7 @@ private fun AppDrawerShell(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppTopBar(
+    header: AppHeaderState,
     destination: AppDestination,
     session: AppSession,
     images: VehicleImageRepository,
@@ -453,47 +472,60 @@ private fun AppTopBar(
     routeRepository: RouteRepository,
     isOffline: Boolean,
 ) {
-    Column {
-        TopAppBar(
-            title = {
-                if (destination == AppDestination.Home) {
+    val content = header.content
+    val back = if (workScheduleOpen) onOpenNavigation else header.onBack
+    CenterAlignedTopAppBar(
+        title = {
+            when {
+                workScheduleOpen -> Text("График работы", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                destination == AppDestination.Home -> {
                     val routeModel: RouteViewModel = viewModel(key = "route-${session.user.id}-${session.token.hashCode()}-$isOffline",
                         factory = RouteViewModel.factory(routeRepository, session, isOffline))
                     val routeState by routeModel.state.collectAsStateWithLifecycle()
                     AppSegmentedControl(titles = RouteWorkType.entries.map { it.title },
                         selectedIndex = RouteWorkType.entries.indexOf(routeState.record.workType),
-                        onSelect = { routeModel.selectWorkType(RouteWorkType.entries[it]) }, modifier = Modifier.width(176.dp))
-                } else Text(if (workScheduleOpen) "График работы" else destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            },
-            navigationIcon = {
-                IconButton(onClick = onOpenNavigation) {
-                    Icon(if (workScheduleOpen) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Menu, contentDescription = if (workScheduleOpen) "Назад к сотрудникам" else "Открыть меню")
+                        onSelect = { routeModel.selectWorkType(RouteWorkType.entries[it]) })
                 }
-            },
-            actions = {
-                if (destination == AppDestination.Employees && requestsState.isAuthorized && !workScheduleOpen) {
-                    IconButton(onClick = onOpenWorkSchedule) { Icon(painterResource(R.drawable.ic_nav_schedule), "График работы") }
+                destination == AppDestination.Requests && requestsState.initialArchiveReady &&
+                    (requestsState.isAuthorized || requestsState.isOffline) && requestsState.selectedRequest == null -> {
+                    AppSegmentedControl(
+                        titles = RequestsMode.entries.map { it.title },
+                        selectedIndex = RequestsMode.entries.indexOf(requestsState.mode),
+                        onSelect = { requestsActions.onModeChange(RequestsMode.entries[it]) },
+                    )
                 }
-                if (destination == AppDestination.Home) {
-                    IconButton(onClick = onOpenProfile, modifier = Modifier.semantics { contentDescription = "Открыть профиль" }) {
-                        ProfileAvatar(session.user, images)
-                    }
+                content?.title != null -> content.title.invoke()
+                else -> Text(destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        navigationIcon = {
+            Box(Modifier.width(48.dp), contentAlignment = Alignment.Center) {
+                if (back != null) AppBackButton(back) else AppMenuButton(onOpenNavigation)
+            }
+        },
+        actions = {
+            // Equal side slots keep the title at the screen centre even without a trailing action.
+            Row(Modifier.width(48.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                when {
+                    destination == AppDestination.Employees && requestsState.isAuthorized && !workScheduleOpen ->
+                        IconButton(onClick = onOpenWorkSchedule) { Icon(painterResource(R.drawable.ic_nav_schedule), "График работы") }
+                    destination == AppDestination.Home ->
+                        IconButton(onClick = onOpenProfile, modifier = Modifier.semantics { contentDescription = "Открыть профиль" }) {
+                            ProfileAvatar(session.user, images)
+                        }
+                    content != null -> content.actions(this)
                 }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-        )
-        if (destination == AppDestination.Requests && requestsState.initialArchiveReady &&
-            (requestsState.isAuthorized || requestsState.isOffline) && requestsState.selectedRequest == null) {
-            AppSegmentedControl(
-                titles = RequestsMode.entries.map { it.title },
-                selectedIndex = RequestsMode.entries.indexOf(requestsState.mode),
-                onSelect = { requestsActions.onModeChange(RequestsMode.entries[it]) },
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-            )
-        }
-    }
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+            navigationIconContentColor = MaterialTheme.colorScheme.primary,
+            actionIconContentColor = MaterialTheme.colorScheme.primary),
+    )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NavigationMenu(
     destinations: List<AppDestination>,
@@ -504,38 +536,46 @@ private fun NavigationMenu(
     modifier: Modifier = Modifier,
     groupArchiveLoading: Boolean = false,
 ) {
-    Column(modifier.padding(horizontal = 18.dp, vertical = 28.dp)) {
-        Text("Инженер", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 18.dp, bottom = 24.dp))
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            items(destinations, key = { it.name }) { destination ->
-                val isSelected = destination == selected
-                Surface(
-                    onClick = { onSelect(destination) },
-                    color = if (isSelected) MaterialTheme.colorScheme.onSurface.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().semantics { this.selected = isSelected },
-                ) {
-                    Row(Modifier.heightIn(min = 46.dp).padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        DestinationMark(destination)
-                        Text(destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium)
+    val dark = ru.lumastack.lumawork.ui.theme.LocalAppDarkTheme.current
+    val ink = if (dark) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color(.08f, .10f, .11f)
+    Column(modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
+        Box(Modifier.fillMaxWidth().height(64.dp), contentAlignment = Alignment.CenterStart) {
+            Text("Инженер", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Medium,
+                color = ink)
+        }
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 44.dp) {
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                items(destinations, key = { it.name }) { destination ->
+                    val isSelected = destination == selected
+                    Surface(
+                        onClick = { onSelect(destination) },
+                        color = if (isSelected) ink.copy(alpha = if (dark) .13f else .08f) else androidx.compose.ui.graphics.Color.Transparent,
+                        contentColor = ink,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().semantics { this.selected = isSelected },
+                    ) {
+                        Row(Modifier.heightIn(min = 44.dp).padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            DestinationMark(destination)
+                            Text(destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                                fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal)
+                        }
                     }
                 }
             }
         }
-        if (groupArchiveLoading) Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-            Text("Загрузка заявок группы", style = MaterialTheme.typography.bodySmall)
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 22.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onOpenSettings,
                 modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape)) {
                 Icon(Icons.Default.Settings, contentDescription = "Настройки", modifier = Modifier.size(24.dp))
+            }
+            if (groupArchiveLoading) Row(Modifier.weight(1f).padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text("Загрузка заявок группы", style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             IconButton(onClick = onOpenFeedback,
                 modifier = Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape)) {
@@ -564,7 +604,7 @@ private fun DestinationMark(destination: AppDestination) {
         AppDestination.Feedback -> R.drawable.ic_nav_feedback
         AppDestination.Admin -> R.drawable.ic_nav_admin_panel_settings
     }
-    Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(24.dp))
+    Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(20.dp))
 }
 
 @Composable

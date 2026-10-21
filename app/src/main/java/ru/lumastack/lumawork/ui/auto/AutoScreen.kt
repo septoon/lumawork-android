@@ -1,7 +1,6 @@
 package ru.lumastack.lumawork.ui.auto
 
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -11,14 +10,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,14 +23,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import androidx.compose.material3.Surface
@@ -68,9 +59,12 @@ import ru.lumastack.lumawork.domain.auto.MaintenancePartDraft
 import ru.lumastack.lumawork.domain.auto.MaintenanceRecord
 import ru.lumastack.lumawork.domain.auto.Vehicle
 import ru.lumastack.lumawork.domain.auto.VehicleDraft
-import ru.lumastack.lumawork.domain.auto.VehicleInputValidation
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @Composable
 fun AutoRoute(
@@ -130,7 +124,7 @@ private fun AutoScreen(
     startOffline: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
         enabled = !state.isSaving && !startOffline, contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
@@ -172,11 +166,8 @@ private fun AutoScreen(
                         )
                     }
                 }
-                Surface(
+                AppPanel(
                     Modifier.weight(0.56f).fillMaxHeight(),
-                    shape = RoundedCornerShape(26.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-                    tonalElevation = 2.dp,
                 ) {
                     LazyColumn(
                         contentPadding = PaddingValues(20.dp),
@@ -272,13 +263,10 @@ private fun MaintenanceOverview(state: AutoUiState, onAdd: () -> Unit) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             SectionLabel("ОБСЛУЖИВАНИЕ")
             Row {
-                Button(onClick = onAdd, enabled = state.selectedVehicle != null) { Text("Добавить") }
+                AppButton(onClick = onAdd, enabled = state.selectedVehicle != null) { Text("Добавить") }
             }
         }
-        Surface(
-            shape = RoundedCornerShape(22.dp),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-            tonalElevation = 1.dp,
+        AppPanel(
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(state.selectedVehicle?.displayName ?: "Автомобиль не выбран", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -314,11 +302,8 @@ private fun AutoMetric(label: String, value: String, modifier: Modifier = Modifi
 
 @Composable
 private fun MaintenanceRow(record: MaintenanceRecord, onClick: () -> Unit) {
-    Surface(
+    AppPanel(
         Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        tonalElevation = 1.dp,
     ) {
         Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
             Box(Modifier.padding(top = 5.dp).size(10.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
@@ -353,8 +338,8 @@ private fun MaintenanceEditorDialog(
             SectionLabel("АВТОМОБИЛЬ")
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 vehicles.forEach { vehicle ->
-                    if (vehicle.id == draft.vehicleId) Button(onClick = {}) { Text(vehicle.displayName) }
-                    else OutlinedButton(onClick = { onChange(draft.copy(vehicleId = vehicle.id)) }) { Text(vehicle.displayName) }
+                    if (vehicle.id == draft.vehicleId) AppButton(onClick = {}) { Text(vehicle.displayName) }
+                    else AppOutlinedButton(onClick = { onChange(draft.copy(vehicleId = vehicle.id)) }) { Text(vehicle.displayName) }
                 }
             }
         }
@@ -372,7 +357,7 @@ private fun MaintenanceEditorDialog(
                 }
             }
         }
-        OutlinedButton(onClick = { onChange(draft.copy(parts = draft.parts + MaintenancePartDraft())) }, modifier = Modifier.fillMaxWidth()) {
+        AppOutlinedButton(onClick = { onChange(draft.copy(parts = draft.parts + MaintenancePartDraft())) }, modifier = Modifier.fillMaxWidth()) {
             Text("Добавить запчасть")
         }
     }
@@ -467,7 +452,7 @@ private fun formatInt(value: Int): String = NumberFormat.getIntegerInstance(Loca
 @Composable
 private fun MaintenanceDateField(value: String, onChange: (String) -> Unit, enabled: Boolean) {
     var open by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text("Дата: ${value.shortDate()}") }
+    AppOutlinedButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text("Дата: ${value.shortDate()}") }
     if (open) {
         val picker = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = runCatching {
             LocalDate.parse(value).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()

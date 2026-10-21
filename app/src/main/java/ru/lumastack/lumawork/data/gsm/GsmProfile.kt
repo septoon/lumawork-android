@@ -2,6 +2,7 @@ package ru.lumastack.lumawork.data.gsm
 
 import kotlinx.serialization.Serializable
 import ru.lumastack.lumawork.domain.auto.Vehicle
+import ru.lumastack.lumawork.domain.auto.VehicleInputValidation
 
 /** Separate from AppUser.profile: this is the report generator's /gsm/profile contract. */
 @Serializable
@@ -38,6 +39,13 @@ data class GsmProfile(
         employeeJobTitle, employeeCompany, employeeAddress, employeePhone, employeeTitleCompany, employeeAddressPhone,
         driverLicenseNumber, fuelCardNumber, carModel, licensePlate, projectName).all(String::isBlank) &&
         defaultStartOdometer == 0 && fuelNorm == 0.0
+
+    fun matchingVehicles(vehicles: List<Vehicle>): List<Vehicle> {
+        vehicleId?.let { id -> return vehicles.filter { it.id == id } }
+        val plate = VehicleInputValidation.normalizePlate(licensePlate)
+        if (plate.isBlank()) return emptyList()
+        return vehicles.filter { VehicleInputValidation.normalizePlate(it.licensePlate.orEmpty()) == plate }
+    }
 
     fun toggleFuelType(value: String): GsmProfile {
         val next = if (value in fuelTypes) {

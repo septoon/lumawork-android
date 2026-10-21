@@ -15,7 +15,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -24,18 +23,20 @@ import androidx.compose.ui.unit.dp
 import ru.lumastack.lumawork.domain.employees.*
 import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun EmployeeDetail(
-    employee: Employee, isLoading: Boolean, errorMessage: String?, onBack: (() -> Unit)?,
+    employee: Employee, isLoading: Boolean, errorMessage: String?,
     onRefresh: () -> Unit, canRefresh: Boolean, onActionError: (String) -> Unit,
     modifier: Modifier = Modifier, listState: LazyListState = rememberLazyListState(),
 ) {
     val context = LocalContext.current
     var sectionId by rememberSaveable(employee.sysId) { mutableStateOf<String?>(null) }
     employee.detailSections.firstOrNull { it.id == sectionId }?.let { section ->
-        ModalBottomSheet(onDismissRequest = { sectionId = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+        ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = { sectionId = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
             LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 item {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -63,14 +64,13 @@ internal fun EmployeeDetail(
     LazyColumn(modifier, state = listState, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(key = "toolbar") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                onBack?.let { TextButton(onClick = it) { Text("Назад") } }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onRefresh, enabled = canRefresh && !isLoading) { Text("Обновить") }
             }
         }
         item(key = "hero") {
-            Card(shape = RoundedCornerShape(26.dp)) {
-                Column(Modifier.fillMaxWidth().background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary))).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            AppCard {
+                Column(Modifier.fillMaxWidth().background(AppSurfaces.accent).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
                         Surface(color = Color.White.copy(alpha = .18f), shape = RoundedCornerShape(20.dp)) {
                             Box(Modifier.size(68.dp), contentAlignment = Alignment.Center) { Text(employee.initials, color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
@@ -129,7 +129,7 @@ internal fun EmployeeDetail(
             }
         }
         items(employee.detailSections, key = EmployeeSection::id) { section ->
-            Card(onClick = { sectionId = section.id }, shape = RoundedCornerShape(18.dp)) {
+            AppCard(onClick = { sectionId = section.id }) {
                 Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text(section.title, fontWeight = FontWeight.SemiBold)

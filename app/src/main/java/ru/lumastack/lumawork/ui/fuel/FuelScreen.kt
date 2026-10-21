@@ -1,7 +1,6 @@
 package ru.lumastack.lumawork.ui.fuel
 
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -10,31 +9,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
-import ru.lumastack.lumawork.ui.theme.AppTextField
-import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,7 +51,6 @@ import ru.lumastack.lumawork.domain.fuel.FuelArchivePolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -79,6 +66,11 @@ import ru.lumastack.lumawork.domain.fuel.FuelRecordType
 import ru.lumastack.lumawork.domain.fuel.FuelSummaryMonth
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @Composable
 fun FuelRoute(
@@ -165,7 +157,7 @@ private fun FuelScreen(
     onOpenImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
         enabled = !state.isSaving && !state.isOffline, contentAlignment = Alignment.TopCenter) {
         if (widthClass != AppWidthClass.Expanded) {
@@ -192,11 +184,8 @@ private fun FuelScreen(
                     fuelMessages(state)
                     if (archiveAvailable) item(key = "archive") { ArchivePanel(state.archivedCount, onOpenArchive) }
                 }
-                Surface(
+                AppPanel(
                     Modifier.weight(0.58f).fillMaxHeight(),
-                    shape = RoundedCornerShape(26.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-                    tonalElevation = 2.dp,
                 ) {
                     LazyColumn(
                         contentPadding = PaddingValues(20.dp),
@@ -231,7 +220,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelHeader(
     item(key = "actions") {
         var menu by remember { mutableStateOf(false) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Button(onClick = onAddFuel, enabled = !state.isSaving && !state.isOffline, modifier = Modifier.weight(1f)) { Text("Добавить заправку") }
+            AppButton(onClick = onAddFuel, enabled = !state.isSaving && !state.isOffline, modifier = Modifier.weight(1f)) { Text("Добавить заправку") }
             Box {
                 IconButton(onClick = { menu = true }, enabled = !state.isSaving && !state.isOffline) { Icon(Icons.Default.MoreVert, "Другие действия с топливом") }
                 DropdownMenu(menu, { menu = false }) {
@@ -244,7 +233,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelHeader(
         }
     }
     if (state.snapshot.records.isNotEmpty()) item(key = "analytics") {
-        Surface(onClick = onOpenAnalytics, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+        AppPanel(onClick = onOpenAnalytics, color = MaterialTheme.colorScheme.primaryContainer) {
             Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Аналитика  ›", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text("Цена литра, расходы и динамика по месяцам", style = MaterialTheme.typography.bodySmall)
@@ -258,8 +247,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelHeader(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 state.years.forEach { year ->
-                    if (state.selectedYear == year) Button(onClick = { onSelectYear(year) }) { Text(year) }
-                    else OutlinedButton(onClick = { onSelectYear(year) }) { Text(year) }
+                    if (state.selectedYear == year) AppButton(onClick = { onSelectYear(year) }) { Text(year) }
+                    else AppOutlinedButton(onClick = { onSelectYear(year) }) { Text(year) }
                 }
             }
         }
@@ -303,9 +292,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelMonths(
 @Composable
 private fun FuelBalancePanel(state: FuelUiState) {
     val totals = state.summary.totals
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f)),
-        shape = RoundedCornerShape(24.dp),
+    AppCard(
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -421,7 +408,7 @@ private fun FuelLine(label: String, value: String) {
 
 @Composable
 private fun ArchivePanel(count: Int, onClick: () -> Unit) {
-    Surface(onClick = onClick, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f), shape = RoundedCornerShape(18.dp)) {
+    AppPanel(onClick = onClick) {
         Row(Modifier.fillMaxWidth().padding(15.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Архив до 13 мая 2026", fontWeight = FontWeight.SemiBold)
             Text("$count записей", color = MaterialTheme.colorScheme.onSurfaceVariant)

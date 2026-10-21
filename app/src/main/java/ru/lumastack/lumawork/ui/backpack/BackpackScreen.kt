@@ -2,12 +2,10 @@ package ru.lumastack.lumawork.ui.backpack
 
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
-import androidx.activity.compose.BackHandler
+import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -29,7 +27,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -46,13 +43,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.ui.res.painterResource
 import ru.lumastack.lumawork.R
 import ru.lumastack.lumawork.domain.backpack.*
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
@@ -83,10 +76,13 @@ import ru.lumastack.lumawork.domain.backpack.BackpackItemGroup
 import ru.lumastack.lumawork.domain.backpack.BackpackPhotoCatalog
 import ru.lumastack.lumawork.domain.backpack.NOT_SET
 import ru.lumastack.lumawork.domain.backpack.backpackGroups
-import ru.lumastack.lumawork.domain.backpack.filterBackpackGroups
 import ru.lumastack.lumawork.domain.backpack.photoFor
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
+import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @Composable
 fun BackpackRoute(
@@ -150,7 +146,7 @@ private fun BackpackScreen(
     val groups = remember(state.snapshot?.items) { backpackGroups(state.snapshot?.items.orEmpty()) }
     val visibleGroups = remember(state.snapshot, state.query, state.locationFilter) { backpackGroups(visibleBackpackItems(state.snapshot, state.query, state.locationFilter)) }
     val selected = visibleGroups.firstOrNull { it.id == state.selectedGroupId } ?: groups.firstOrNull { it.id == state.selectedGroupId }
-    val background = ru.lumastack.lumawork.ui.theme.appScreenBackground()
+    val background = appScreenBackground()
     val listState = rememberLazyGridState()
     val detailState = rememberLazyGridState()
     var displayedDetailId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -166,13 +162,11 @@ private fun BackpackScreen(
         if (widthClass == AppWidthClass.Expanded) {
             Row(Modifier.widthIn(max = 1400.dp).fillMaxSize().padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Surface(Modifier.weight(.45f).fillMaxHeight(), shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = .65f)) {
+                AppPanel(Modifier.weight(.45f).fillMaxHeight()) {
                     BackpackOverview(state, groups, visibleGroups, AppWidthClass.Compact,
                         imageRepository, onQueryChange, onOpenGroup, listState, onScan, onSelectLocation, onOpenOffice)
                 }
-                Surface(Modifier.weight(.55f).fillMaxHeight(), shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = .65f)) {
+                AppPanel(Modifier.weight(.55f).fillMaxHeight()) {
                     if (selected != null) {
                         BackpackDetails(selected, state.photoCatalog, imageRepository,
                             AppWidthClass.Compact, onBack, detailState, state, onSetLocation, onSerial, showBackButton = false)
@@ -192,7 +186,7 @@ private fun BackpackScreen(
                 onQueryChange, onOpenGroup, listState, onScan, onSelectLocation, onOpenOffice)
         }
         if (selected != null && widthClass != AppWidthClass.Expanded) {
-            ModalBottomSheet(onDismissRequest = onBack, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+            ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onBack, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
                 BackpackDetails(selected, state.photoCatalog, imageRepository, widthClass, onBack, detailState, state, onSetLocation, onSerial)
             }
         }
@@ -278,9 +272,7 @@ private fun BackpackHeader(
 ) {
     var filterOpen by remember { mutableStateOf(false) }
     val totalQuantity = visibleGroups.sumOf(BackpackItemGroup::quantity)
-    Card(
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(22.dp),
+    AppCard(
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Row(
@@ -354,11 +346,9 @@ private fun BackpackTile(
     onClick: () -> Unit,
     selected: Boolean = false,
 ) {
-    Card(
+    AppCard(
         onClick = onClick,
         border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(20.dp),
     ) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             BackpackImage(imageUrl, imageRepository, Modifier.fillMaxWidth().aspectRatio(1.25f))
@@ -402,7 +392,7 @@ private fun BackpackDetails(
     ) {
         item(key = "detail-header", span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (showBackButton) OutlinedButton(onClick = onBack) { Text("Назад") }
+                if (showBackButton) ru.lumastack.lumawork.ui.shell.AppBackButton(onBack)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -431,9 +421,7 @@ private fun BackpackDetails(
 private fun BackpackInstanceCard(item: BackpackItem, state: BackpackUiState, onSetLocation: (BackpackItem, BackpackLocation) -> Unit, onSerial: (String) -> Unit) {
     var locationOpen by remember { mutableStateOf(false) }
     val snapshot = state.snapshot
-    Card(
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(18.dp),
+    AppCard(
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             Text("Экземпляр", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -506,9 +494,7 @@ internal fun BackpackImage(
 
 @Composable
 private fun MessageCard(title: String, message: String) {
-    Card(
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
-        shape = RoundedCornerShape(20.dp),
+    AppCard(
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)

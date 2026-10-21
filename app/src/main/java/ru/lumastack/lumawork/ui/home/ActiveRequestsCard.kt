@@ -8,9 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -29,6 +26,8 @@ import java.util.Locale
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.domain.simpleone.updatedAtDateTime
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppCard
 
 @Composable
 fun ActiveRequestsCard(
@@ -36,6 +35,7 @@ fun ActiveRequestsCard(
     onOpenRequests: () -> Unit,
     modifier: Modifier = Modifier,
     onOpenRequest: (SimpleOneRequest) -> Unit = { onOpenRequests() },
+    compact: Boolean = false,
 ) {
     val requests = state.activeRequests
     val now = remember(requests) { LocalDateTime.now() }
@@ -51,16 +51,13 @@ fun ActiveRequestsCard(
         "Обновлено $it"
     }
 
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        ),
-        shape = RoundedCornerShape(24.dp),
+    AppCard(
         modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(if (compact) 20.dp else 28.dp),
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(if (compact) 16.dp else 20.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -68,7 +65,7 @@ fun ActiveRequestsCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Активные заявки", style = MaterialTheme.typography.titleLarge)
+                    Text("Активные заявки", style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge)
                     Text(
                         text = updateCaption ?: when {
                             state.isInitializing -> "Загружаем сохранённые данные…"
@@ -89,9 +86,9 @@ fun ActiveRequestsCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    RequestMetric("Всего", requests.size, Modifier.weight(1f).clickable(onClick = onOpenRequests))
-                    RequestMetric("Просрочено", overdue, Modifier.weight(1f), isAlert = overdue > 0)
-                    RequestMetric("Сегодня", dueToday, Modifier.weight(1f))
+                    RequestMetric("Всего", requests.size, Modifier.weight(1f).clickable(onClick = onOpenRequests), compact = compact)
+                    RequestMetric("Просрочено", overdue, Modifier.weight(1f), isAlert = overdue > 0, compact = compact)
+                    RequestMetric("Сегодня", dueToday, Modifier.weight(1f), compact = compact)
                 }
 
                 if (nearest != null) NearestRequestSummary(nearest, onClick = { onOpenRequest(nearest) })
@@ -119,7 +116,7 @@ fun ActiveRequestsCard(
             }
 
             if (!state.isInitializing) {
-                Button(onClick = onOpenRequests, modifier = Modifier.fillMaxWidth()) {
+                AppButton(onClick = onOpenRequests, modifier = Modifier.fillMaxWidth()) {
                     Text(if (state.isAuthorized) "Открыть заявки" else "Подключить SimpleOne")
                 }
             }
@@ -133,6 +130,7 @@ private fun RequestMetric(
     value: Int,
     modifier: Modifier,
     isAlert: Boolean = false,
+    compact: Boolean = false,
 ) {
     val containerColor = if (isAlert) {
         MaterialTheme.colorScheme.errorContainer
@@ -146,7 +144,7 @@ private fun RequestMetric(
     }
     Surface(color = containerColor, shape = RoundedCornerShape(16.dp), modifier = modifier) {
         Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = if (compact) 6.dp else 10.dp, vertical = if (compact) 8.dp else 12.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Text(

@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -59,6 +58,7 @@ import ru.lumastack.lumawork.data.salary.readSalaryDocumentBytes
 import ru.lumastack.lumawork.data.salary.salaryDocumentsCacheDirectory
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @Composable
 fun SalaryDocumentsCard(
@@ -182,7 +182,7 @@ private fun SalaryDocumentsContent(session: AppSession, offline: Boolean, month:
         }
     }
 
-    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+    AppPanel(modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Расчётный листок", fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))

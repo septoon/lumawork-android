@@ -3,7 +3,7 @@ package ru.lumastack.lumawork.ui.ftp
 import android.content.*
 import android.os.Build
 import android.provider.DocumentsContract
-import androidx.activity.compose.BackHandler
+import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -45,8 +44,12 @@ import ru.lumastack.lumawork.data.ftp.*
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
-import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
+import ru.lumastack.lumawork.ui.shell.AppHeaderSegments
+import androidx.compose.material.icons.automirrored.filled.List
 import ru.lumastack.lumawork.ui.theme.AppTextField
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
+import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,12 +146,16 @@ private fun FtpRouteContent(session: AppSession, startOffline: Boolean, reposito
     }
     LaunchedEffect(state.notice) { state.notice?.let { message -> snackbar.showSnackbar(message); model.notice(null) } }
     BackHandler(state.selected == null && !state.queueOpen && state.section == FtpSection.Catalog && state.path != "/", model::up)
+    AppHeaderSegments(listOf("FTP", "Загрузки"), state.section.ordinal, { model.section(FtpSection.entries[it]) }, actions = {
+        val activeCount = state.transfers.count { it.state.isActive }
+        IconButton(onClick = model::showQueue) {
+            BadgedBox(badge = { if (activeCount > 0) Badge { Text(activeCount.toString()) } }) {
+                Icon(Icons.AutoMirrored.Filled.List, "Очередь${if (activeCount > 0) " ($activeCount)" else ""}")
+            }
+        }
+    })
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.widthIn(max = if (widthClass == AppWidthClass.Expanded) 1180.dp else 720.dp).fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AppSegmentedControl(listOf("FTP", "Загрузки"), state.section.ordinal, { model.section(FtpSection.entries[it]) }, Modifier.weight(1f))
-                TextButton(onClick = model::showQueue) { Text("Очередь${state.transfers.count { it.state.isActive }.takeIf { it > 0 }?.let { " ($it)" }.orEmpty()}") }
-            }
             if (state.section == FtpSection.Catalog) {
                 FtpBreadcrumbBar(state.path, model::navigate)
                 FtpCatalog(state, model, ::copyPath)
@@ -158,7 +165,7 @@ private fun FtpRouteContent(session: AppSession, startOffline: Boolean, reposito
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
     state.selected?.let { item ->
-        ModalBottomSheet(onDismissRequest = model::closeSelected, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = model::closeSelected, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     SelectionContainer(Modifier.weight(1f)) { Text(item.name + if (item.isDirectory) ".zip" else "", style = MaterialTheme.typography.titleLarge) }
@@ -174,7 +181,7 @@ private fun FtpRouteContent(session: AppSession, startOffline: Boolean, reposito
             }
         }
     }
-    if (state.queueOpen) ModalBottomSheet(onDismissRequest = model::hideQueue, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    if (state.queueOpen) ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = model::hideQueue, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.9f)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Загрузки FTP", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
@@ -213,7 +220,7 @@ private fun FtpCatalog(state: FtpUiState, model: FtpViewModel, copyPath: (String
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { AppTextField(state.search, model::search, "Поиск в папке", search = true, singleLine = true, modifier = Modifier.fillMaxWidth()) }
             if (state.path == "/" && state.search.isBlank()) item {
-                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                AppCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Избранное${state.snapshot.favoritePaths.size.takeIf { it > 0 }?.let { " • $it" }.orEmpty()}", style = MaterialTheme.typography.titleMedium)
                     if (state.snapshot.favoritePaths.isEmpty()) Text("Отмечайте папки звёздочкой для быстрого доступа.", style = MaterialTheme.typography.bodySmall)
                     state.snapshot.favoritePaths.forEach { path -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -242,7 +249,7 @@ private fun FtpCatalog(state: FtpUiState, model: FtpViewModel, copyPath: (String
 private fun FtpRemoteRow(item: FtpItem, favorite: Boolean, active: FtpTransfer?, open: () -> Unit, actions: () -> Unit, toggleFavorite: () -> Unit, copy: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Box {
-        Surface(Modifier.fillMaxWidth().combinedClickable(onClick = open, onLongClick = { menu = true }), shape = RoundedCornerShape(18.dp)) {
+        AppPanel(Modifier.fillMaxWidth().combinedClickable(onClick = open, onLongClick = { menu = true })) {
             Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(painterResource(if (item.isDirectory) R.drawable.ic_nav_folder_open else R.drawable.ic_nav_assignment), null, tint = MaterialTheme.colorScheme.primary)
                 Column(Modifier.weight(1f)) {
@@ -285,7 +292,7 @@ private fun FtpSavedDownloads(state: FtpUiState, search: (String) -> Unit, openF
 private fun FtpTransferCard(record: FtpTransfer, open: () -> Unit, share: () -> Unit, files: () -> Unit, cancel: () -> Unit, remove: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Box {
-        Card(Modifier.fillMaxWidth().combinedClickable(onClick = { if (record.state == FtpTransferState.Completed) open() }, onLongClick = { menu = true })) {
+        AppCard(Modifier.fillMaxWidth().combinedClickable(onClick = { if (record.state == FtpTransferState.Completed) open() }, onLongClick = { menu = true })) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(record.fileName, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -311,7 +318,7 @@ private fun FtpTransferCard(record: FtpTransfer, open: () -> Unit, share: () -> 
 }
 @Composable
 private fun FtpMessage(title: String, message: String, action: @Composable () -> Unit = {}) {
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    AppCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium); Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant); action()
     } }
 }

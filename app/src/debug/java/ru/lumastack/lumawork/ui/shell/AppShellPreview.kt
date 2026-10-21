@@ -182,6 +182,12 @@ private val previewRouteRepository = RouteRepository(
         ): RouteDayRecord? = null.also { previewRefresh("home") }
 
         override suspend fun sendDay(token: String, record: RouteDayRecord) = Unit
+
+        override suspend fun sendGsmReport(token: String, month: String) =
+            ru.lumastack.lumawork.data.route.GsmReportResult(
+                fileName = "ГСМ $month.xlsx", sentToEmail = previewSession.user.email,
+                confirmsEmailDelivery = true, skipEmail = false,
+            )
     },
     cache = object : RouteCache {
         override suspend fun read(userId: String, date: String, workType: ru.lumastack.lumawork.domain.route.RouteWorkType): RouteDayRecord? = null
@@ -325,6 +331,10 @@ private val previewBackpackRepository = BackpackRepository(
 private val previewBackpackPhotoRepository = BackpackPhotoRepository(
     origin = "https://api.work.lumastack.ru",
     cache = object : BackpackPhotoCatalogCache {
+        override suspend fun read(): BackpackPhotoCatalog? = BackpackPhotoCatalog()
+        override suspend fun save(catalog: BackpackPhotoCatalog) = Unit
+    },
+    equipmentCache = object : BackpackPhotoCatalogCache {
         override suspend fun read(): BackpackPhotoCatalog? = BackpackPhotoCatalog()
         override suspend fun save(catalog: BackpackPhotoCatalog) = Unit
     },

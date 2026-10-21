@@ -1,8 +1,7 @@
 package ru.lumastack.lumawork.ui.requests
 
-import androidx.activity.compose.BackHandler
+import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,41 +25,31 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
-import ru.lumastack.lumawork.ui.theme.AppButton as Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material3.MaterialTheme
-import ru.lumastack.lumawork.ui.theme.AppOutlinedButton as OutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -69,16 +58,14 @@ import ru.lumastack.lumawork.domain.simpleone.ActiveRequestsStatusFilter
 import ru.lumastack.lumawork.domain.simpleone.ClosedArchiveSource
 import ru.lumastack.lumawork.domain.simpleone.RequestsMode
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
-import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 import ru.lumastack.lumawork.domain.simpleone.filterActiveRequests
 import ru.lumastack.lumawork.domain.simpleone.filterClosedRequests
 import ru.lumastack.lumawork.domain.simpleone.parseSimpleOneDate
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundBottomLight
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopDark
-import ru.lumastack.lumawork.ui.theme.LumaBackgroundTopLight
+import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.AppPanel
 
 data class RequestsActions(
     val onUsernameChange: (String) -> Unit,
@@ -138,8 +125,8 @@ fun RequestsScreen(
         if (selected == null || widthClass == AppWidthClass.Expanded) toolbar()
         if (widthClass == AppWidthClass.Expanded) {
             Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Surface(Modifier.weight(.43f).fillMaxHeight(), shape = RoundedCornerShape(24.dp)) { list() }
-                Surface(Modifier.weight(.57f).fillMaxHeight(), shape = RoundedCornerShape(24.dp)) {
+                AppPanel(Modifier.weight(.43f).fillMaxHeight()) { list() }
+                AppPanel(Modifier.weight(.57f).fillMaxHeight()) {
                     if (selected != null) detail(selected)
                     else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Выберите заявку") }
                 }
@@ -320,11 +307,7 @@ private fun RequestsHeading(state: SimpleOneUiState, count: Int) {
 
 @Composable
 private fun EmptyRequestsCard(state: SimpleOneUiState) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        ),
-        shape = RoundedCornerShape(22.dp),
+    AppCard(
     ) {
         Text(
             text = when {
@@ -346,11 +329,7 @@ internal fun SimpleOneConnectionCard(
     state: SimpleOneUiState,
     actions: RequestsActions,
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        ),
-        shape = RoundedCornerShape(24.dp),
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -384,7 +363,7 @@ internal fun SimpleOneConnectionCard(
                 keyboardActions = KeyboardActions(onDone = { actions.onSignIn() }),
                 modifier = Modifier.fillMaxWidth(),
             )
-            Button(
+            AppButton(
                 onClick = actions.onSignIn,
                 enabled = !state.isLoading,
                 modifier = Modifier.fillMaxWidth(),
@@ -392,7 +371,7 @@ internal fun SimpleOneConnectionCard(
                 if (state.isLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = androidx.compose.material3.LocalContentColor.current,
                         strokeWidth = 2.dp,
                     )
                 } else {
@@ -415,8 +394,8 @@ private fun RequestCard(request: SimpleOneRequest, selected: Boolean, onClick: (
     onOpenTerminal: (String) -> Unit, personalComment: @Composable (SimpleOneRequest) -> Unit) {
     val data = remember(request) { ru.lumastack.lumawork.domain.requests.RequestDetailsData(request) }
     val type = ru.lumastack.lumawork.domain.requests.closedRequestTypeTitle(data.type)
-    Card(onClick = onClick, border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-        shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxWidth()) {
+    AppCard(onClick = onClick, border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+        modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Column(Modifier.weight(1f)) {
@@ -465,6 +444,7 @@ fun SimpleOneRequestDetailContent(
     errorMessage: String?,
     onBack: () -> Unit,
     gridState: LazyGridState = rememberLazyGridState(),
+    showBackButton: Boolean = false,
 ) {
     val columns = if (widthClass == AppWidthClass.Compact) 1 else 2
     val fields = remember(request) { request.detailFields() }
@@ -478,12 +458,12 @@ fun SimpleOneRequestDetailContent(
     ) {
         item(key = "detail-header", span = { GridItemSpan(maxLineSpan) }) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
+                if (showBackButton || isLoading) Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedButton(onClick = onBack) { Text("Назад") }
+                    if (showBackButton) ru.lumastack.lumawork.ui.shell.AppBackButton(onBack)
                     if (isLoading) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                 }
                 Text(request.displayNumber, style = MaterialTheme.typography.headlineMedium)
@@ -517,11 +497,7 @@ fun SimpleOneRequestDetailContent(
 
 @Composable
 private fun DetailFieldCard(field: DetailField) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
-        ),
-        shape = RoundedCornerShape(18.dp),
+    AppCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         SelectionContainer {

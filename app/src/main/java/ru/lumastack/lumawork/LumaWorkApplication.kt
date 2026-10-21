@@ -163,6 +163,7 @@ class AppContainer(application: Application) {
     val backpackPhotoRepository = BackpackPhotoRepository(
         origin = BuildConfig.API_ORIGIN,
         cache = FileBackpackPhotoCatalogCache(application, json),
+        equipmentCache = FileBackpackPhotoCatalogCache(application, json, "equipment-photo-catalog.json"),
         json = json,
     )
 

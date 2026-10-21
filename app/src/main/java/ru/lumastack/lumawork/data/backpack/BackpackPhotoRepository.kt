@@ -5,6 +5,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -19,6 +20,7 @@ import ru.lumastack.lumawork.domain.backpack.BackpackPhoto
 class BackpackPhotoRepository(
     private val origin: String,
     private val cache: BackpackPhotoCatalogCache,
+    private val equipmentCache: BackpackPhotoCatalogCache,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -27,9 +29,15 @@ class BackpackPhotoRepository(
 ) {
     suspend fun cached(): BackpackPhotoCatalog = cache.read() ?: FALLBACK_CATALOG
 
-    suspend fun refresh(): BackpackPhotoCatalog? {
+    suspend fun cachedEquipment(): BackpackPhotoCatalog = equipmentCache.read() ?: BackpackPhotoCatalog()
+
+    suspend fun refresh(): BackpackPhotoCatalog? = refresh("backpack-terminals", cache)
+
+    suspend fun refreshEquipment(): BackpackPhotoCatalog? = refresh("equipment", equipmentCache)
+
+    private suspend fun refresh(endpoint: String, targetCache: BackpackPhotoCatalogCache): BackpackPhotoCatalog? {
         val request = Request.Builder()
-            .url("${origin.trimEnd('/')}/api/v2/media/backpack-terminals")
+            .url("${origin.trimEnd('/')}/api/v2/media/$endpoint")
             .header("Accept", "application/json")
             .get()
             .build()
@@ -39,9 +47,11 @@ class BackpackPhotoRepository(
                 if (!it.isSuccessful) return null
                 val catalog = json.decodeFromString<BackpackPhotoCatalog>(it.body.string())
                 if (catalog.items.isEmpty()) return null
-                withContext(Dispatchers.IO) { cache.save(catalog) }
+                withContext(Dispatchers.IO) { targetCache.save(catalog) }
                 catalog
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             null
         }
@@ -90,8 +100,9 @@ interface BackpackPhotoCatalogCache {
 class FileBackpackPhotoCatalogCache(
     context: android.content.Context,
     private val json: Json,
+    fileName: String = "photo-catalog.json",
 ) : BackpackPhotoCatalogCache {
-    private val file = java.io.File(context.noBackupFilesDir, "backpack/photo-catalog.json")
+    private val file = java.io.File(context.noBackupFilesDir, "backpack/$fileName")
 
     override suspend fun read(): BackpackPhotoCatalog? = withContext(Dispatchers.IO) {
         if (!file.isFile) return@withContext null
