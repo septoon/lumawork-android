@@ -34,7 +34,7 @@ class FtpViewModel(private val repository: FtpRepository, private val session: A
         try { repository.read(session.user.id)?.let(::applySnapshot); refreshTransfers() }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { mutableState.update { it.copy(errorMessage = "Не удалось прочитать сохранённые данные FTP.") } }
-        if (!startOffline) navigate("/")
+        if (!startOffline && pathRevision == 0L) navigate("/")
     } }
     private fun applySnapshot(snapshot: FtpSnapshot) { mutableState.update { if (snapshot.revision >= it.snapshot.revision) it.copy(snapshot = snapshot) else it } }
     fun search(value: String) { mutableState.update { it.copy(search = value) } }

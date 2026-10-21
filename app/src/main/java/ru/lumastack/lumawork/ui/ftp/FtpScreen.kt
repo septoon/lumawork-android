@@ -53,15 +53,20 @@ import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FtpRoute(session: AppSession, startOffline: Boolean, repository: FtpRepository, widthClass: AppWidthClass, modifier: Modifier = Modifier) {
-    key(session.user.id, session.token, startOffline) { FtpRouteContent(session, startOffline, repository, widthClass, modifier) }
+fun FtpRoute(session: AppSession, startOffline: Boolean, repository: FtpRepository, widthClass: AppWidthClass, modifier: Modifier = Modifier,
+    initialPath: String? = null, onPathConsumed: () -> Unit = {},
+) {
+    key(session.user.id, session.token, startOffline) { FtpRouteContent(session, startOffline, repository, widthClass, modifier, initialPath, onPathConsumed) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FtpRouteContent(session: AppSession, startOffline: Boolean, repository: FtpRepository, widthClass: AppWidthClass, modifier: Modifier) {
+private fun FtpRouteContent(session: AppSession, startOffline: Boolean, repository: FtpRepository, widthClass: AppWidthClass, modifier: Modifier,
+    initialPath: String?, onPathConsumed: () -> Unit,
+) {
     val model: FtpViewModel = viewModel(key = "ftp-${session.user.id}-${session.token.hashCode()}-$startOffline", factory = FtpViewModel.factory(repository, session, startOffline))
     val state by model.state.collectAsStateWithLifecycle()
+    LaunchedEffect(initialPath) { initialPath?.let { model.section(FtpSection.Catalog); model.navigate(it); onPathConsumed() } }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle

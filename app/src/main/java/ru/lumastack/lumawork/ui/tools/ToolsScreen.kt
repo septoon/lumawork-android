@@ -38,12 +38,12 @@ import ru.lumastack.lumawork.ui.theme.appScreenBackground
 import androidx.compose.foundation.background
 import ru.lumastack.lumawork.ui.theme.AppCard
 
-private enum class ToolsSection(val title: String) { Device("Устройство"), Firmware("Прошивки"), Logs("Логи"), History("История") }
-private enum class FileFilter(val title: String) { All("Все файлы"), Update("update.zip"), Previous("Выбран ранее") }
+private enum class ToolsSection(val title: String) { Device("Устройство"), Firmware("Файлы"), History("История") }
+private enum class FileFilter(val title: String) { All("Все ZIP"), Previous("Выбран ранее") }
 
 @Composable
 fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiState,
-    widthClass: AppWidthClass, onFtp: () -> Unit, onWiki: () -> Unit,
+    widthClass: AppWidthClass, onFtp: () -> Unit, onWiki: () -> Unit, onPaxFtp: () -> Unit = onFtp,
 ) {
     val context = LocalContext.current
     val transfers = repository.transfers
@@ -53,6 +53,7 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
     }
     val model: ToolsViewModel = viewModel(key = "tools-$owner", factory = ToolsViewModel.factory(context, transfers, owner))
     val state by model.state.collectAsStateWithLifecycle()
+    val paxFiles = state.files.filter { it.isPaxFirmwareSource() }
     val usb by model.usb.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var section by rememberSaveable(owner) { mutableStateOf(ToolsSection.Device) }
@@ -62,6 +63,9 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
     var requestSearch by remember { mutableStateOf("") }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val importFirmware = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) model.importFirmware(uri)
+    }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) scope.launch {
             try {
@@ -97,71 +101,42 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it); model.notice(null) } }
     AppHeaderSegments(ToolsSection.entries.map { it.title }, section.ordinal, { section = ToolsSection.entries[it] })
     Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
-        Column(Modifier.padding(padding).widthIn(max = if (widthClass == AppWidthClass.Expanded) 1180.dp else 720.dp).fillMaxSize()) {
-            AppRefreshContainer(Modifier.fillMaxSize(), isRefreshing = state.loading, onRefresh = { model.usb.scan(); model.refresh() }) {
+        Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
+            AppRefreshContainer(Modifier.widthIn(max = if (widthClass == AppWidthClass.Expanded) 1180.dp else 720.dp).fillMaxSize(), isRefreshing = state.loading, onRefresh = { model.usb.scan(); model.refresh() }) {
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item { Text("Операция: ${state.snapshot.operation.phase.title}", style = MaterialTheme.typography.labelLarge) }
+                    if (state.snapshot.operation.phase != UpdatePhase.Idle && section != ToolsSection.Device) item {
+                        Text(state.snapshot.operation.phase.title, style = MaterialTheme.typography.labelLarge)
+                    }
                     when (section) {
-                        ToolsSection.Device -> {
-                            item { ToolCard("Прямое USB-соединение") {
-                                Text(if (usb.hostSupported) "Подключите POS-терминал кабелем к телефону или планшету в режиме USB Host." else "На этом устройстве Android USB Host не поддерживается.")
-                                Text("USB-подключение не подтверждает доступ к файлам, сервисным командам или обновлению ОС.", style = MaterialTheme.typography.bodyMedium)
-                                TextButton(onClick = { model.usb.scan() }) { Text("Обновить устройства") }
-                            } }
-                            usb.error?.let { error -> item { ToolCard("Диагностика подключения") { Text(error, color = MaterialTheme.colorScheme.error) } } }
-                            if (usb.devices.isEmpty()) item { ToolCard("USB-оборудование не обнаружено") {
-                                Text("Проверьте кабель передачи данных и распределение ролей Host/Device. Зарядка не означает установку соединения.")
-                            } }
-                            items(usb.devices, key = { it.key }) { device -> ToolCard(device.product ?: "USB-устройство") {
-                                SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("VID/PID: %04X:%04X".format(device.vendorId, device.productId))
-                                    Text("Производитель: ${device.manufacturer ?: "не указан"}")
-                                    Text("Модель терминала: ${device.confirmedModel ?: "достоверно не определена"}")
-                                    Text("USB: ${if (device.hasPermission) "доступ разрешён" else "требуется разрешение"}")
-                                    Text("Адрес USB: ${device.key}", style = MaterialTheme.typography.bodySmall)
-                                    device.interfaces.forEach { iface ->
-                                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                                        Text("Интерфейс ${iface.id} / alt ${iface.alternate}: ${iface.deviceClass}/${iface.subclass}/${iface.protocol}")
-                                        Text(iface.kind.title, style = MaterialTheme.typography.bodyMedium)
-                                        iface.endpoints.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                                    }
-                                } }
-                                if (!device.hasPermission) TextButton(onClick = { model.usb.requestPermission(device.key) }, enabled = usb.permissionPending == null) {
-                                    Text(if (usb.permissionPending == device.key) "Ожидание разрешения…" else "Разрешить USB-доступ")
-                                } else TextButton(onClick = { model.usb.probe(device.key) }, enabled = usb.probingKey == null) { Text("Проверить протоколы") }
-                                if (usb.probingKey == device.key) {
-                                    LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Проверка ответа MTP/PTP…")
-                                    TextButton(onClick = model.usb::cancelProbe) { Text("Прервать диагностику") }
-                                }
-                                usb.diagnostics[device.key]?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                            } }
-                            item { ToolCard("Доступные возможности") {
-                                Text("Обнаружение USB, разрешение Android, диагностика интерфейсов и локальные файлы FTP.")
-                                Text("P8 Bio: USB Serial описан для кассового режима; команды логов и прошивки не подтверждены. MF960 Android: Host/Device и OTA описаны, прямой доступ к Downloads не подтверждён.")
-                                TextButton(onClick = onWiki) { Text("Открыть Вики") }
-                            } }
+                        ToolsSection.Device -> item {
+                            ToolsDeviceWorkspace(usb, model.usb::scan, model.usb::requestPermission,
+                                model.usb::probe, model.usb::cancelProbe, onWiki,
+                                firmwareBusy = state.globalInstallBusy, onFirmware = { section = ToolsSection.Firmware })
                         }
                         ToolsSection.Firmware -> {
-                            item { AppTextField(query, { query = it }, "Поиск файлов FTP", search = true, singleLine = true) }
+                            item { PaxFirmwarePanel(state, usb,
+                                onImport = { importFirmware.launch(arrayOf("application/zip", "application/octet-stream")) },
+                                onFtp = onPaxFtp, onDevice = { section = ToolsSection.Device }, onStart = model::startFirmware) }
+                            item { Text("ZIP из папки прошивок PAX в FTP", style = MaterialTheme.typography.titleMedium) }
+                            item { AppTextField(query, { query = it }, "Поиск комплектов PAX", search = true, singleLine = true) }
                             item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 FileFilter.entries.forEach { item -> FilterChip(selected = filter == item, onClick = { filter = item }, label = { Text(item.title) }) }
                             } }
                             item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                TextButton(onClick = onFtp) { Text("Загрузить через FTP") }
+                                TextButton(onClick = onPaxFtp) { Text("Загрузить через FTP") }
                                 TextButton(onClick = { model.refresh() }, enabled = !state.loading && !state.checking) { Text("Обновить список") }
                             } }
-                            if (state.files.isEmpty() && !state.loading) item { ToolCard("Локальных файлов нет") {
-                                Text("Загрузите прошивку или другой файл через существующий экран FTP. Повторная загрузка сохранённых файлов не требуется.")
-                                TextButton(onClick = onFtp) { Text("Загрузить через FTP") }
+                            if (paxFiles.isEmpty() && !state.loading) item { ToolCard("Скачанных комплектов PAX нет") {
+                                Text("Загрузите ZIP из папки Verifone_Pax/Прошивки или выберите полный комплект из памяти устройства. Файлы других производителей доступны в разделе FTP.")
+                                TextButton(onClick = onPaxFtp) { Text("Открыть прошивки PAX") }
                             } }
-                            val visible = state.files.filter { file ->
+                            val visible = paxFiles.filter { file ->
                                 (query.isBlank() || file.name.contains(query.trim(), true)) && when (filter) {
                                     FileFilter.All -> true
-                                    FileFilter.Update -> file.name.equals("update.zip", true)
                                     FileFilter.Previous -> file.id == state.snapshot.selection?.file?.id
                                 }
                             }
-                            if (visible.isEmpty() && state.files.isNotEmpty()) item { Text("По заданным условиям файлы не найдены.") }
+                            if (visible.isEmpty() && paxFiles.isNotEmpty()) item { Text("По заданным условиям файлы не найдены.") }
                             items(visible, key = { it.id }) { file ->
                                 val selected = state.snapshot.selection?.takeIf { it.file.id == file.id }
                                 AppCard(onClick = { model.inspect(file) }, enabled = !file.downloading && !state.checking && !state.loading, modifier = Modifier.fillMaxWidth()) {
@@ -176,15 +151,7 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
                             }
                             item { ToolCard("Проверка перед передачей") {
                                 Text("Имя и расширение файла не подтверждают совместимость. SHA-256 проверяет неизменность выбранных байтов; без официального эталона он не подтверждает подлинность прошивки.")
-                                Text(USB_UNCONFIRMED_UPDATE, color = MaterialTheme.colorScheme.error)
-                            } }
-                        }
-                        ToolsSection.Logs -> {
-                            item { ToolCard("Логи терминала") {
-                                Text("Прямое получение логов не поддерживается: протокол не подтверждён")
-                                Text("Кассовый USB Serial P8 не подтверждает доступ к логам. Для MF960 нужен документированный файловый протокол или официальный SDK. Сервисные команды не отправляются.")
-                                Text("Полученных по USB логов пока нет. Просмотр, экспорт логов и отправка вложения в SimpleOne станут доступны после подключения подтверждённого адаптера.")
-                                TextButton(onClick = onWiki) { Text("Открыть Вики") }
+                                Text("Полная установка поддерживается только для проверенного комплекта PAX D270 в карточке выше. Остальные файлы доступны для локальной проверки.", style = MaterialTheme.typography.bodyMedium)
                             } }
                         }
                         ToolsSection.History -> {
@@ -214,8 +181,11 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
                     TextButton(onClick = { model.closeFile(); onFtp() }) { Text("Загрузить файл через FTP") }
                 }
                 item { Text(state.checkMessage ?: "После выбора приложение проверит доступность и SHA-256, затем сохранит ID загрузки FTP. Совместимость и протокол записи не подтверждены; передача недоступна.") }
-                if (file.name.equals("update.zip", true)) item { Text("Копирование update.zip и установка ОС — отдельные операции.\n$USB_UNCONFIRMED_UPDATE", color = MaterialTheme.colorScheme.error) }
+                if (file.name.equals("update.zip", true)) item { Text("Имя update.zip не подтверждает совместимость. Установка на терминал недоступна.", style = MaterialTheme.typography.bodyMedium) }
                 if (state.checking) item { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Проверка файла и SHA-256…") }
+                if (available && file.name.endsWith(".zip", true)) item {
+                    TextButton(onClick = { model.prepareFirmwareFromFtp(file.id) }, enabled = !state.firmwareBusy && !state.globalInstallBusy) { Text("Подготовить полный комплект PAX") }
+                }
                 if (selected != null) item { TextButton(onClick = { model.clearSelection() }, enabled = !state.checking) { Text("Сбросить сохранённый выбор") } }
             }
         }, confirmButton = {
@@ -241,7 +211,7 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
     }
 }
 
-@Composable private fun ToolCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+@Composable internal fun ToolCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     AppCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, style = MaterialTheme.typography.titleMedium); content()
     } }
@@ -249,8 +219,6 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
 @Composable private fun FileDetails(file: LocalToolFile, hash: String?) {
     SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("Размер: ${android.text.format.Formatter.formatFileSize(LocalContext.current, file.size)} · загрузка: ${toolDate(file.downloadedAt)}", style = MaterialTheme.typography.bodySmall)
-        Text("ID FTP: ${file.id}", style = MaterialTheme.typography.bodySmall)
-        Text(file.locator, style = MaterialTheme.typography.bodySmall)
         Text("SHA-256: ${hash ?: "будет рассчитан при выборе"}", style = MaterialTheme.typography.bodySmall)
     } }
 }

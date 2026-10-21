@@ -15,18 +15,19 @@ import kotlinx.coroutines.launch
 /** Diagnostic support is separate from permission to write firmware or read terminal logs. */
 internal interface UsbProtocolDiagnosticsAdapter {
     fun supports(device: UsbEquipment): Boolean
-    suspend fun inspect(device: UsbDevice): String
+    suspend fun inspect(device: UsbDevice, onStage: (UsbProbeStage) -> Unit): UsbDiagnosticResult
     fun cancel() {}
 }
 internal class CdcAcmDiagnosticsAdapter : UsbProtocolDiagnosticsAdapter {
     override fun supports(device: UsbEquipment) = device.interfaces.any { it.kind == UsbInterfaceKind.CdcAcm }
-    override suspend fun inspect(device: UsbDevice) =
-        "Объявлен USB Serial (CDC ACM). Кассовый COM-интерфейс не подтверждает поддержку выгрузки логов или прошивки. Сервисные команды не отправлялись."
+    override suspend fun inspect(device: UsbDevice, onStage: (UsbProbeStage) -> Unit) =
+        UsbDiagnosticResult("Объявлен USB Serial (CDC ACM). Сервисный протокол этого устройства пока не поддерживается.")
 }
 internal class MtpDiagnosticsAdapter(private val manager: UsbManager) : UsbProtocolDiagnosticsAdapter {
     private val mtpSession = AtomicReference<MtpProbeSession?>(null)
     override fun supports(device: UsbEquipment) = device.interfaces.any { it.kind == UsbInterfaceKind.MtpCandidate }
-    override suspend fun inspect(device: UsbDevice): String {
+    override suspend fun inspect(device: UsbDevice, onStage: (UsbProbeStage) -> Unit): UsbDiagnosticResult {
+        onStage(UsbProbeStage.Reading)
         val connection = manager.openDevice(device) ?: error("USB open failed")
         val session = MtpProbeSession(MtpDevice(device), connection)
         val mtp = session.device
@@ -42,12 +43,12 @@ internal class MtpDiagnosticsAdapter(private val manager: UsbManager) : UsbProto
             val storages = mtp.storageIds?.toList()?.mapNotNull { id -> mtp.getStorageInfo(id)?.let {
                 "${it.description.ifBlank { id.toString() }}: свободно ${it.freeSpace} Б"
             } }.orEmpty()
-            return buildString {
+            return UsbDiagnosticResult(buildString {
                 append("MTP/PTP ответ получен. Модель из ответа: ${info.model.ifBlank { "не указана" }}.\n")
                 append("Хранилища: ${storages.ifEmpty { listOf("недоступны") }.joinToString("; ")}.\n")
                 append("SendObject: ${if (sendDeclared) "объявлен устройством, запись не проверена" else "не объявлен"}.\n")
                 append("Доступ к Downloads, совместимость прошивки и получение логов не подтверждены. USB-сессия диагностики закрыта.")
-            }
+            })
         } finally {
             mtpSession.compareAndSet(session, null)
             session.close()

@@ -23,10 +23,10 @@ class FtpLocalToolFiles(private val transfers: FtpTransfers) : LocalToolFiles {
     override suspend fun list(owner: String): List<LocalToolFile> = transfers.refresh(owner).mapNotNull { record ->
         if (record.action != FtpTransferAction.Download) return@mapNotNull null
         if (record.state.isActive) return@mapNotNull LocalToolFile(record.id, record.fileName, record.totalBytes ?: record.bytesWritten,
-            0, record.createdAt, "ftp:${record.id}", downloading = true)
+            0, record.createdAt, "ftp:${record.id}", downloading = true, remotePath = record.remotePath)
         if (record.state != FtpTransferState.Completed) return@mapNotNull null
         transfers.savedFile(owner, record.id)?.let { file ->
-            LocalToolFile(record.id, record.fileName, file.length(), file.lastModified(), record.createdAt, file.toURI().toString())
+            LocalToolFile(record.id, record.fileName, file.length(), file.lastModified(), record.createdAt, file.toURI().toString(), remotePath = record.remotePath)
         }
     }
     override suspend fun open(owner: String, id: String): InputStream =
@@ -108,6 +108,20 @@ class ToolsRepository(
         require(request == null || (request.sysId.isNotBlank() && request.number.isNotBlank()))
         val state = read(owner)
         store.write(owner, state.copy(history = state.history.map { if (it.id == eventId) it.copy(request = request) else it }))
+    } }
+    suspend fun recordInstallation(owner: String, installation: PaxInstallState) = withContext(Dispatchers.IO) { mutex.withLock {
+        require(installation.owner == owner)
+        if (installation.operationId.isBlank() || installation.phase !in listOf(PaxInstallPhase.Complete, PaxInstallPhase.Failed, PaxInstallPhase.Interrupted)) return@withLock
+        val state = read(owner)
+        if (state.history.any { it.id == installation.operationId }) return@withLock
+        val kind = when (installation.phase) {
+            PaxInstallPhase.Complete -> ToolsEventKind.InstallationConfirmed
+            PaxInstallPhase.Interrupted -> ToolsEventKind.Interrupted
+            else -> ToolsEventKind.InstallationUnknown
+        }
+        val event = ToolsEvent(installation.operationId, installation.updatedAt, kind,
+            "PAX D270 · ${installation.step?.title ?: "Подготовка"}. ${installation.detail}")
+        store.write(owner, state.copy(history = (listOf(event) + state.history).take(500)))
     } }
     private suspend fun read(owner: String): ToolsSnapshot {
         require(owner.isNotBlank())

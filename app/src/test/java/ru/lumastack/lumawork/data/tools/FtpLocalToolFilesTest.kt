@@ -20,6 +20,7 @@ class FtpLocalToolFilesTest {
         val listed = source.list("owner")
         assertEquals(1, listed.size)
         assertEquals(file.toURI().toString(), listed.single().locator)
+        assertEquals("/firmware/update.zip", listed.single().remotePath)
         assertEquals("firmware", source.open("owner", listed.single().id).bufferedReader().use { it.readText() })
         assertTrue(runCatching { source.open("other", listed.single().id) }.isFailure)
         assertEquals(0, gateway.enqueued)
@@ -41,6 +42,19 @@ class FtpLocalToolFilesTest {
         val file = temporary.newFile("deleted").apply { delete() }
         val source = FtpLocalToolFiles(FtpTransfers(LocalFtpStore(listOf(record("owner"))), LocalFtpGateway(file)))
         assertTrue(source.list("owner").isEmpty())
+    }
+    @Test fun `PAX selector uses FTP provenance and never offers Unitodi PayApp`() = runBlocking {
+        val file = temporary.newFile("source").apply { writeText("firmware") }
+        val entries = listOf(
+            record("owner").copy(remotePath = "$PAX_FIRMWARE_FTP_PATH/ПО 3.0.65.014 для целевого ТО/3.0.65.014_ЦР.zip", fileName = "3.0.65.014_ЦР.zip"),
+            record("owner").copy(remotePath = "/VTB_TO/TO/Vendor/Unitodi/ofd_payapp.apk", fileName = "ofd_payapp.apk"),
+            record("owner").copy(remotePath = "/VTB_TO/TO/Vendor/Unitodi/update.zip", fileName = "update.zip"),
+            record("owner").copy(remotePath = "${PAX_FIRMWARE_FTP_PATH}_old/package.zip", fileName = "package.zip"),
+        )
+        val listed = FtpLocalToolFiles(FtpTransfers(LocalFtpStore(entries), LocalFtpGateway(file))).list("owner")
+        assertEquals(4, listed.size) // Source remains shared; only the PAX chooser is scoped.
+        assertEquals(listOf("3.0.65.014_ЦР.zip"), listed.filter { it.isPaxFirmwareSource() }.map { it.name })
+        assertFalse(LocalToolFile("old", "pax.zip", 1, 1, 1, "managed").isPaxFirmwareSource())
     }
     private fun record(owner: String) = FtpTransfer(UUID.randomUUID().toString(), owner, "/firmware/update.zip", "update.zip", false,
         FtpTransferAction.Download, 1, state = FtpTransferState.Completed)

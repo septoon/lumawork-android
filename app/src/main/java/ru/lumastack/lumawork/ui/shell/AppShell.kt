@@ -362,6 +362,7 @@ private fun AppDrawerShell(
 ) {
     var assistantSection by rememberSaveable(session.user.id) { mutableStateOf("chat") }
     var workScheduleOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
+    var requestedFtpPath by remember(session.user.id) { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(selected, simpleOneState.isAuthorized) {
         if (selected != AppDestination.Employees || !simpleOneState.isAuthorized) workScheduleOpen = false
     }
@@ -448,6 +449,8 @@ private fun AppDrawerShell(
                         onCloseWorkSchedule = { workScheduleOpen = false },
                         assistantSection = assistantSection,
                         onAssistantSection = { assistantSection = it },
+                        requestedFtpPath = requestedFtpPath,
+                        onRequestedFtpPath = { requestedFtpPath = it },
                         modifier = Modifier.padding(padding).consumeWindowInsets(padding),
                     )
                 }
@@ -637,6 +640,8 @@ private fun DestinationContent(
     onCloseWorkSchedule: () -> Unit,
     assistantSection: String,
     onAssistantSection: (String) -> Unit,
+    requestedFtpPath: String?,
+    onRequestedFtpPath: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -730,6 +735,7 @@ private fun DestinationContent(
                 requests = simpleOneState,
                 widthClass = contentWidthClass,
                 onFtp = { onSelect(AppDestination.Ftp) },
+                onPaxFtp = { onRequestedFtpPath(ru.lumastack.lumawork.data.tools.PAX_FIRMWARE_FTP_PATH); onSelect(AppDestination.Ftp) },
                 onWiki = { onAssistantSection("wiki"); onSelect(AppDestination.Wiki) },
             )
             AppDestination.Ftp -> FtpRoute(
@@ -737,6 +743,8 @@ private fun DestinationContent(
                 startOffline = isOffline,
                 repository = ftpRepository,
                 widthClass = contentWidthClass,
+                initialPath = requestedFtpPath,
+                onPathConsumed = { onRequestedFtpPath(null) },
             )
             AppDestination.Salary -> SalaryRoute(
                 session = session,

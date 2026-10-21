@@ -1,5 +1,8 @@
 package ru.lumastack.lumawork.data.backpack
 
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -25,24 +28,29 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class BackpackRepositoryTest {
+    private val models = mutableListOf<ru.lumastack.lumawork.ui.backpack.BackpackViewModel>()
+    private suspend fun closeModels() {
+        models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
+        models.clear()
+    }
     @Test fun `offline mode never starts list refresh`() = runTest {
         kotlinx.coroutines.Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {
             val api = FakeBackpackApi(listOf(item("1")))
-            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(api, authorizedStore(), FakeBackpackCache()), testPhotos(), "owner", true)
+            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(api, authorizedStore(), FakeBackpackCache()), testPhotos(), "owner", true).also(models::add)
             model.activate("simple-user", true)
             advanceUntilIdle()
             model.refresh()
             advanceUntilIdle()
             assertEquals(0, api.listCalls)
-        } finally { kotlinx.coroutines.Dispatchers.resetMain() }
+        } finally { closeModels(); kotlinx.coroutines.Dispatchers.resetMain() }
     }
 
     @Test fun `refresh cannot revert a location edited while cache save was suspended`() = runTest {
         kotlinx.coroutines.Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {
             val cache = FakeBackpackCache().apply { value = BackpackSnapshot("simple-user", listOf(item("1"))); saveGate = CompletableDeferred() }
-            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(FakeBackpackApi(listOf(item("1"))), authorizedStore(), cache), testPhotos(), "owner", false)
+            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(FakeBackpackApi(listOf(item("1"))), authorizedStore(), cache), testPhotos(), "owner", false).also(models::add)
             model.activate("simple-user", true)
             runCurrent()
             model.setLocation(item("1"), BackpackLocation.Absent)
@@ -50,7 +58,7 @@ class BackpackRepositoryTest {
             cache.saveGate!!.complete(Unit)
             advanceUntilIdle()
             assertEquals(BackpackLocation.Absent, model.state.value.snapshot!!.location(item("1")))
-        } finally { kotlinx.coroutines.Dispatchers.resetMain() }
+        } finally { closeModels(); kotlinx.coroutines.Dispatchers.resetMain() }
     }
 
     @Test fun `reauthorization refreshes an existing cached inventory`() = runTest {
@@ -58,14 +66,14 @@ class BackpackRepositoryTest {
         try {
             val cache = FakeBackpackCache().apply { value = BackpackSnapshot("simple-user", listOf(item("old"))) }
             val api = FakeBackpackApi(listOf(item("new")))
-            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(api, authorizedStore(), cache), testPhotos(), "owner", false)
+            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(api, authorizedStore(), cache), testPhotos(), "owner", false).also(models::add)
             model.activate("simple-user", false)
             advanceUntilIdle()
             model.activate("simple-user", true)
             advanceUntilIdle()
             assertEquals(1, api.listCalls)
             assertEquals("new", model.state.value.snapshot!!.items.single().id)
-        } finally { kotlinx.coroutines.Dispatchers.resetMain() }
+        } finally { closeModels(); kotlinx.coroutines.Dispatchers.resetMain() }
     }
 
     @Test fun `reauthorization during cache restore still refreshes inventory`() = runTest {
@@ -73,7 +81,7 @@ class BackpackRepositoryTest {
         try {
             val cache = FakeBackpackCache().apply { value = BackpackSnapshot("simple-user", listOf(item("old"))); readGate = CompletableDeferred() }
             val api = FakeBackpackApi(listOf(item("new")))
-            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(api, authorizedStore(), cache), testPhotos(), "owner", false)
+            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(api, authorizedStore(), cache), testPhotos(), "owner", false).also(models::add)
             model.activate("simple-user", false)
             runCurrent()
             model.activate("simple-user", true)
@@ -81,7 +89,7 @@ class BackpackRepositoryTest {
             advanceUntilIdle()
             assertEquals(1, api.listCalls)
             assertEquals("new", model.state.value.snapshot!!.items.single().id)
-        } finally { kotlinx.coroutines.Dispatchers.resetMain() }
+        } finally { closeModels(); kotlinx.coroutines.Dispatchers.resetMain() }
     }
 
     @Test fun `authorization loss cancels pending refresh and keeps cached inventory`() = runTest {
@@ -89,7 +97,7 @@ class BackpackRepositoryTest {
         try {
             val cache = FakeBackpackCache().apply { value = BackpackSnapshot("simple-user", listOf(item("old"))) }
             val api = FakeBackpackApi(listOf(item("new"))).apply { listGate = CompletableDeferred() }
-            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(api, authorizedStore(), cache), testPhotos(), "owner", false)
+            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(api, authorizedStore(), cache), testPhotos(), "owner", false).also(models::add)
             model.activate("simple-user", true)
             runCurrent()
             model.activate("simple-user", false)
@@ -98,13 +106,13 @@ class BackpackRepositoryTest {
             assertEquals(false, model.state.value.isLoading)
             assertEquals(false, model.state.value.isAuthorized)
             assertEquals("old", model.state.value.snapshot!!.items.single().id)
-        } finally { kotlinx.coroutines.Dispatchers.resetMain() }
+        } finally { closeModels(); kotlinx.coroutines.Dispatchers.resetMain() }
     }
 
     @Test fun `accepted scan clears location filter without changing serial text`() = runTest {
         kotlinx.coroutines.Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {
-            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(FakeBackpackApi(emptyList()), authorizedStore(), FakeBackpackCache()), testPhotos(), "owner", true)
+            val model = ru.lumastack.lumawork.ui.backpack.BackpackViewModel(BackpackRepository(FakeBackpackApi(emptyList()), authorizedStore(), FakeBackpackCache()), testPhotos(), "owner", true).also(models::add)
             model.selectLocation(BackpackLocation.Home)
             model.openGroup("model:pax")
             model.applyScan("  000AbC-123/45  ")
@@ -114,7 +122,7 @@ class BackpackRepositoryTest {
             model.applyScan("—")
             assertEquals("000AbC-123/45", model.state.value.query)
             advanceUntilIdle()
-        } finally { kotlinx.coroutines.Dispatchers.resetMain() }
+        } finally { closeModels(); kotlinx.coroutines.Dispatchers.resetMain() }
     }
 
     @Test fun `list is published before details and concurrent location edits survive hydration`() = runTest {

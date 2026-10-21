@@ -2,10 +2,14 @@ package ru.lumastack.lumawork.data.tools
 
 import kotlinx.serialization.Serializable
 
+const val PAX_FIRMWARE_FTP_PATH = "/VTB_TO/TO/Vendor/Verifone_Pax/Прошивки"
+
 @Serializable data class LocalToolFile(
     val id: String, val name: String, val size: Long, val modifiedAt: Long,
     val downloadedAt: Long, val locator: String, val downloading: Boolean = false,
+    val remotePath: String? = null,
 )
+fun LocalToolFile.isPaxFirmwareSource(): Boolean = remotePath?.startsWith("$PAX_FIRMWARE_FTP_PATH/") == true && name.endsWith(".zip", true)
 @Serializable data class SelectedFirmware(val file: LocalToolFile, val sha256: String, val selectedAt: Long)
 @Serializable data class ToolRequestRef(val sysId: String, val number: String)
 @Serializable enum class ToolsEventKind(val title: String) {

@@ -106,6 +106,26 @@ class ToolsRepositoryTest {
         assertEquals("sys123", repository().refresh("owner").snapshot.history.first().request?.sysId)
         assertTrue(repository().refresh("other").snapshot.history.isEmpty())
     }
+    @Test fun `installation result is recorded once across route reentry and keeps local binding`() = runBlocking {
+        val installation = PaxInstallState(owner = "owner", phase = PaxInstallPhase.Complete, step = PaxFirmwareStep.Complete,
+            detail = "Versions confirmed", operationId = "installation-id", updatedAt = 123)
+        repository().recordInstallation("owner", installation)
+        repository().bindRequest("owner", "installation-id", ToolRequestRef("sys123", "INC123"))
+        repository().recordInstallation("owner", installation)
+        val history = repository().refresh("owner").snapshot.history
+        assertEquals(1, history.size)
+        assertEquals(ToolsEventKind.InstallationConfirmed, history.single().kind)
+        assertEquals("INC123", history.single().request?.number)
+        assertTrue(runCatching { repository().recordInstallation("other", installation) }.isFailure)
+        assertTrue(repository().refresh("other").snapshot.history.isEmpty())
+    }
+    @Test fun `running or interrupted installation never appears as confirmed`() = runBlocking {
+        val installation = PaxInstallState(owner = "owner", phase = PaxInstallPhase.Running, operationId = "installation-id")
+        repository().recordInstallation("owner", installation)
+        assertTrue(repository().refresh("owner").snapshot.history.isEmpty())
+        repository().recordInstallation("owner", installation.copy(phase = PaxInstallPhase.Interrupted))
+        assertEquals(ToolsEventKind.Interrupted, repository().refresh("owner").snapshot.history.single().kind)
+    }
 }
 private class TestToolsStore : ToolsStore {
     val values = mutableMapOf<String, ToolsSnapshot>()
