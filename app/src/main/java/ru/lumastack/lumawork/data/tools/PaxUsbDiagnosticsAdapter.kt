@@ -13,7 +13,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 
 fun isPaxUsbCandidate(device: UsbEquipment): Boolean = isPaxPinpadCandidate(device) || isPaxXcbCandidate(device)
-internal fun isPaxXcbCandidate(device: UsbEquipment): Boolean = device.vendorId == 0x2FB8 && device.productId == 0x1101 &&
+// Both identities use the same XCB transport in the supplied D270 and Q25 captures.
+internal fun isPaxXcbUsbId(vendorId: Int, productId: Int): Boolean =
+    vendorId == 0x2FB8 && productId == 0x1101 || vendorId == 0x1234 && productId == 0x0101
+internal fun isPaxXcbCandidate(device: UsbEquipment): Boolean = isPaxXcbUsbId(device.vendorId, device.productId) &&
     device.interfaces.any { it.id == 0 && it.alternate == 0 && it.deviceClass == 255 }
 
 /** One owner and one close path for diagnostics and the installer. Never takes an interface forcibly. */
@@ -44,7 +47,7 @@ internal class PaxUsbConnection private constructor(
     }
     companion object {
         fun open(manager: UsbManager, device: UsbDevice): PaxUsbConnection {
-            paxRequire(device.vendorId == 0x2FB8 && device.productId == 0x1101 && manager.hasPermission(device),
+            paxRequire(isPaxXcbUsbId(device.vendorId, device.productId) && manager.hasPermission(device),
                 "Подключите PAX и разрешите USB-доступ.")
             val iface = (0 until device.interfaceCount).map(device::getInterface)
                 .singleOrNull { it.id == 0 && it.alternateSetting == 0 && it.interfaceClass == 255 }

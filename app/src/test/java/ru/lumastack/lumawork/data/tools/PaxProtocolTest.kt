@@ -10,6 +10,21 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class PaxProtocolTest {
+    @Test fun `Q25 and D270 XCB devices remain available before and after USB permission`() {
+        for ((vendor, product) in listOf(0x1234 to 0x0101, 0x2FB8 to 0x1101)) {
+            for (permission in listOf(false, true)) {
+                val device = UsbEquipment("usb", vendor, product, null, null, permission,
+                    listOf(UsbInterfaceDetails(0, 0, 255, 0, 0, emptyList())))
+                assertTrue(isPaxXcbCandidate(device))
+                assertTrue(isPaxUsbCandidate(device))
+                assertFalse(isPaxXcbCandidate(device.copy(productId = 0x9999)))
+                assertFalse(isPaxXcbCandidate(device.copy(interfaces = listOf(device.interfaces.single().copy(deviceClass = 8)))))
+                assertFalse(isPaxXcbCandidate(device.copy(interfaces = listOf(device.interfaces.single().copy(id = 1)))))
+                assertFalse(isPaxXcbCandidate(device.copy(interfaces = listOf(device.interfaces.single().copy(alternate = 1)))))
+            }
+        }
+    }
+
     @Test fun `outer decoder accepts split frames and coalesced status replies`() {
         val decoder = PaxFrameDecoder()
         val fixture = hex("02040300fb7f81") + hex("030211000028000000000100000000000000010038")

@@ -10,7 +10,7 @@ import org.junit.Test
 
 /** Optional private-fixture check. Never copies captures into the project or emits their payload. */
 class PaxCaptureReplayTest {
-    @Test fun `all four private captures reproduce expected frames messages and final software`() {
+    @Test fun `private captures reproduce expected frames messages and final software`() {
         val directory = System.getenv("PAX_CAPTURE_DIR")?.let(::File)
         assumeTrue("Set PAX_CAPTURE_DIR to run private capture replay", directory?.isDirectory == true)
         val expected = listOf(
@@ -18,13 +18,15 @@ class PaxCaptureReplayTest {
             Expected("pax_termassist.pcapng", 13_125, 6_551, 0),
             Expected("pax_termassist_connected.pcapng", 10_302, 2_511, 42),
             Expected("pax_termassist_full_update.pcapng", 61_962, 21_657, 1_932),
+            Expected("Прошивка Pax Q25/pax_q25_termassist_full_update.pcapng", 35_641, 17_751, 1_706, 0x1234, 0x0101),
         )
         for (capture in expected) {
             val packets = packets(File(requireNotNull(directory), capture.file).readBytes())
             assertEquals(capture.file, capture.packets, packets.size)
             val devices = packets.filter { it.transfer == 2 && it.payload.size >= 18 &&
                 it.payload[0] == 18.toByte() && it.payload[1] == 1.toByte() &&
-                it.payload.copyOfRange(8, 12).contentEquals(byteArrayOf(0xb8.toByte(), 0x2f, 1, 0x11)) }
+                it.payload.copyOfRange(8, 12).contentEquals(byteArrayOf(capture.vendor.toByte(), (capture.vendor shr 8).toByte(),
+                    capture.product.toByte(), (capture.product shr 8).toByte())) }
                 .map { it.device }.toSet()
             assertTrue(capture.file, devices.isNotEmpty())
             val groups = packets.filter { it.device in devices && it.transfer == 3 && it.payload.isNotEmpty() &&
@@ -63,10 +65,17 @@ class PaxCaptureReplayTest {
                 assertEquals("Nuxiums3.1.24", finalPassports.last().os)
                 assertEquals("3.0.65.014", finalPassports.last().mainApp)
             }
+            if (capture.messages == 1_706) {
+                assertEquals("Q25", finalPassports.last().model)
+                assertEquals("Prolin2.7.159", finalPassports.last().os)
+                assertEquals("3.0.65.014", finalPassports.last().mainApp)
+                assertEquals(1, finalPassports.map { it.fingerprint }.distinct().size)
+            }
         }
     }
 
-    private data class Expected(val file: String, val packets: Int, val frames: Int, val messages: Int)
+    private data class Expected(val file: String, val packets: Int, val frames: Int, val messages: Int,
+        val vendor: Int = 0x2FB8, val product: Int = 0x1101)
     private data class Packet(val device: Pair<Int, Int>, val endpoint: Int, val transfer: Int, val info: Int, val payload: ByteArray)
     private fun packets(bytes: ByteArray): List<Packet> {
         val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)

@@ -38,7 +38,7 @@ class PaxFirmwareService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             @Suppress("DEPRECATION")
             val device = intent.getParcelableExtra<android.hardware.usb.UsbDevice>(UsbManager.EXTRA_DEVICE)
-            if (device?.vendorId == 0x2fb8 && device.productId == 0x1101) usbEpoch.incrementAndGet()
+            if (device != null && isPaxXcbUsbId(device.vendorId, device.productId)) usbEpoch.incrementAndGet()
         }
     }
     private val notifications get() = getSystemService(NotificationManager::class.java)
@@ -107,7 +107,8 @@ class PaxFirmwareService : Service() {
         val host = AndroidPaxFirmwareHost(this, manager, onLink = { link.set(it) },
             onBytes = { bytes, total -> publish(snapshot.copy(bytes = bytes, totalBytes = total), force = false) },
             onWaiting = { text -> publish(snapshot.copy(detail = text), force = false) },
-            epoch = { usbEpoch.get() }, allowCurrent = snapshot.pendingAction == "reconnect" || ("reboot" in snapshot.completedActions && "reconnect" !in snapshot.completedActions))
+            epoch = { usbEpoch.get() }, allowCurrent = snapshot.pendingAction == "reconnect" || ("reboot" in snapshot.completedActions && "reconnect" !in snapshot.completedActions),
+            model = snapshot.model)
         // Migration of the old stage-7 journal: the operator explicitly confirms a fresh MAINAPP operation.
         // Old journals have no identity checkpoint, so only the captured D270 package and expected OS/boot permit this gate.
         if (snapshot.deviceFingerprint == null) throw PaxDiagnosticException("Прочитайте паспорт PAX перед запуском операции.")
@@ -312,6 +313,7 @@ private class AndroidPaxFirmwareHost(
     private val context: Context, private val manager: UsbManager, private val onLink: (PaxUsbConnection?) -> Unit,
     private val onBytes: (Long, Long) -> Unit, private val onWaiting: (String) -> Unit,
     private val epoch: () -> Long, private val allowCurrent: Boolean,
+    private val model: PaxModel,
 ) : PaxFirmwareHost {
     private var initialEpoch = epoch()
     private var allowCurrentDevice = allowCurrent
@@ -328,7 +330,7 @@ private class AndroidPaxFirmwareHost(
         try {
             val session = PaxInstallerSession(connection.wire, onBytes)
             session.connect()
-            return Port(connection, session)
+            return Port(connection, session, model)
         } catch (failure: Throwable) { connection.close(); onLink(null); throw failure }
     }
     override suspend fun reconnect(previousKey: String, fingerprint: String): PaxFirmwarePort = withTimeout(240_000) {
@@ -342,7 +344,7 @@ private class AndroidPaxFirmwareHost(
             currentCoroutineContext().ensureActive()
             val devices = manager.deviceList
             if (previousKey !in devices) sawDisconnect = true
-            val candidates = devices.values.filter { it.vendorId == 0x2FB8 && it.productId == 0x1101 }
+            val candidates = devices.values.filter { isPaxXcbUsbId(it.vendorId, it.productId) }
             paxRequire(candidates.size <= 1, "После перезагрузки обнаружено несколько PAX. Продолжение заблокировано.")
             val candidate = candidates.singleOrNull()
             if (candidate != null && (manual || sawDisconnect || epoch() != initialEpoch || candidate.deviceName != previousKey)) {
@@ -377,13 +379,13 @@ private class AndroidPaxFirmwareHost(
         }
         @Suppress("UNREACHABLE_CODE") error("unreachable")
     }
-    private class Port(private val connection: PaxUsbConnection, private val session: PaxInstallerSession) : PaxFirmwarePort {
+    private class Port(private val connection: PaxUsbConnection, private val session: PaxInstallerSession, private val model: PaxModel) : PaxFirmwarePort {
         override suspend fun passport() = session.passport()
         override suspend fun upload(asset: PaxFirmwareAsset) = session.upload(PaxTransferAsset(asset.name, asset.size,
             asset.file.lastModified().coerceAtLeast(0) / 1000) { asset.file.inputStream() })
         override suspend fun removeMainApp() = session.removeMainApp()
         override suspend fun installBoot(remote: String) = session.installBoot(remote)
-        override suspend fun installOs(remote: String) = session.installOs(remote)
+        override suspend fun installOs(remote: String) = session.installOs(remote, model)
         override suspend fun installMainApp(remote: String) = session.installMainApp(remote)
         override suspend fun installAppData(remote: String) = session.installAppData(remote)
         override suspend fun installOption(remote: String) = session.installOption(remote)

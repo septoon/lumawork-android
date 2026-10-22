@@ -37,6 +37,29 @@ class PaxInstallerSessionTest {
         assertEquals(6, wire.quits)
     }
 
+    @Test fun `Q25 Prolin completes with firmware base marker followed by OKAY`() = runBlocking {
+        val wire = Device(status = "installer firmware-kernel done.\r\ninstaller firmware-ramdisk done.\r\ninstaller firmware-base done.\r\n")
+        val session = PaxInstallerSession(wire)
+        session.connect()
+        session.installOs("/tmp/os.zip", PaxModel.Q25)
+        assertEquals(1, wire.quits)
+    }
+
+    @Test fun `OS completion marker must match selected model and incomplete Prolin stops`() = runBlocking {
+        for ((model, status) in listOf(
+            PaxModel.D270 to "installer firmware-base done.\r\n",
+            PaxModel.Q25 to "installer rootfs.img done.\r\n",
+            PaxModel.Q25 to "installer firmware-kernel done.\r\ninstaller firmware-ramdisk done.\r\n",
+            PaxModel.Q25 to "verify failed\r\ninstaller firmware-base done.\r\n",
+        )) {
+            val wire = Device(status = status)
+            val session = PaxInstallerSession(wire)
+            session.connect()
+            assertFailure { session.installOs("/tmp/os.zip", model) }
+            assertEquals(0, wire.quits)
+        }
+    }
+
     @Test fun `upload streams complete bytes with STAT ASK SEND DATA DONE QUIT and no resume`() = runBlocking {
         val wire = Device()
         val updates = mutableListOf<Pair<Long, Long>>()
