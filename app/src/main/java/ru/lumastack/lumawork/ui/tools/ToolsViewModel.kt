@@ -13,11 +13,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import ru.lumastack.lumawork.data.ftp.FtpTransfers
+import ru.lumastack.lumawork.data.ftp.*
+import kotlinx.coroutines.delay
+import android.provider.OpenableColumns
 import ru.lumastack.lumawork.data.tools.*
-import java.io.File
 import java.io.InputStream
-import java.util.UUID
 
 data class ToolsUiState(
     val files: List<LocalToolFile> = emptyList(), val snapshot: ToolsSnapshot = ToolsSnapshot(),
@@ -27,12 +27,19 @@ data class ToolsUiState(
     val pinpadExpectedOs: String = "",
     val paxModel: PaxModel = PaxModel.D270, val installMode: PaxInstallMode = PaxInstallMode.Full,
     val installation: PaxInstallState = PaxInstallState(), val globalInstallBusy: Boolean = false,
+    val library: PaxLibrarySnapshot = PaxLibrarySnapshot(), val archiveDownload: FtpTransfer? = null,
+    val archivePicker: PaxArchiveKind? = null, val ftpPath: String = "", val ftpItems: List<FtpItem> = emptyList(),
+    val ftpLoading: Boolean = false, val ftpError: String? = null,
 )
-class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owner: String) : ViewModel() {
+class ToolsViewModel(context: Context, private val ftp: FtpRepository, private val owner: String, private var token: String) : ViewModel() {
+    private val transfers = requireNotNull(ftp.transfers)
     private val context = context.applicationContext as android.app.Application
     private val localFiles = FtpLocalToolFiles(transfers)
     private val repository = ToolsRepository(localFiles, FileToolsStore(context))
     private val firmwareStore = PaxFirmwareStore(context)
+    private val library = PaxFirmwareLibrary(firmwareStore.ownerDirectory(owner))
+    private var downloadWork: Job? = null
+    private var catalogWork: Job? = null
     private val mutable = MutableStateFlow(ToolsUiState())
     val state = mutable.asStateFlow()
     private val preparedPackages = mutableMapOf<PaxModel, PaxFirmwarePackage>()
@@ -56,10 +63,19 @@ class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owne
                     preparedPackages[it.model] = it
                     if (it.model == PaxModel.S210) pinpadExpectations[it.directory.path] = saved.expectedPinpadOs ?: expectedPinpadOs(it.os).orEmpty()
                 }
-                mutable.update { it.copy(firmware = bundle, pinpadExpectedOs = saved.expectedPinpadOs ?: expectedPinpadOs(bundle?.os).orEmpty(), installation = saved, paxModel = saved.model, installMode = saved.mode) }
+                val index = withContext(Dispatchers.IO) {
+                    if (bundle != null) runCatching { library.adopt(bundle) }
+                    library.read()
+                }
+                for (model in PaxModel.entries) withContext(Dispatchers.IO) { runCatching { library.bundle(model) }.getOrNull() }?.let { preparedPackages[model] = it }
+                val restoredModel = index.pending?.model ?: saved.model
+                val selected = preparedPackages[restoredModel] ?: bundle?.takeIf { it.model == restoredModel }
+                mutable.update { it.copy(library = index, firmware = selected, pinpadExpectedOs = index.selected(restoredModel, PaxArchiveKind.Firmware)?.let { index.pinpadVersions[it] } ?: saved.expectedPinpadOs ?: expectedPinpadOs(selected?.os).orEmpty(), installation = saved, paxModel = restoredModel,
+                    installMode = if (restoredModel == PaxModel.S210 && saved.mode == PaxInstallMode.RemoveMainApp) PaxInstallMode.Full else saved.mode) }
                 repository.recordInstallation(owner, saved)
             } catch (_: Exception) { notice("Не удалось прочитать подготовленный комплект PAX. Выберите ZIP, RAR или 7z заново.") }
             finally { mutable.update { it.copy(firmwareBusy = false) } }
+            state.value.library.pending?.let(::watchDownload)
             PaxFirmwareRuntime.state.collect { current ->
                 mutable.update { it.copy(globalInstallBusy = current.active,
                     installation = if (current.owner == owner) current else it.installation) }
@@ -84,54 +100,142 @@ class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owne
             catch (_: Exception) { notice("Не удалось сохранить подтверждение завершения.") }
         }
     }
-    fun importFirmware(uri: Uri) = prepareFirmware { requireNotNull(context.contentResolver.openInputStream(uri)) { "Не удалось открыть архив." } }
-    fun prepareFirmwareFromFtp(id: String) = prepareFirmware { localFiles.open(owner, id) }
-    private fun prepareFirmware(open: suspend () -> InputStream) {
-        if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
-        preparedPackages.remove(state.value.paxModel)
-        mutable.update { it.copy(firmware = null, firmwareBusy = true, firmwareError = null, inspected = null, checkMessage = null) }
+    fun updateToken(value: String) { token = value }
+    fun importFirmware(uri: Uri, kind: PaxArchiveKind = PaxArchiveKind.Firmware) {
+        val name = runCatching { context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        } }.getOrNull() ?: "Архив из файла"
+        prepareFirmware(kind, name) { requireNotNull(context.contentResolver.openInputStream(uri)) { "Не удалось открыть архив." } }
+    }
+    fun prepareFirmwareFromFtp(id: String, kind: PaxArchiveKind = PaxArchiveKind.Firmware) {
+        val file = state.value.files.firstOrNull { it.id == id } ?: return
+        prepareFirmware(kind, file.name, file.remotePath) { localFiles.open(owner, id) }
+    }
+    private fun prepareFirmware(kind: PaxArchiveKind, name: String, sourcePath: String? = null, open: suspend () -> InputStream) {
+        if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active || state.value.paxModel == PaxModel.D230) return
+        val selectedModel = state.value.paxModel
+        mutable.update { it.copy(firmwareBusy = true, firmwareError = null, inspected = null, checkMessage = null) }
         viewModelScope.launch {
             try {
-                val selectedModel = state.value.paxModel
-                val bundle = withContext(Dispatchers.IO) {
-                    val destination = File(firmwareStore.ownerDirectory(owner), "bundle-${UUID.randomUUID()}")
-                    try { open().use { PaxArchiveCatalog.prepare(it, destination, selectedModel) } }
-                    catch (failure: Exception) {
-                        if (selectedModel != PaxModel.D270) throw failure
-                        // Retain support for the previously imported, fingerprinted full D270 capture kit.
-                        try { open().use { PaxFirmwareBundleReader.prepare(it, destination).asPackage() } }
-                        catch (_: Exception) { throw failure }
-                    }
-                }
-                preparedPackages[bundle.model] = bundle
-                if (bundle.model == PaxModel.S210) pinpadExpectations[bundle.directory.path] = expectedPinpadOs(bundle.os).orEmpty()
-                val ready = PaxInstallState(owner = owner, phase = PaxInstallPhase.Ready, bundleDirectory = bundle.directory.path,
-                    detail = "Комплект ${selectedModel.title} подготовлен.", model = selectedModel, updatedAt = System.currentTimeMillis())
-                if (!state.value.installation.canResume) withContext(Dispatchers.IO) { firmwareStore.write(ready) }
-                mutable.update { it.copy(firmware = bundle, pinpadExpectedOs = expectedPinpadOs(bundle.os).orEmpty(), installation = if (it.installation.canResume) it.installation else ready,
-                    installMode = if (!bundle.hasOs && it.installMode == PaxInstallMode.Full) PaxInstallMode.MainApp else it.installMode) }
-                notice("Комплект ${selectedModel.title} подготовлен. Доступные операции определены по его составу.")
+                val index = withContext(Dispatchers.IO) { open().use { library.importArchive(it, selectedModel, kind, name, sourcePath) } }
+                applyLibrary(index, selectedModel)
+                notice("${kind.title} для ${selectedModel.title} сохранена. Версию можно переключить в списке.")
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) {
-                val message = failure.message ?: "Не удалось подготовить комплект выбранной модели."
-                mutable.update { it.copy(firmwareError = message) }
-                notice(message)
-            }
+            catch (failure: Exception) { firmwareFailure(failure) }
             finally { mutable.update { it.copy(firmwareBusy = false) } }
         }
+    }
+    private suspend fun applyLibrary(index: PaxLibrarySnapshot, model: PaxModel) {
+        val bundle = withContext(Dispatchers.IO) { library.bundle(model) }
+        if (bundle != null) preparedPackages[model] = bundle
+        mutable.update { current ->
+            if (current.paxModel != model) current.copy(library = index)
+            else current.copy(library = index, firmware = bundle, firmwareError = null,
+                pinpadExpectedOs = if (model == PaxModel.S210) bundle?.let { index.selected(model, PaxArchiveKind.Firmware)?.let { id -> index.pinpadVersions[id] } ?: pinpadExpectations[it.directory.path] ?: expectedPinpadOs(it.os) }.orEmpty() else current.pinpadExpectedOs)
+        }
+    }
+    fun selectArchive(id: String) {
+        if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
+        val entry = state.value.library.archives.firstOrNull { it.id == id && it.model == state.value.paxModel } ?: return
+        mutable.update { it.copy(firmwareBusy = true, firmwareError = null) }
+        viewModelScope.launch {
+            try { applyLibrary(withContext(Dispatchers.IO) { library.select(id) }, entry.model) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { firmwareFailure(failure) }
+            finally { mutable.update { it.copy(firmwareBusy = false) } }
+        }
+    }
+    fun openArchivePicker(kind: PaxArchiveKind) {
+        if (state.value.firmwareBusy || state.value.globalInstallBusy || state.value.paxModel == PaxModel.D230) return
+        if (kind == PaxArchiveKind.Prolin && state.value.paxModel == PaxModel.S210) return
+        mutable.update { it.copy(archivePicker = kind, ftpItems = emptyList(), ftpError = null) }
+        navigateArchiveFtp(kind.ftpPath)
+    }
+    fun closeArchivePicker() { catalogWork?.cancel(); mutable.update { it.copy(archivePicker = null, ftpLoading = false) } }
+    fun navigateArchiveFtp(path: String) {
+        val kind = state.value.archivePicker ?: return
+        val normalized = normalizeFtpPath(path)
+        if (normalized != kind.ftpPath && !normalized.startsWith(kind.ftpPath + "/")) return
+        catalogWork?.cancel()
+        val samePath = state.value.ftpPath == normalized
+        mutable.update { it.copy(ftpPath = normalized, ftpItems = if (samePath) it.ftpItems else emptyList(), ftpLoading = true, ftpError = null) }
+        catalogWork = viewModelScope.launch {
+            try {
+                ftp.read(owner)?.directories?.get(normalized)?.let { cached -> mutable.update { it.copy(ftpItems = cached) } }
+                val snapshot = ftp.load(owner, token, normalized)
+                mutable.update { it.copy(ftpItems = snapshot.directories[normalized].orEmpty(), ftpLoading = false) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { mutable.update { it.copy(ftpLoading = false, ftpError = failure.message ?: "Не удалось открыть FTP.") } }
+        }
+    }
+    fun downloadArchive(item: FtpItem) {
+        val kind = state.value.archivePicker ?: return
+        val target = state.value.paxModel
+        if (state.value.firmwareBusy || state.value.globalInstallBusy || !item.name.isPaxArchiveName() || item.isDirectory) return
+        val path = normalizeFtpPath(item.path)
+        if (!path.startsWith(kind.ftpPath + "/")) return
+        mutable.update { it.copy(firmwareBusy = true, firmwareError = null) }
+        viewModelScope.launch {
+            try {
+                val record = transfers.start(owner, token, item, FtpTransferAction.Download)
+                val pending = PaxArchiveDownload(record.id, target, kind)
+                val index = withContext(Dispatchers.IO) { library.pending(pending) }
+                mutable.update { it.copy(library = index, archivePicker = null, archiveDownload = record) }
+                watchDownload(pending)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { firmwareFailure(failure); mutable.update { it.copy(firmwareBusy = false) } }
+        }
+    }
+    private fun watchDownload(pending: PaxArchiveDownload) {
+        downloadWork?.cancel()
+        mutable.update { it.copy(firmwareBusy = true) }
+        downloadWork = viewModelScope.launch {
+            try {
+                while (true) {
+                    val record = transfers.refresh(owner).firstOrNull { it.id == pending.transferId } ?: error("Загрузка архива не найдена. Выберите его на FTP заново.")
+                    mutable.update { it.copy(archiveDownload = record) }
+                    when (record.state) {
+                        FtpTransferState.Completed -> {
+                            mutable.update { it.copy(archiveDownload = null) }
+                            withContext(Dispatchers.IO) { localFiles.open(owner, record.id).use {
+                                library.importArchive(it, pending.model, pending.kind, record.fileName, record.remotePath)
+                            } }
+                            val index = withContext(Dispatchers.IO) { library.pending(null) }
+                            applyLibrary(index, pending.model)
+                            notice("${pending.kind.title} для ${pending.model.title} скачана и подготовлена.")
+                            break
+                        }
+                        FtpTransferState.Failed, FtpTransferState.Cancelled -> error(record.errorMessage ?: "Загрузка отменена.")
+                        else -> delay(2_000)
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                runCatching { withContext(Dispatchers.IO) { library.pending(null) } }.getOrNull()?.let { index -> mutable.update { it.copy(library = index) } }
+                firmwareFailure(failure)
+            } finally { mutable.update { it.copy(firmwareBusy = false, archiveDownload = null) } }
+        }
+    }
+    fun cancelArchiveDownload() {
+        val record = state.value.archiveDownload?.takeIf { it.canCancel } ?: return
+        viewModelScope.launch { transfers.cancel(owner, record.id) }
+    }
+    private fun firmwareFailure(failure: Exception) {
+        val message = failure.message ?: "Не удалось подготовить архив. Предыдущий комплект сохранён."
+        mutable.update { it.copy(firmwareError = message) }; notice(message)
     }
     fun selectPaxModel(model: PaxModel) {
         if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
         val cached = preparedPackages[model]
         mutable.update { it.copy(paxModel = model, firmware = cached, firmwareError = null,
             pinpadExpectedOs = if (model == PaxModel.S210) cached?.let { bundle ->
-                pinpadExpectations[bundle.directory.path] ?: expectedPinpadOs(bundle.os)
+                state.value.library.selected(model, PaxArchiveKind.Firmware)?.let { id -> state.value.library.pinpadVersions[id] } ?: pinpadExpectations[bundle.directory.path] ?: expectedPinpadOs(bundle.os)
             }.orEmpty() else it.pinpadExpectedOs,
             installMode = if (model == PaxModel.S210 && it.installMode == PaxInstallMode.RemoveMainApp) PaxInstallMode.Full else it.installMode) }
     }
     fun selectInstallMode(mode: PaxInstallMode) {
         if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
-        if (state.value.paxModel == PaxModel.S210 && mode == PaxInstallMode.RemoveMainApp) return
+        if (state.value.paxModel == PaxModel.D230 || state.value.paxModel == PaxModel.S210 && mode == PaxInstallMode.RemoveMainApp) return
         mutable.update { it.copy(installMode = mode) }
     }
     fun setPinpadExpectedOs(value: String) {
@@ -140,6 +244,11 @@ class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owne
         if (clean.length <= 96 && clean.all { it.isLetterOrDigit() || it in ".-_()" }) {
             state.value.firmware?.takeIf { it.model == PaxModel.S210 }?.let { pinpadExpectations[it.directory.path] = clean }
             mutable.update { it.copy(pinpadExpectedOs = clean) }
+            state.value.library.selected(PaxModel.S210, PaxArchiveKind.Firmware)?.let { id -> viewModelScope.launch {
+                try { val index = withContext(Dispatchers.IO) { library.pinpadVersion(id, clean) }; mutable.update { it.copy(library = index) } }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { notice("Не удалось сохранить ожидаемую версию OS S210.") }
+            } }
         }
     }
     fun retryConnection() { PaxFirmwareRuntime.retryConnection(); usb.scan() }
@@ -151,6 +260,7 @@ class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owne
             val saved = state.value.installation
             val model = if (resume) saved.model else state.value.paxModel
             val mode = if (resume) saved.mode else state.value.installMode
+            check(model != PaxModel.D230) { "Скоро.." }
             val path = if (mode == PaxInstallMode.RemoveMainApp) null else if (resume) saved.bundleDirectory else state.value.firmware?.takeIf { it.model == model }?.directory?.path
             check(mode == PaxInstallMode.RemoveMainApp || path != null) { "Сначала выберите ZIP этой модели." }
             val equipment = usb.state.value.devices.singleOrNull { it.hasPermission &&
@@ -236,9 +346,9 @@ class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owne
     }
     override fun onCleared() { usb.close() }
     companion object {
-        fun factory(context: Context, transfers: FtpTransfers, owner: String) = object : ViewModelProvider.Factory {
+        fun factory(context: Context, ftp: FtpRepository, owner: String, token: String) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                ToolsViewModel(context.applicationContext, transfers, owner) as T
+                ToolsViewModel(context.applicationContext, ftp, owner, token) as T
         }
     }
 }

@@ -43,19 +43,30 @@ internal object PaxCompressedArchive {
         return path
     }
 
-    fun convert(source: File, destination: File) {
-        require(isCompressed(source)) { "Нужен ZIP, RAR4/RAR5 или 7z" }
+    fun convert(source: File, destination: File) = convert(source, destination, null)
+
+    // OS RemoteUpdate uses the format passphrase distributed inside POSLoader itself.
+    // It is not an FTP/account credential. Other password-protected archives remain unsupported.
+    fun convertRemoteOs(source: File, destination: File) = convert(source, destination, remoteOsPassphrase)
+
+    private val remoteOsPassphrase = byteArrayOf(72, 101, 108, 108, 48, 72, 97, 99, 107, 101, 114)
+
+    private fun convert(source: File, destination: File, passphrase: ByteArray?) {
+        require(passphrase != null || isCompressed(source)) { "Нужен ZIP, RAR4/RAR5 или 7z" }
         val sevenZip = source.inputStream().use { input ->
             val header = ByteArray(8); input.read(header); is7z(header)
         }
-        val format = if (sevenZip) "7z" else "RAR"
-        if (!sevenZip) requireSingleVolume(source)
+        val format = if (passphrase != null) "OS RemoteUpdate ZIP" else if (sevenZip) "7z" else "RAR"
+        if (passphrase == null && !sevenZip) requireSingleVolume(source)
         val archive = Archive.readNew()
         try {
             // Android native locale is C; 7z stores UTF-16LE paths, including Cyrillic folders.
             Archive.setCharset(archive, Charsets.UTF_8.name().toByteArray(Charsets.UTF_8))
             Archive.readSupportFilterNone(archive)
-            if (sevenZip) Archive.readSupportFormat7zip(archive) else {
+            if (passphrase != null) {
+                Archive.readSupportFormatZip(archive)
+                Archive.readAddPassphrase(archive, passphrase)
+            } else if (sevenZip) Archive.readSupportFormat7zip(archive) else {
                 Archive.readSupportFormatRar(archive)
                 Archive.readSupportFormatRar5(archive)
             }
@@ -70,7 +81,7 @@ internal object PaxCompressedArchive {
                     val entry = Archive.readNextHeader(archive)
                     if (entry == 0L) break
                     require(++entries <= MAX_ENTRIES) { "Слишком много файлов в $format" }
-                    require(!ArchiveEntry.isEncrypted(entry)) { "${format} с паролем не поддерживается" }
+                    require(passphrase != null || !ArchiveEntry.isEncrypted(entry)) { "${format} с паролем не поддерживается" }
                     val type = ArchiveEntry.filetype(entry)
                     require(type == ArchiveEntry.AE_IFREG || type == ArchiveEntry.AE_IFDIR) { "Ссылки и специальные файлы $format запрещены" }
                     require(ArchiveEntry.symlink(entry) == null && ArchiveEntry.hardlink(entry) == null) { "Ссылки в $format запрещены" }
@@ -102,7 +113,7 @@ internal object PaxCompressedArchive {
                     require(copied == size) { "${format} повреждён или не хватает тома" }
                     zip.closeEntry()
                 }
-                require(entries > 0 && Archive.readHasEncryptedEntries(archive) <= 0) { "Пустой $format или архив с паролем" }
+                require(entries > 0 && (passphrase != null || Archive.readHasEncryptedEntries(archive) <= 0)) { "Пустой $format или архив с паролем" }
             }
         } catch (failure: Exception) {
             destination.delete()

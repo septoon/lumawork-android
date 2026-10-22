@@ -3,6 +3,11 @@ package ru.lumastack.lumawork.data.tools
 import java.io.File
 import kotlinx.serialization.Serializable
 
+@Serializable enum class PaxArchiveKind(val title: String, val ftpPath: String) {
+    Firmware("Прошивка", PAX_FIRMWARE_FTP_PATH),
+    Prolin("Prolin / ОС", "/VTB_TO/TO/Vendor/Verifone_Pax/POSLoader"),
+}
+
 @Serializable
 enum class PaxModel(val title: String, val archiveFolder: String) {
     D230("PAX D230", "Pax_Prolin_D230"),

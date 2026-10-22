@@ -12,6 +12,43 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 class PaxArchiveCatalogTest {
+    @Test fun `POS Loader archive selects remote OS package and only compatible OS and boot`() {
+        val remote = zip(mapOf(
+            "os-d270.zip" to zip(mapOf("RELEASE.TXT" to "Product : OS\nVersion : 3.1.45-r13454\nModel : PAXD270_PAXQ25S\n".toByteArray())),
+            "boot.zip" to zip(mapOf("RELEASE.TXT" to "Product : BOOT\nVersion : 8.1.12.274\nModel : PAXD270\n".toByteArray())),
+            "os-q25.zip" to zip(mapOf("RELEASE.TXT" to "Product : OS\nVersion : 2.7.181-r13278\nModel : PAXQ25\n".toByteArray())),
+        ))
+        val source = zip(mapOf("POS Loader и OS/OS_RemoteUpdatePkg_1.2.2.0.zip" to remote, "POS Loader и OS/POS Loader 4.1.zip" to zip(mapOf("setup.exe" to byteArrayOf(1)))))
+        val result = PaxArchiveCatalog.prepareProlin(ByteArrayInputStream(source), File(temporary.root, "prolin"), PaxModel.D270)
+        assertEquals("3.1.45-r13454", result.expectedOs)
+        assertEquals("8.1.12.274", result.expectedBoot)
+        assertNull(result.application)
+        assertFalse(File(result.directory, "os-q25.zip").exists())
+        assertEquals(result, PaxArchiveCatalog.read(result.directory, PaxModel.D270))
+    }
+
+    @Test fun `separate Prolin and firmware produce self contained model specific installation bundle`() {
+        val firmware = prepare(files("Pax_Prolin_TTF"), PaxModel.Q25)
+        val prolinBytes = zip(mapOf("q25-os.zip" to zip(mapOf("RELEASE.TXT" to "Product : OS\nVersion : 2.7.181-r13278\nModel : PAXQ25\n".toByteArray()))))
+        val prolin = PaxArchiveCatalog.prepareProlin(ByteArrayInputStream(prolinBytes), File(temporary.root, "os"), PaxModel.Q25)
+        val result = PaxArchiveCatalog.combine(firmware, prolin, File(temporary.root, "combined"), PaxModel.Q25)
+        assertEquals("9.8.7.123", result.expectedMainApp)
+        assertEquals("2.7.181-r13278", result.expectedOs)
+        assertEquals(2, result.appData.size)
+        firmware.directory.deleteRecursively(); prolin.directory.deleteRecursively()
+        assertEquals(result, PaxArchiveCatalog.read(result.directory, PaxModel.Q25))
+        assertTrue(runCatching { PaxArchiveCatalog.combine(result, null, File(temporary.root, "wrong"), PaxModel.D270) }.isFailure)
+    }
+
+    @Test fun `ambiguous OS versions and S210 Prolin are rejected without a partial import`() {
+        val os = zip(mapOf("RELEASE.TXT" to "Product : OS\nVersion : 1.2.3\nModel : PAXQ25\n".toByteArray()))
+        val source = zip(mapOf("one.zip" to os, "two.zip" to os))
+        val destination = File(temporary.root, "ambiguous-os")
+        assertTrue(runCatching { PaxArchiveCatalog.prepareProlin(ByteArrayInputStream(source), destination, PaxModel.Q25) }.isFailure)
+        assertFalse(destination.exists())
+        assertTrue(runCatching { PaxArchiveCatalog.prepareProlin(ByteArrayInputStream(source), destination, PaxModel.S210) }.isFailure)
+    }
+
     @Test fun `FTP folder wrapper is unpacked to find the model inside one nested archive`() {
         val result = prepare(mapOf("FTP folder/base.zip" to zip(files()), "FTP folder/readme.txt" to "notes".toByteArray()))
         assertEquals(PaxModel.D230, result.model)

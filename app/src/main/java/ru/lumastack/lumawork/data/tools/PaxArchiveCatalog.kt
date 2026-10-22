@@ -18,6 +18,40 @@ import kotlinx.serialization.json.*
 /** A local integrity manifest preserves the selected model and exact imported bytes.
  * Neither this manifest nor metadata inside a package establishes vendor trust. */
 object PaxArchiveCatalog {
+    fun prepareProlin(input: InputStream, destination: File, model: PaxModel): PaxFirmwarePackage {
+        require(model != PaxModel.S210) { "Для S210 используется его комплект OS/APP." }
+        return prepare(input, destination, model, PaxArchiveKind.Prolin)
+    }
+
+    fun combine(firmware: PaxFirmwarePackage?, prolin: PaxFirmwarePackage?, destination: File, model: PaxModel): PaxFirmwarePackage {
+        require(firmware != null || prolin != null) { "Выберите архив прошивки или Prolin." }
+        require(listOfNotNull(firmware, prolin).all { it.model == model }) { "Комплект относится к другой модели." }
+        require(prolin == null || model != PaxModel.S210) { "Для S210 не нужен Prolin." }
+        // Recheck the original immutable imports before making a self-contained installation snapshot.
+        listOfNotNull(firmware, prolin).forEach { readPaxPackage(it.directory, model) }
+        require(!destination.exists() && destination.mkdir()) { "Не удалось создать комплект установки." }
+        try {
+            val records = linkedMapOf<String, JsonObject>()
+            fun copy(asset: PaxFirmwareAsset?, prefix: String): String? = asset?.let {
+                val path = "$prefix/${it.name}"
+                safePath(path)
+                val file = File(destination, path)
+                require(path !in records && file.parentFile!!.let { dir -> dir.isDirectory || dir.mkdirs() }) { "Повторяющийся файл комплекта." }
+                it.file.inputStream().use { input -> file.outputStream().use { output ->
+                    copyLimited(input, MAX_FILE) { bytes, count -> output.write(bytes, 0, count) }
+                } }
+                require(file.length() == it.size && hash(file) == it.sha256) { "Исходный комплект изменён." }
+                records[path] = buildJsonObject { put("size", it.size); put("sha256", it.sha256) }
+                path
+            }
+            val osSource = prolin ?: firmware
+            val selection = Selection(copy(firmware?.application, "firmware"), copy(osSource?.boot, "system"), copy(osSource?.os, "system"),
+                firmware?.appData.orEmpty().map { copy(it, "firmware")!! }, firmware?.options.orEmpty().map { copy(it, "firmware")!! },
+                osVersion = osSource?.expectedOs, bootVersion = osSource?.expectedBoot)
+            writeManifest(destination, model, selection, firmware?.expectedMainApp, JsonObject(records))
+            return read(destination, model)
+        } catch (failure: Exception) { destination.deleteRecursively(); throw failure }
+    }
     private const val MANIFEST = ".pax-import.json"
     private const val MAX_ARCHIVE = 256L * 1024 * 1024
     private const val MAX_FILE = 256L * 1024 * 1024
@@ -26,7 +60,7 @@ object PaxArchiveCatalog {
     private const val MAX_METADATA = 64L * 1024
     private val json = Json
     private data class Selection(
-        val application: String,
+        val application: String?,
         val boot: String? = null,
         val os: String? = null,
         val appData: List<String> = emptyList(),
@@ -37,7 +71,10 @@ object PaxArchiveCatalog {
     )
     private data class Stage(val path: String, val product: String, val version: String?)
 
-    fun prepare(input: InputStream, destination: File, model: PaxModel): PaxFirmwarePackage {
+    fun prepare(input: InputStream, destination: File, model: PaxModel): PaxFirmwarePackage =
+        prepare(input, destination, model, PaxArchiveKind.Firmware)
+
+    private fun prepare(input: InputStream, destination: File, model: PaxModel, kind: PaxArchiveKind): PaxFirmwarePackage {
         require(!destination.exists() && !Files.isSymbolicLink(destination.toPath())) { "Каталог импорта уже существует" }
         val parent = requireNotNull(destination.absoluteFile.parentFile)
         require(parent.isDirectory || parent.mkdirs()) { "Не удалось создать каталог импорта" }
@@ -46,15 +83,18 @@ object PaxArchiveCatalog {
         var created = false
         try {
             archive.outputStream().use { out -> input.use { copyLimited(it, MAX_ARCHIVE) { bytes, count -> out.write(bytes, 0, count) } } }
-            val source = unwrap(archive, parent, temporaryArchives)
+            val source = unwrap(archive, parent, temporaryArchives, kind)
             validateCentralDirectory(source)
             openZip(source).use { zip ->
                 val entries = checkedEntries(zip)
-                val roots = modelRoots(entries.keys, model)
-                require(roots.size == 1) { "Папка ${model.archiveFolder} отсутствует или неоднозначна" }
-                val root = roots.single()
-                val scoped = entries.filterKeys { it.startsWith("$root/") }.mapKeys { it.key.removePrefix("$root/") }
-                val selection = if (model == PaxModel.S210) selectS210(scoped.keys) else selectProlin(zip, scoped, model)
+                val scoped = if (kind == PaxArchiveKind.Prolin) entries else {
+                    val roots = modelRoots(entries.keys, model)
+                    require(roots.size == 1) { "Папка ${model.archiveFolder} отсутствует или неоднозначна" }
+                    val root = roots.single()
+                    entries.filterKeys { it.startsWith("$root/") }.mapKeys { it.key.removePrefix("$root/") }
+                }
+                val selection = if (kind == PaxArchiveKind.Prolin) selectSystem(zip, scoped, model)
+                    else if (model == PaxModel.S210) selectS210(scoped.keys) else selectProlin(zip, scoped, model)
                 require(destination.mkdir()) { "Не удалось создать каталог импорта" }
                 created = true
                 val paths = (listOfNotNull(selection.boot, selection.os, selection.application, selection.script) + selection.appData + selection.options)
@@ -70,19 +110,8 @@ object PaxArchiveCatalog {
                     }
                 }
                 // appinfo is authoritative for MAINAPP; filenames are deliberately ignored.
-                val mainVersion = if (model == PaxModel.S210) null else applicationVersion(File(destination, selection.application))
-                val manifest = buildJsonObject {
-                    put("format", 1); put("model", model.name)
-                    put("application", selection.application)
-                    selection.boot?.let { put("boot", it) }; selection.os?.let { put("os", it) }
-                    selection.script?.let { put("script", it) }
-                    put("appData", JsonArray(selection.appData.map(::JsonPrimitive)))
-                    put("options", JsonArray(selection.options.map(::JsonPrimitive)))
-                    mainVersion?.let { put("expectedMainApp", it) }
-                    selection.osVersion?.let { put("expectedOs", it) }; selection.bootVersion?.let { put("expectedBoot", it) }
-                    put("files", records)
-                }
-                File(destination, MANIFEST).writeText(manifest.toString())
+                val mainVersion = if (model == PaxModel.S210) null else selection.application?.let { applicationVersion(File(destination, it)) }
+                writeManifest(destination, model, selection, mainVersion, records)
             }
             return read(destination, model)
         } catch (failure: Exception) {
@@ -93,7 +122,22 @@ object PaxArchiveCatalog {
 
     /** FTP folder downloads wrap the original vendor archive. Follow one unambiguous
      * archive per layer, never an arbitrary candidate or nested OS/app payload. */
-    private fun unwrap(input: File, parent: File, temporary: MutableList<File>): File {
+    private fun writeManifest(directory: File, model: PaxModel, selection: Selection, mainVersion: String?, records: JsonObject) {
+        val manifest = buildJsonObject {
+            put("format", 1); put("model", model.name)
+            selection.application?.let { put("application", it) }
+            selection.boot?.let { put("boot", it) }; selection.os?.let { put("os", it) }
+            selection.script?.let { put("script", it) }
+            put("appData", JsonArray(selection.appData.map(::JsonPrimitive)))
+            put("options", JsonArray(selection.options.map(::JsonPrimitive)))
+            mainVersion?.let { put("expectedMainApp", it) }
+            selection.osVersion?.let { put("expectedOs", it) }; selection.bootVersion?.let { put("expectedBoot", it) }
+            put("files", records)
+        }
+        File(directory, MANIFEST).writeText(manifest.toString())
+    }
+
+    private fun unwrap(input: File, parent: File, temporary: MutableList<File>, kind: PaxArchiveKind): File {
         var current = input
         repeat(4) { depth ->
             if (PaxCompressedArchive.isCompressed(current)) {
@@ -102,9 +146,27 @@ object PaxArchiveCatalog {
                 if (current != input) current.delete()
                 current = normalized
             }
+            if (kind == PaxArchiveKind.Prolin && validateCentralDirectory(current, allowEncrypted = true)) {
+                val normalized = File.createTempFile("pax-decrypted-os-", ".zip", parent).also { temporary += it }
+                PaxCompressedArchive.convertRemoteOs(current, normalized)
+                if (current != input) current.delete()
+                current = normalized
+            }
             validateCentralDirectory(current)
             val nested = openZip(current).use { zip ->
                 val entries = checkedEntries(zip)
+                if (kind == PaxArchiveKind.Prolin) {
+                    val remote = entries.filterKeys { it.substringAfterLast('/').matches(Regex("(?i)OS_RemoteUpdatePkg_[0-9.]+\\.zip")) }
+                    require(remote.size <= 1) { "Внутри несколько версий OS RemoteUpdate. Выберите один архив." }
+                    if (remote.isNotEmpty()) {
+                        val entry = remote.values.single()
+                        return@use File.createTempFile("pax-remote-os-", ".zip", parent).also { file ->
+                            temporary += file
+                            file.outputStream().use { out -> checkedCopy(zip, entry, MAX_ARCHIVE) { bytes, count -> out.write(bytes, 0, count) } }
+                        }
+                    }
+                    return current
+                }
                 if (PaxModel.entries.any { modelRoots(entries.keys, it).isNotEmpty() }) return current
                 val archives = entries.filterKeys { it.isPaxArchiveName() }
                 if (archives.isEmpty()) return current
@@ -142,7 +204,8 @@ object PaxArchiveCatalog {
         require(manifest["format"]?.jsonPrimitive?.int == 1 && manifest["model"]?.jsonPrimitive?.content == model.name) { "Комплект относится к другой модели" }
         fun string(key: String) = manifest[key]?.jsonPrimitive?.content
         fun list(key: String) = manifest.getValue(key).jsonArray.map { it.jsonPrimitive.content }
-        val boot = string("boot"); val os = string("os"); val application = requireNotNull(string("application"))
+        val boot = string("boot"); val os = string("os"); val application = string("application")
+        require(application != null || os != null) { "Комплект не содержит прошивки или ОС." }
         val data = list("appData"); val options = list("options")
         val references = listOfNotNull(boot, os, application, string("script")) + data + options
         require(references.distinct().size == references.size) { "Повторяющийся файл в комплекте" }
@@ -172,7 +235,15 @@ object PaxArchiveCatalog {
             require(actual.size <= MAX_ENTRIES) { "Слишком много файлов" }
         }
         require(actual == records.keys + MANIFEST) { "Состав комплекта изменён" }
-        return PaxFirmwarePackage(directory, model, boot?.let(assets::getValue), os?.let(assets::getValue), assets.getValue(application), data.map(assets::getValue), options.map(assets::getValue), string("expectedOs"), string("expectedMainApp"), string("expectedBoot"))
+        return PaxFirmwarePackage(directory, model, boot?.let(assets::getValue), os?.let(assets::getValue), application?.let(assets::getValue), data.map(assets::getValue), options.map(assets::getValue), string("expectedOs"), string("expectedMainApp"), string("expectedBoot"))
+    }
+
+    private fun selectSystem(zip: ZipFile, entries: Map<String, ZipEntry>, model: PaxModel): Selection {
+        val stages = entries.filterKeys { it.endsWith(".zip", true) }.mapNotNull { (path, entry) -> stageMetadata(zip, entry, path, model, strict = false) }
+        val systems = stages.filter { it.product == "OS" }; val boots = stages.filter { it.product == "BOOT" }
+        require(systems.size == 1 && boots.size <= 1) { "Не найдена однозначная ОС для ${model.title}. Выберите архив с одной совместимой версией." }
+        return Selection(null, boots.singleOrNull()?.path, systems.single().path,
+            osVersion = systems.single().version, bootVersion = boots.singleOrNull()?.version)
     }
 
     private fun selectProlin(zip: ZipFile, entries: Map<String, ZipEntry>, model: PaxModel): Selection {
@@ -226,7 +297,7 @@ object PaxArchiveCatalog {
         }
     }
 
-    private fun stageMetadata(outer: ZipFile, entry: ZipEntry, path: String, model: PaxModel): Stage? {
+    private fun stageMetadata(outer: ZipFile, entry: ZipEntry, path: String, model: PaxModel, strict: Boolean = true): Stage? {
         val temporary = File.createTempFile("pax-metadata-", ".zip")
         try {
             temporary.outputStream().use { out -> checkedCopy(outer, entry, MAX_FILE) { bytes, count -> out.write(bytes, 0, count) } }
@@ -242,7 +313,9 @@ object PaxArchiveCatalog {
                 val product = values["Product"]?.uppercase(Locale.ROOT)
                 if (product !in setOf("OS", "BOOT")) return@use null
                 val models = values["Model"]?.split(Regex("[^A-Za-z0-9]+")) ?: return@use null
-                require("PAX${model.name}" in models.map { it.uppercase(Locale.ROOT) }) { "OS/BOOT несовместимы с ${model.title}" }
+                if ("PAX${model.name}" !in models.map { it.uppercase(Locale.ROOT) }) {
+                    require(!strict) { "OS/BOOT несовместимы с ${model.title}" }; return@use null
+                }
                 Stage(path, requireNotNull(product), values["Version"]?.takeIf(::safeVersion))
             }
         } finally { temporary.delete() }
@@ -374,8 +447,9 @@ object PaxArchiveCatalog {
     }
 
     /** ZIP64, encrypted archives, special UNIX files and multi-disk ZIPs are unsupported. */
-    private fun validateCentralDirectory(file: File, allowSignedTrailer: Boolean = false) {
+    private fun validateCentralDirectory(file: File, allowSignedTrailer: Boolean = false, allowEncrypted: Boolean = false): Boolean =
         RandomAccessFile(file, "r").use { input ->
+            var encrypted = false
             require(input.length() >= 22) { "Некорректный ZIP" }
             val tailSize = minOf(input.length(), 65557L).toInt()
             val tail = ByteArray(tailSize)
@@ -398,13 +472,15 @@ object PaxArchiveCatalog {
             repeat(count) {
                 require(input.filePointer + 46 <= start + length) { "Повреждённый каталог ZIP" }
                 val header = ByteArray(46); input.readFully(header)
-                require(u32(header, 0) == 0x02014b50L && u16(header, 8) and 1 == 0) { "Неподдерживаемый ZIP" }
+                val protected = u16(header, 8) and 1 != 0
+                encrypted = encrypted || protected
+                require(u32(header, 0) == 0x02014b50L && (!protected || allowEncrypted)) { "Неподдерживаемый ZIP" }
                 val mode = (u32(header, 38) ushr 16).toInt() and 0xf000
                 require(mode in setOf(0, 0x4000, 0x8000)) { "Ссылки и специальные файлы ZIP запрещены" }
                 require(listOf(20, 24, 42).none { u32(header, it) == 0xffffffffL }) { "ZIP64 запрещён" }
                 input.seek(input.filePointer + u16(header, 28) + u16(header, 30) + u16(header, 32))
             }
             require(input.filePointer == start + length) { "Некорректный каталог ZIP" }
+            encrypted
         }
-    }
 }

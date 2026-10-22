@@ -26,12 +26,13 @@ internal fun PaxFirmwarePanel(
     onModel: (PaxModel) -> Unit,
     onMode: (PaxInstallMode) -> Unit,
     onPinpadOs: (String) -> Unit,
-    onImport: () -> Unit,
-    onFtp: () -> Unit,
+    onImport: (PaxArchiveKind) -> Unit,
+    onFtp: (PaxArchiveKind) -> Unit,
+    onArchive: (String) -> Unit,
+    onCancelDownload: () -> Unit,
     onStart: () -> Unit,
     onResume: () -> Unit,
     onRetryConnection: () -> Unit,
-    files: @Composable ColumnScope.() -> Unit,
     connection: @Composable ColumnScope.() -> Unit,
 ) {
     var confirm by remember { mutableStateOf(false) }
@@ -73,17 +74,31 @@ internal fun PaxFirmwarePanel(
                 }
             }
         }
+        if (state.paxModel == PaxModel.D230) {
+            ToolsSubpanel(colors.mint) { Text("Скоро..", style = MaterialTheme.typography.titleMedium) }
+            return@Column
+        }
         ToolsStepCard(2, "Комплект прошивки", colors.mint) {
+            val kinds = if (state.paxModel == PaxModel.S210) listOf(PaxArchiveKind.Firmware) else PaxArchiveKind.entries
+            kinds.forEach { kind ->
+                PaxArchiveSelector(state, kind, !busy, onImport, onFtp, onArchive)
+            }
             state.firmwareError?.let { message ->
                 ToolsSubpanel(MaterialTheme.colorScheme.error) {
-                    Text("Комплект ${state.paxModel.title} не подготовлен", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+                    Text("Не удалось добавить архив", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
                     Text(message, style = MaterialTheme.typography.bodyMedium, color = colors.ink)
                 }
             }
             if (state.firmwareBusy) {
                 ToolsSubpanel(colors.mint) {
                     LinearProgressIndicator(Modifier.fillMaxWidth(), color = colors.mint)
-                    Text("Проверка архива…", style = MaterialTheme.typography.bodyMedium, color = colors.muted)
+                    val download = state.archiveDownload
+                    Text(if (download != null) "${download.fileName} · ${download.state.title}" else "Распаковка и проверка архива…",
+                        style = MaterialTheme.typography.bodyMedium, color = colors.muted)
+                    if (download != null) {
+                        download.progress?.let { Text("${(it * 100).toInt()}%", style = MaterialTheme.typography.labelMedium) }
+                        if (download.canCancel) TextButton(onClick = onCancelDownload) { Text("Отменить загрузку") }
+                    }
                 }
             } else if (bundle != null) {
                 ToolsSubpanel(colors.mint) {
@@ -119,20 +134,6 @@ internal fun PaxFirmwarePanel(
                 Text("Для известного комплекта заполняется автоматически; для другого укажите версию из документации.",
                     style = MaterialTheme.typography.bodySmall, color = colors.muted)
             }
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                if (maxWidth >= 480.dp) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ToolsActionButton("Выбрать ZIP / RAR / 7z", onImport, Modifier.weight(1f), enabled = !busy,
-                        icon = ToolsIcons.folder, primary = true)
-                    ToolsActionButton("Загрузить через FTP", onFtp, Modifier.weight(1.15f), enabled = !busy,
-                        icon = Icons.Outlined.Send, accent = colors.mint)
-                } else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ToolsActionButton("Выбрать ZIP / RAR / 7z", onImport, Modifier.fillMaxWidth(), enabled = !busy,
-                        icon = ToolsIcons.folder, primary = true)
-                    ToolsActionButton("Загрузить через FTP", onFtp, Modifier.fillMaxWidth(), enabled = !busy,
-                        icon = Icons.Outlined.Send, accent = colors.mint)
-                }
-            }
-            files()
         }
         ToolsStepCard(3, "Подключение", colors.blue, decoration = ToolsIcons.usb) { connection() }
         ToolsStepCard(4, "Операция", colors.violet) {
@@ -199,6 +200,7 @@ internal fun PaxFirmwarePanel(
         AlertDialog(onDismissRequest = { confirm = false }, title = { Text(if (resuming) "Продолжить запись?" else "Начать запись?") }, text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("${selectedModel.title} · ${paxModeTitle(selectedModel, selectedMode)}", style = MaterialTheme.typography.titleMedium)
+                if (resuming) Text("Продолжение использует прежние версии файлов, сохранённые при начале этой операции.", style = MaterialTheme.typography.bodyMedium)
                 if (resuming && selectedModel != PaxModel.S210 && installation.step in listOf(PaxFirmwareStep.Reboot, PaxFirmwareStep.Reconnect, PaxFirmwareStep.CheckingOs))
                     Text("Продолжайте после перезагрузки PAX и входа в main menu → General → XCB service → USB.", style = MaterialTheme.typography.bodyMedium)
                 if (!resuming && installation.canResume) Text("При запуске новой операции журнал продолжения предыдущей будет заменён. До запуска журнал сохранится.", style = MaterialTheme.typography.bodyMedium)
@@ -266,5 +268,38 @@ private fun FirmwareProgress(installation: PaxInstallState, model: PaxModel) {
         installation.fileName?.let { FirmwareSummaryRow(Icons.Outlined.List, it) }
         if (installation.completedActions.isNotEmpty()) FirmwareSummaryRow(Icons.Outlined.List,
             "Выполнено этапов: ${installation.completedActions.size}")
+    }
+}
+
+@Composable
+private fun PaxArchiveSelector(state: ToolsUiState, kind: PaxArchiveKind, enabled: Boolean,
+    onImport: (PaxArchiveKind) -> Unit, onFtp: (PaxArchiveKind) -> Unit, onArchive: (String) -> Unit,
+) {
+    val versions = state.library.archives.filter { it.model == state.paxModel && it.kind == kind }.asReversed()
+    val selected = versions.firstOrNull { it.id == state.library.selected(state.paxModel, kind) }
+    var expanded by remember(state.paxModel, kind) { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(if (state.paxModel == PaxModel.S210) "Комплект OS / APP" else kind.title, style = MaterialTheme.typography.titleSmall)
+        Box {
+            OutlinedButton(onClick = { expanded = true }, enabled = enabled && versions.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.weight(1f)) {
+                    Text(selected?.version ?: selected?.name ?: "Нет сохранённых версий", maxLines = 2)
+                    if (selected?.version != null) Text(selected.name, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+                }
+                Icon(Icons.Outlined.ArrowDropDown, contentDescription = "Выбрать сохранённую версию")
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                versions.forEach { version -> DropdownMenuItem(
+                    text = { Column { Text(version.version ?: version.name); if (version.version != null) Text(version.name, style = MaterialTheme.typography.bodySmall) } },
+                    leadingIcon = { if (version.id == selected?.id) Icon(Icons.Outlined.Check, null) },
+                    onClick = { expanded = false; onArchive(version.id) },
+                ) }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToolsActionButton("Выбрать на FTP", { onFtp(kind) }, Modifier.weight(1f), enabled = enabled,
+                icon = ToolsIcons.folder, accent = ToolsColors.current.mint)
+            TextButton(onClick = { onImport(kind) }, enabled = enabled) { Text("Из файла") }
+        }
     }
 }

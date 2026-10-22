@@ -731,11 +731,11 @@ private fun DestinationContent(
             )
             AppDestination.Tools -> ToolsRoute(
                 owner = session.user.id,
+                token = session.token,
                 repository = ftpRepository,
                 requests = simpleOneState,
                 widthClass = contentWidthClass,
                 onFtp = { onSelect(AppDestination.Ftp) },
-                onPaxFtp = { onRequestedFtpPath(ru.lumastack.lumawork.data.tools.PAX_FIRMWARE_FTP_PATH); onSelect(AppDestination.Ftp) },
                 onWiki = { onAssistantSection("wiki"); onSelect(AppDestination.Wiki) },
             )
             AppDestination.Ftp -> FtpRoute(

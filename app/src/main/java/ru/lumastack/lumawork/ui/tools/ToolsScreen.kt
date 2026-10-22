@@ -38,12 +38,11 @@ import ru.lumastack.lumawork.ui.theme.appScreenBackground
 import androidx.compose.foundation.background
 import ru.lumastack.lumawork.ui.theme.AppCard
 
-private enum class ToolsSection(val title: String) { Pax("PAX"), P8("Unitodi P8"), Morefun("Morefun"), History("История") }
-private enum class FileFilter(val title: String) { All("ZIP, RAR и 7z"), Previous("Выбран ранее") }
+private enum class ToolsSection(val title: String) { Pax("PAX"), P8("UniTodi P8"), Morefun("Morefun"), History("История") }
 
 @Composable
-fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiState,
-    widthClass: AppWidthClass, onFtp: () -> Unit, onWiki: () -> Unit, onPaxFtp: () -> Unit = onFtp,
+fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests: SimpleOneUiState,
+    widthClass: AppWidthClass, onFtp: () -> Unit, onWiki: () -> Unit,
 ) {
     val context = LocalContext.current
     val transfers = repository.transfers
@@ -51,21 +50,18 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
         ToolCard("Файлы FTP недоступны") { Text("Локальное хранилище FTP не подключено."); TextButton(onClick = onFtp) { Text("Загрузить через FTP") } }
         return
     }
-    val model: ToolsViewModel = viewModel(key = "tools-$owner", factory = ToolsViewModel.factory(context, transfers, owner))
+    val model: ToolsViewModel = viewModel(key = "tools-$owner", factory = ToolsViewModel.factory(context, repository, owner, token))
     val state by model.state.collectAsStateWithLifecycle()
-    val paxFiles = state.files.filter { it.isPaxFirmwareSource() }
     val usb by model.usb.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var section by rememberSaveable(owner) { mutableStateOf(ToolsSection.Pax) }
-    var query by rememberSaveable(owner) { mutableStateOf("") }
-    var filter by rememberSaveable(owner) { mutableStateOf(FileFilter.All) }
-    var showDownloads by rememberSaveable(owner) { mutableStateOf(false) }
+    var importKind by rememberSaveable(owner) { mutableStateOf(PaxArchiveKind.Firmware) }
     var binding by remember(owner) { mutableStateOf<String?>(null) }
     var requestSearch by remember { mutableStateOf("") }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val importFirmware = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) model.importFirmware(uri)
+        if (uri != null) model.importFirmware(uri, importKind)
     }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) scope.launch {
@@ -85,6 +81,7 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
             catch (_: Exception) { model.notice("Не удалось экспортировать историю. Проверьте доступ к выбранному файлу.") }
         }
     }
+    LaunchedEffect(token) { model.updateToken(token) }
     LaunchedEffect(model, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             model.usb.start(); model.usb.scan(); model.refresh()
@@ -113,46 +110,17 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
                         ToolsSection.Pax -> item {
                             PaxFirmwarePanel(state, usb,
                                 onModel = model::selectPaxModel, onMode = model::selectInstallMode, onPinpadOs = model::setPinpadExpectedOs,
-                                onImport = { importFirmware.launch(arrayOf("application/x-7z-compressed", "application/zip", "application/rar", "application/vnd.rar", "application/x-rar-compressed", "application/x-rar", "application/octet-stream")) },
-                                onFtp = onPaxFtp, onStart = model::startFirmware, onResume = model::resumeFirmware,
+                                onImport = { kind -> importKind = kind; importFirmware.launch(arrayOf("application/x-7z-compressed", "application/zip", "application/rar", "application/vnd.rar", "application/x-rar-compressed", "application/x-rar", "application/octet-stream")) },
+                                onFtp = model::openArchivePicker, onArchive = model::selectArchive, onCancelDownload = model::cancelArchiveDownload, onStart = model::startFirmware, onResume = model::resumeFirmware,
                                 onRetryConnection = model::retryConnection,
-                                files = {
-                                    ToolsActionButton(if (showDownloads) "Скрыть скачанные архивы" else "Скачанные архивы из FTP · ${paxFiles.size}",
-                                        { showDownloads = !showDownloads }, Modifier.fillMaxWidth(),
-                                        icon = ToolsIcons.folder, accent = ToolsColors.current.mint)
-                                    if (showDownloads) {
-                                        AppTextField(query, { query = it }, "Поиск комплектов PAX", search = true, singleLine = true)
-                                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            FileFilter.entries.forEach { item -> FilterChip(selected = filter == item, onClick = { filter = item }, label = { Text(item.title) }) }
-                                        }
-                                        val visible = paxFiles.filter { file ->
-                                            (query.isBlank() || file.name.contains(query.trim(), true)) && when (filter) {
-                                                FileFilter.All -> true
-                                                FileFilter.Previous -> file.id == state.snapshot.selection?.file?.id
-                                            }
-                                        }
-                                        if (visible.isEmpty()) Text(if (paxFiles.isEmpty()) "Скачанных комплектов PAX нет." else "Файлы не найдены.", style = MaterialTheme.typography.bodySmall)
-                                        visible.forEach { file ->
-                                            val selected = state.snapshot.selection?.takeIf { it.file.id == file.id }
-                                            AppCard(onClick = { model.inspect(file) }, enabled = !file.downloading && !state.checking && !state.loading && !state.globalInstallBusy && !state.firmwareBusy, modifier = Modifier.fillMaxWidth()) {
-                                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                    Text(file.name, style = MaterialTheme.typography.titleSmall)
-                                                    if (selected != null) Text("Выбран ранее · ${toolDate(selected.selectedAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                                    Text(android.text.format.Formatter.formatFileSize(context, file.size), style = MaterialTheme.typography.bodySmall)
-                                                    if (file.downloading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                                                }
-                                            }
-                                        }
-                                        TextButton(onClick = { model.refresh() }, enabled = !state.loading && !state.checking) { Text("Обновить список") }
-                                    }
-                                }, connection = {
+                                connection = {
                                     ToolsDeviceWorkspace(usb, model.usb::scan, model.usb::requestPermission,
                                         model.usb::probe, model.usb::cancelProbe, onWiki,
                                         firmwareBusy = state.globalInstallBusy, paxModel = state.paxModel)
                                 })
                         }
-                        ToolsSection.P8 -> item { TerminalFamilyPage(TerminalFamily.P8, onFtp, onWiki) }
-                        ToolsSection.Morefun -> item { TerminalFamilyPage(TerminalFamily.Morefun, onFtp, onWiki) }
+                        ToolsSection.P8 -> item { ToolCard("UniTodi P8") { Text("Скоро..") } }
+                        ToolsSection.Morefun -> item { ToolCard("Morefun") { Text("Скоро..") } }
                         ToolsSection.History -> {
                             item { Text("События хранятся на этом устройстве. Привязка к заявке локальная; вложения в SimpleOne не отправляются.", style = MaterialTheme.typography.bodyMedium) }
                             if (state.snapshot.history.isEmpty()) item { Text("История операций пуста.") }
@@ -170,6 +138,10 @@ fun ToolsRoute(owner: String, repository: FtpRepository, requests: SimpleOneUiSt
         }
     }
     } // Tools-only palette; shell and other app routes retain their own theme.
+    if (state.archivePicker != null) {
+        PaxArchivePicker(state, model::closeArchivePicker, model::navigateArchiveFtp, model::downloadArchive,
+            onSaved = { id -> val kind = state.archivePicker!!; model.closeArchivePicker(); model.prepareFirmwareFromFtp(id, kind) })
+    }
     if (state.installation.awaitingCompletionAcknowledgement) {
         val completed = state.installation
         AlertDialog(
