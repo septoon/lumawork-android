@@ -9,7 +9,8 @@ const val PAX_FIRMWARE_FTP_PATH = "/VTB_TO/TO/Vendor/Verifone_Pax/Прошивк
     val downloadedAt: Long, val locator: String, val downloading: Boolean = false,
     val remotePath: String? = null,
 )
-fun LocalToolFile.isPaxFirmwareSource(): Boolean = remotePath?.startsWith("$PAX_FIRMWARE_FTP_PATH/") == true && name.endsWith(".zip", true)
+fun LocalToolFile.isPaxFirmwareSource(): Boolean = remotePath?.startsWith("$PAX_FIRMWARE_FTP_PATH/") == true && name.isPaxArchiveName()
+fun String.isPaxArchiveName(): Boolean = endsWith(".zip", true) || endsWith(".rar", true) || endsWith(".7z", true)
 @Serializable data class SelectedFirmware(val file: LocalToolFile, val sha256: String, val selectedAt: Long)
 @Serializable data class ToolRequestRef(val sysId: String, val number: String)
 @Serializable enum class ToolsEventKind(val title: String) {
@@ -18,6 +19,7 @@ fun LocalToolFile.isPaxFirmwareSource(): Boolean = remotePath?.startsWith("$PAX_
     Diagnostic("Диагностика USB"), Interrupted("Операция прервана"),
     FileCopied("Файл скопирован"), SessionClosed("USB-сессия закрыта"),
     AutonomyConfirmed("Автономное продолжение подтверждено"), AutonomyUnknown("Автономное продолжение не подтверждено"),
+    InstallationWritten("Запись завершена · требуется проверка"),
     InstallationConfirmed("Установка подтверждена"), InstallationUnknown("Результат установки не подтверждён"),
 }
 @Serializable data class ToolsEvent(

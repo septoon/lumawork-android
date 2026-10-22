@@ -400,7 +400,7 @@ private fun AppDrawerShell(
     ) {
         CompositionLocalProvider(LocalAppHeader provides header) {
             Scaffold(
-                modifier = Modifier.background(appScreenBackground()),
+                modifier = Modifier.background(header.content?.background ?: appScreenBackground()),
                 containerColor = androidx.compose.ui.graphics.Color.Transparent,
                 topBar = {
                     AppTopBar(

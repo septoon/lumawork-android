@@ -23,7 +23,9 @@ data class ToolsUiState(
     val files: List<LocalToolFile> = emptyList(), val snapshot: ToolsSnapshot = ToolsSnapshot(),
     val loading: Boolean = true, val checking: Boolean = false, val notice: String? = null,
     val inspected: LocalToolFile? = null, val checkMessage: String? = null,
-    val firmware: PaxFirmwareBundle? = null, val firmwareBusy: Boolean = true,
+    val firmware: PaxFirmwarePackage? = null, val firmwareBusy: Boolean = true, val firmwareError: String? = null,
+    val pinpadExpectedOs: String = "",
+    val paxModel: PaxModel = PaxModel.D270, val installMode: PaxInstallMode = PaxInstallMode.Full,
     val installation: PaxInstallState = PaxInstallState(), val globalInstallBusy: Boolean = false,
 )
 class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owner: String) : ViewModel() {
@@ -33,6 +35,8 @@ class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owne
     private val firmwareStore = PaxFirmwareStore(context)
     private val mutable = MutableStateFlow(ToolsUiState())
     val state = mutable.asStateFlow()
+    private val preparedPackages = mutableMapOf<PaxModel, PaxFirmwarePackage>()
+    private val pinpadExpectations = mutableMapOf<String, String>()
     private var work: Job? = null
     private var pendingRefresh = false
     private var pendingHashCheck = false
@@ -46,11 +50,15 @@ class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owne
             try {
                 val saved = withContext(Dispatchers.IO) { firmwareStore.read(owner) }
                 val bundle = saved.bundleDirectory?.let { path -> withContext(Dispatchers.IO) {
-                    runCatching { PaxFirmwareBundleReader.read(firmwareStore.checkedBundleDirectory(owner, path)) }.getOrNull()
+                    runCatching { readPaxPackage(firmwareStore.checkedBundleDirectory(owner, path), saved.model) }.getOrNull()
                 } }
-                mutable.update { it.copy(firmware = bundle, installation = saved) }
+                bundle?.let {
+                    preparedPackages[it.model] = it
+                    if (it.model == PaxModel.S210) pinpadExpectations[it.directory.path] = saved.expectedPinpadOs ?: expectedPinpadOs(it.os).orEmpty()
+                }
+                mutable.update { it.copy(firmware = bundle, pinpadExpectedOs = saved.expectedPinpadOs ?: expectedPinpadOs(bundle?.os).orEmpty(), installation = saved, paxModel = saved.model, installMode = saved.mode) }
                 repository.recordInstallation(owner, saved)
-            } catch (_: Exception) { notice("Не удалось прочитать подготовленный комплект PAX. Выберите ZIP заново.") }
+            } catch (_: Exception) { notice("Не удалось прочитать подготовленный комплект PAX. Выберите ZIP, RAR или 7z заново.") }
             finally { mutable.update { it.copy(firmwareBusy = false) } }
             PaxFirmwareRuntime.state.collect { current ->
                 mutable.update { it.copy(globalInstallBusy = current.active,
@@ -63,39 +71,108 @@ class ToolsViewModel(context: Context, transfers: FtpTransfers, private val owne
             }
         }
     }
-    fun importFirmware(uri: Uri) = prepareFirmware { requireNotNull(context.contentResolver.openInputStream(uri)) { "Не удалось открыть ZIP." } }
+    fun acknowledgeFirmwareCompletion() {
+        val completed = state.value.installation.takeIf { it.awaitingCompletionAcknowledgement } ?: return
+        mutable.update { it.copy(installation = it.installation.copy(completionAcknowledged = true)) }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { firmwareStore.acknowledgeCompletion(owner, completed.operationId) }
+                val current = PaxFirmwareRuntime.state.value
+                if (current.owner == owner && current.operationId == completed.operationId && current.phase == PaxInstallPhase.Complete)
+                    PaxFirmwareRuntime.mutable.value = current.copy(completionAcknowledged = true)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { notice("Не удалось сохранить подтверждение завершения.") }
+        }
+    }
+    fun importFirmware(uri: Uri) = prepareFirmware { requireNotNull(context.contentResolver.openInputStream(uri)) { "Не удалось открыть архив." } }
     fun prepareFirmwareFromFtp(id: String) = prepareFirmware { localFiles.open(owner, id) }
     private fun prepareFirmware(open: suspend () -> InputStream) {
         if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
-        mutable.update { it.copy(firmwareBusy = true, inspected = null, checkMessage = null) }
+        preparedPackages.remove(state.value.paxModel)
+        mutable.update { it.copy(firmware = null, firmwareBusy = true, firmwareError = null, inspected = null, checkMessage = null) }
         viewModelScope.launch {
             try {
+                val selectedModel = state.value.paxModel
                 val bundle = withContext(Dispatchers.IO) {
                     val destination = File(firmwareStore.ownerDirectory(owner), "bundle-${UUID.randomUUID()}")
-                    open().use { PaxFirmwareBundleReader.prepare(it, destination) }
+                    try { open().use { PaxArchiveCatalog.prepare(it, destination, selectedModel) } }
+                    catch (failure: Exception) {
+                        if (selectedModel != PaxModel.D270) throw failure
+                        // Retain support for the previously imported, fingerprinted full D270 capture kit.
+                        try { open().use { PaxFirmwareBundleReader.prepare(it, destination).asPackage() } }
+                        catch (_: Exception) { throw failure }
+                    }
                 }
+                preparedPackages[bundle.model] = bundle
+                if (bundle.model == PaxModel.S210) pinpadExpectations[bundle.directory.path] = expectedPinpadOs(bundle.os).orEmpty()
                 val ready = PaxInstallState(owner = owner, phase = PaxInstallPhase.Ready, bundleDirectory = bundle.directory.path,
-                    detail = "Проверены все 10 файлов полного комплекта D270.", updatedAt = System.currentTimeMillis())
-                withContext(Dispatchers.IO) { firmwareStore.write(ready) }
-                mutable.update { it.copy(firmware = bundle, installation = ready) }
-                notice("Полный комплект D270 проверен и подготовлен.")
+                    detail = "Комплект ${selectedModel.title} подготовлен.", model = selectedModel, updatedAt = System.currentTimeMillis())
+                if (!state.value.installation.canResume) withContext(Dispatchers.IO) { firmwareStore.write(ready) }
+                mutable.update { it.copy(firmware = bundle, pinpadExpectedOs = expectedPinpadOs(bundle.os).orEmpty(), installation = if (it.installation.canResume) it.installation else ready,
+                    installMode = if (!bundle.hasOs && it.installMode == PaxInstallMode.Full) PaxInstallMode.MainApp else it.installMode) }
+                notice("Комплект ${selectedModel.title} подготовлен. Доступные операции определены по его составу.")
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { notice(failure.message ?: "Не удалось подготовить полный комплект D270.") }
+            catch (failure: Exception) {
+                val message = failure.message ?: "Не удалось подготовить комплект выбранной модели."
+                mutable.update { it.copy(firmwareError = message) }
+                notice(message)
+            }
             finally { mutable.update { it.copy(firmwareBusy = false) } }
         }
     }
-    fun startFirmware() {
+    fun selectPaxModel(model: PaxModel) {
+        if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
+        val cached = preparedPackages[model]
+        mutable.update { it.copy(paxModel = model, firmware = cached, firmwareError = null,
+            pinpadExpectedOs = if (model == PaxModel.S210) cached?.let { bundle ->
+                pinpadExpectations[bundle.directory.path] ?: expectedPinpadOs(bundle.os)
+            }.orEmpty() else it.pinpadExpectedOs,
+            installMode = if (model == PaxModel.S210 && it.installMode == PaxInstallMode.RemoveMainApp) PaxInstallMode.Full else it.installMode) }
+    }
+    fun selectInstallMode(mode: PaxInstallMode) {
+        if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
+        if (state.value.paxModel == PaxModel.S210 && mode == PaxInstallMode.RemoveMainApp) return
+        mutable.update { it.copy(installMode = mode) }
+    }
+    fun setPinpadExpectedOs(value: String) {
+        if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
+        val clean = value.trim()
+        if (clean.length <= 96 && clean.all { it.isLetterOrDigit() || it in ".-_()" }) {
+            state.value.firmware?.takeIf { it.model == PaxModel.S210 }?.let { pinpadExpectations[it.directory.path] = clean }
+            mutable.update { it.copy(pinpadExpectedOs = clean) }
+        }
+    }
+    fun retryConnection() { PaxFirmwareRuntime.retryConnection(); usb.scan() }
+    fun startFirmware() = launchFirmware(resume = false)
+    fun resumeFirmware() = launchFirmware(resume = true)
+    private fun launchFirmware(resume: Boolean) {
         try {
             check(!state.value.firmwareBusy && !PaxFirmwareRuntime.state.value.active)
-            val bundle = requireNotNull(state.value.firmware) { "Сначала подготовьте полный комплект." }
-            val equipment = usb.state.value.devices.singleOrNull { it.hasPermission && isPaxUsbCandidate(it) }
+            val saved = state.value.installation
+            val model = if (resume) saved.model else state.value.paxModel
+            val mode = if (resume) saved.mode else state.value.installMode
+            val path = if (mode == PaxInstallMode.RemoveMainApp) null else if (resume) saved.bundleDirectory else state.value.firmware?.takeIf { it.model == model }?.directory?.path
+            check(mode == PaxInstallMode.RemoveMainApp || path != null) { "Сначала выберите ZIP этой модели." }
+            val equipment = usb.state.value.devices.singleOrNull { it.hasPermission &&
+                if (model == PaxModel.S210) isPaxPinpadCandidate(it) else isPaxXcbCandidate(it) }
                 ?: error("Подключите один PAX и разрешите USB-доступ.")
             check(usb.state.value.probingKey == null) { "Дождитесь завершения чтения паспорта." }
-            val passport = requireNotNull(usb.state.value.passports[equipment.key]) { "Сначала прочитайте паспорт PAX во вкладке «Устройство»." }
-            check(passport.model == "D270" && passport.os?.startsWith("Nuxiums") == true && passport.target == "Inpas") { "Нужен PAX D270 / Nuxiums / Inpas." }
-            val fingerprint = requireNotNull(passport.fingerprint) { "Идентичность терминала не подтверждена." }
+            val fingerprint = if (model == PaxModel.S210) {
+                val info = usb.state.value.pinpads[equipment.key]
+                val beforeOs = mode != PaxInstallMode.MainApp && (!resume || "pinpad-os" !in saved.completedActions)
+                if (!resume) check(if (beforeOs) equipment.key in usb.state.value.pinpadOsBoot else info?.fingerprint != null) {
+                    if (beforeOs) "Подключите S210 с белым экраном и проверьте подключение." else "Прочитайте данные S210 в системном меню."
+                }
+                info?.fingerprint ?: saved.deviceFingerprint.takeIf { resume }
+            }
+            else {
+                val passport = usb.state.value.passports[equipment.key]
+                if (passport != null) check(passport.model == model.name && passport.target == "Inpas") { "Модель или платформа PAX не совпала с выбранной." }
+                passport?.fingerprint ?: saved.deviceFingerprint.takeIf { resume }
+                    ?: error("Сначала прочитайте паспорт PAX в шаге «Подключение».")
+            }
             usb.cancelProbe()
-            PaxFirmwareService.start(context, owner, bundle.directory.path, equipment.key, fingerprint)
+            PaxFirmwareService.start(context, owner, path, equipment.key, fingerprint, model, mode, resume, state.value.pinpadExpectedOs.takeIf { it.isNotBlank() })
         } catch (failure: Exception) { notice(failure.message ?: "Не удалось начать установку PAX.") }
     }
     fun refresh(verifyHash: Boolean = true) {

@@ -24,13 +24,15 @@ const val USB_UNCONFIRMED_UPDATE = "Не отсоединяйте кабель: 
 enum class UsbProbeStage(val title: String) {
     Opening("Открытие USB-интерфейса…"), Handshake("Установка сеанса PAX XCB…"), Reading("Чтение ответа устройства…"),
 }
-internal data class UsbDiagnosticResult(val message: String, val passport: PaxPassport? = null)
+internal data class UsbDiagnosticResult(val message: String, val passport: PaxPassport? = null, val pinpad: PaxPinpadInfo? = null, val pinpadOsBoot: Boolean = false)
 data class UsbToolsState(
     val hostSupported: Boolean = true, val devices: List<UsbEquipment> = emptyList(),
     val permissionPending: String? = null, val probingKey: String? = null,
     val diagnostics: Map<String, String> = emptyMap(), val error: String? = null,
     val passports: Map<String, PaxPassport> = emptyMap(), val failures: Map<String, String> = emptyMap(),
     val probeStage: UsbProbeStage? = null,
+    val pinpads: Map<String, PaxPinpadInfo> = emptyMap(),
+    val pinpadOsBoot: Set<String> = emptySet(),
 )
 
 /** Enumerates real hardware. No model VID/PID allowlist is invented from the Wiki's device names. */
@@ -44,14 +46,14 @@ class UsbToolsMonitor(context: Context, private val scope: CoroutineScope,
     val state = mutable.asStateFlow()
     private var registered = false
     private var probeJob: Job? = null
-    private val adapters = listOf(PaxUsbDiagnosticsAdapter(manager), MtpDiagnosticsAdapter(manager), CdcAcmDiagnosticsAdapter())
+    private val adapters = listOf(PaxPinpadDiagnosticsAdapter(manager), PaxUsbDiagnosticsAdapter(manager), MtpDiagnosticsAdapter(manager), CdcAcmDiagnosticsAdapter())
     @Volatile private var revision = 0L
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == UsbManager.ACTION_USB_DEVICE_DETACHED) {
                 // Invalidate even if the path is reused before the next enumeration.
                 cancelProbe()
-                mutable.update { it.copy(passports = emptyMap(), diagnostics = emptyMap(), failures = emptyMap(),
+                mutable.update { it.copy(passports = emptyMap(), pinpads = emptyMap(), pinpadOsBoot = emptySet(), diagnostics = emptyMap(), failures = emptyMap(),
                     devices = it.devices.map { device -> device.copy(confirmedModel = null) }) }
             }
             if (intent.action == permissionAction) {
@@ -87,7 +89,9 @@ class UsbToolsMonitor(context: Context, private val scope: CoroutineScope,
                 onEvent(ToolsEventKind.UsbAttached, "VID/PID %04X:%04X; модель не подтверждена".format(device.vendorId, device.productId), key)
             }
             mutable.update { it.copy(devices = current, diagnostics = it.diagnostics.filterKeys { key -> after[key]?.hasPermission == true },
-                passports = it.passports.filterKeys { key -> after[key]?.hasPermission == true }, failures = it.failures.filterKeys(after::containsKey),
+                passports = it.passports.filterKeys { key -> after[key]?.hasPermission == true },
+                pinpadOsBoot = it.pinpadOsBoot.filterTo(mutableSetOf()) { key -> after[key]?.hasPermission == true },
+                pinpads = it.pinpads.filterKeys { key -> after[key]?.hasPermission == true }, failures = it.failures.filterKeys(after::containsKey),
                 permissionPending = it.permissionPending?.takeIf(after::containsKey)) }
         } catch (_: Exception) { mutable.update { it.copy(error = "Не удалось прочитать USB-устройства. Проверьте кабель и USB Host на телефоне.") } }
     }
@@ -117,7 +121,7 @@ class UsbToolsMonitor(context: Context, private val scope: CoroutineScope,
         }
         val generation = ++revision
         mutable.update { it.copy(probingKey = key, probeStage = UsbProbeStage.Opening, error = null,
-            passports = it.passports - key, failures = it.failures - key, diagnostics = it.diagnostics - key,
+            passports = it.passports - key, pinpads = it.pinpads - key, pinpadOsBoot = it.pinpadOsBoot - key, failures = it.failures - key, diagnostics = it.diagnostics - key,
             devices = it.devices.map { device -> if (device.key == key) device.copy(confirmedModel = null) else device }) }
         probeJob = scope.launch {
             try {
@@ -127,11 +131,15 @@ class UsbToolsMonitor(context: Context, private val scope: CoroutineScope,
                 if (generation == revision && manager.deviceList[key] == device && manager.hasPermission(device)) {
                     mutable.update { it.copy(diagnostics = it.diagnostics + (key to result.message),
                         passports = result.passport?.let { passport -> it.passports + (key to passport) } ?: (it.passports - key),
-                        devices = it.devices.map { current -> if (current.key == key) current.copy(confirmedModel = result.passport?.model) else current }) }
+                        pinpads = result.pinpad?.let { info -> it.pinpads + (key to info) } ?: (it.pinpads - key),
+                        pinpadOsBoot = if (result.pinpadOsBoot) it.pinpadOsBoot + key else it.pinpadOsBoot - key,
+                        devices = it.devices.map { current -> if (current.key == key) current.copy(confirmedModel = result.passport?.model ?: result.pinpad?.model) else current }) }
                     onEvent(ToolsEventKind.Diagnostic, result.message, key)
                 }
             } catch (_: TimeoutCancellationException) {
-                if (generation == revision) failProbe(key, "Время ожидания ответа истекло. Проверьте XCB service → USB и оставайтесь в main menu терминала.")
+                if (generation == revision) failProbe(key, if (isPaxPinpadCandidate(equipment))
+                    "S210 не ответил ни в режиме загрузки OS, ни в системном меню. Переподключите USB в нужном режиме и повторите проверку."
+                    else "Время ожидания ответа истекло. Проверьте XCB service → USB и оставайтесь в main menu терминала.")
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
                 if (generation == revision) {
@@ -143,7 +151,7 @@ class UsbToolsMonitor(context: Context, private val scope: CoroutineScope,
         }
     }
     private fun failProbe(key: String, message: String) {
-        mutable.update { it.copy(failures = it.failures + (key to message), passports = it.passports - key) }
+        mutable.update { it.copy(failures = it.failures + (key to message), passports = it.passports - key, pinpads = it.pinpads - key, pinpadOsBoot = it.pinpadOsBoot - key) }
         onEvent(ToolsEventKind.Diagnostic, message, key)
     }
     private fun describe(device: UsbDevice) = UsbEquipment(device.deviceName, device.vendorId, device.productId,
@@ -154,7 +162,7 @@ class UsbToolsMonitor(context: Context, private val scope: CoroutineScope,
                 (0 until iface.endpointCount).map { e -> iface.getEndpoint(e).let { ep ->
                     "0x%02X · %s · тип %d · пакет %d Б".format(ep.address, if (ep.direction == 128) "IN" else "OUT", ep.type, ep.maxPacketSize)
                 } })
-        }, confirmedModel = mutable.value.passports[device.deviceName]?.model?.takeIf { manager.hasPermission(device) })
+        }, confirmedModel = (mutable.value.passports[device.deviceName]?.model ?: mutable.value.pinpads[device.deviceName]?.model)?.takeIf { manager.hasPermission(device) })
     fun cancelProbe() {
         val key = mutable.value.probingKey
         revision++; probeJob?.cancel(); probeJob = null
@@ -165,7 +173,7 @@ class UsbToolsMonitor(context: Context, private val scope: CoroutineScope,
     override fun close() {
         cancelProbe()
         if (registered) { context.unregisterReceiver(receiver); registered = false }
-        mutable.update { it.copy(permissionPending = null, passports = emptyMap(), diagnostics = emptyMap(), failures = emptyMap(),
+        mutable.update { it.copy(permissionPending = null, passports = emptyMap(), pinpads = emptyMap(), pinpadOsBoot = emptySet(), diagnostics = emptyMap(), failures = emptyMap(),
             devices = it.devices.map { device -> device.copy(confirmedModel = null) }) }
     }
 }

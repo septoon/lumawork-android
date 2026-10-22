@@ -54,6 +54,15 @@ class PaxProtocolTest {
         assertTrue(runCatching { parsePaxPassport("<devinfo><terminal><mach>UNKNOWN</mach></terminal></devinfo>".toByteArray()) }.isFailure)
     }
 
+    @Test fun `supported XCB models are read from passport without D270 substitution`() {
+        for (model in listOf("D230", "D270", "Q25")) {
+            val xml = "<devinfo><terminal><mach>$model</mach><sn>PRIVATE-SERIAL</sn><target>Inpas</target></terminal><application/></devinfo>"
+            val passport = parsePaxPassport(xml.toByteArray())
+            assertEquals(model, passport.model)
+            assertNotNull(passport.fingerprint)
+        }
+        assertTrue(runCatching { parsePaxPassport("<devinfo><terminal><mach>S210</mach></terminal></devinfo>".toByteArray()) }.isFailure)
+    }
     @Test fun `readonly session queries passport with space selector and acknowledges fragments`() = runBlocking {
         val wire = ScriptedPaxWire()
         wire.incoming += message("CNXN", 0x01000000, 65536, "device::\u0000")

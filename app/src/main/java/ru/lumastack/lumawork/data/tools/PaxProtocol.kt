@@ -14,7 +14,8 @@ import org.xml.sax.ErrorHandler
 import org.xml.sax.SAXParseException
 
 internal const val PAX_MAX_PAYLOAD = 65_536
-internal class PaxDiagnosticException(message: String) : Exception(message)
+internal open class PaxDiagnosticException(message: String) : Exception(message)
+internal class PaxConnectionLostException(message: String) : PaxDiagnosticException(message)
 internal fun paxRequire(value: Boolean, message: String) {
     if (!value) throw PaxDiagnosticException(message)
 }
@@ -122,7 +123,7 @@ internal fun parsePaxPassport(bytes: ByteArray): PaxPassport {
         paxRequire(root.tagName == "devinfo", "Устройство вернуло неизвестный формат паспорта.")
         val terminal = root.child("terminal")
         val model = terminal?.value("mach")
-        paxRequire(model == "D270", "Модель из ответа не подтверждена как D270. Диагностика остановлена.")
+        paxRequire(model in setOf("D230", "D270", "Q25"), "Модель из ответа не поддерживается: нужен D230, D270 или Q25.")
         val apps = root.child("application")
         val main = apps?.childNodes?.let { nodes -> (0 until nodes.length).mapNotNull { nodes.item(it) as? Element }
             .singleOrNull { it.tagName == "app" && it.getAttribute("id") == "MAINAPP" } }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
@@ -14,7 +15,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -22,7 +22,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -34,7 +37,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import ru.lumastack.lumawork.R
 import ru.lumastack.lumawork.data.auth.AuthRepository
 import ru.lumastack.lumawork.data.auto.AutoRepository
 import ru.lumastack.lumawork.data.auto.VehicleImageRepository
@@ -61,6 +63,20 @@ import ru.lumastack.lumawork.ui.theme.AppPanel
 
 private enum class SettingsPage(val title: String) {
     Root("Настройки"), Appearance("Оформление"), Screens("Экраны"), Route("Маршрут"), Gsm("ГСМ профиль"), Notifications("Уведомления")
+}
+
+private enum class SettingsIcon(val color: Color, path: String) {
+    Profile(Color(0xFF1A73E8), "M12,12c2.21,0 4,-1.79 4,-4s-1.79,-4 -4,-4 -4,1.79 -4,4 1.79,4 4,4zM12,14c-2.67,0 -8,1.34 -8,4v2h16v-2c0,-2.66 -5.33,-4 -8,-4z"),
+    Fuel(Color(0xFF00897B), "M19.77,7.23l0.01,-0.01L16.06,3.5 15,4.56l2.11,2.11C16.17,7.03 15.5,7.93 15.5,9c0,1.38 1.12,2.5 2.5,2.5 0.36,0 0.69,-0.08 1,-0.21V18c0,0.55 -0.45,1 -1,1s-1,-0.45 -1,-1v-4.5c0,-1.1 -0.9,-2 -2,-2h-1V4c0,-1.1 -0.9,-2 -2,-2H6C4.9,2 4,2.9 4,4v16H2v2h14v-2h-2v-7h1.5v5c0,1.38 1.12,2.5 2.5,2.5s2.5,-1.12 2.5,-2.5V9c0,-0.69 -0.28,-1.32 -0.73,-1.77zM12,9H6V4h6v5zM18,10c-0.55,0 -1,-0.45 -1,-1s0.45,-1 1,-1 1,0.45 1,1 -0.45,1 -1,1z"),
+    Route(Color(0xFF43A047), "M12,2C8.13,2 5,5.13 5,9c0,5.25 7,13 7,13s7,-7.75 7,-13c0,-3.87 -3.13,-7 -7,-7zM12,11.5c-1.38,0 -2.5,-1.12 -2.5,-2.5s1.12,-2.5 2.5,-2.5 2.5,1.12 2.5,2.5 -1.12,2.5 -2.5,2.5z"),
+    Notifications(Color(0xFFEF6C00), "M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.07 -1.63,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.64,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z"),
+    Screens(Color(0xFF5C6BC0), "M3,3h8v8H3zM13,3h8v5h-8zM13,10h8v11h-8zM3,13h8v8H3z"),
+    Appearance(Color(0xFF8E24AA), "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10c1.66,0 3,-1.34 3,-3 0,-0.78 -0.3,-1.49 -0.79,-2.02 -0.47,-0.53 -0.69,-0.79 -0.69,-1.25 0,-0.96 0.78,-1.73 1.73,-1.73H17c2.76,0 5,-2.24 5,-5 0,-3.87 -4.48,-7 -10,-7zM6.5,12C5.67,12 5,11.33 5,10.5S5.67,9 6.5,9 8,9.67 8,10.5 7.33,12 6.5,12zM9.5,8C8.67,8 8,7.33 8,6.5S8.67,5 9.5,5 11,5.67 11,6.5 10.33,8 9.5,8zM14.5,8C13.67,8 13,7.33 13,6.5S13.67,5 14.5,5 16,5.67 16,6.5 15.33,8 14.5,8zM17.5,12c-0.83,0 -1.5,-0.67 -1.5,-1.5S16.67,9 17.5,9 19,9.67 19,10.5 18.33,12 17.5,12z"),
+    Updates(Color(0xFF039BE5), "M17,1H7C5.9,1 5,1.9 5,3v18c0,1.1 0.9,2 2,2h10c1.1,0 2,-0.9 2,-2V3c0,-1.1 -0.9,-2 -2,-2zM17,19H7V5h10v14zM16,12h-3V8h-2v4H8l4,4 4,-4z");
+
+    val vector = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
+        .addPath(pathData = addPathNodes(path), fill = SolidColor(Color.White))
+        .build()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -120,15 +136,15 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                                             onDelete = { avatar { auth.deleteAvatar() } },
                                             onError = { scope.launch { snackbars.showSnackbar(it) } }, size = 60.dp, showEmail = false) }
                                         item { SettingsSectionLabel("Профиль") }
-                                        item { SettingsLink("Профиль", R.drawable.ic_nav_groups, !busy, onOpenProfile) }
-                                        item { SettingsLink("ГСМ профиль", R.drawable.ic_nav_local_gas_station, !busy) { page = SettingsPage.Gsm } }
+                                        item { SettingsLink("Профиль", SettingsIcon.Profile, !busy, onOpenProfile) }
+                                        item { SettingsLink("ГСМ профиль", SettingsIcon.Fuel, !busy) { page = SettingsPage.Gsm } }
                                         item { SettingsSectionLabel("Маршрут") }
-                                        item { SettingsLink("Старт и финиш", R.drawable.ic_nav_home, !busy) { page = SettingsPage.Route } }
+                                        item { SettingsLink("Старт и финиш", SettingsIcon.Route, !busy) { page = SettingsPage.Route } }
                                         item { SettingsSectionLabel("Приложение") }
-                                        item { SettingsLink("Уведомления", null, !busy) { page = SettingsPage.Notifications } }
-                                        item { SettingsLink("Экраны", R.drawable.ic_nav_assignment, !busy) { page = SettingsPage.Screens } }
-                                        item { SettingsLink("Оформление", null, !busy) { page = SettingsPage.Appearance } }
-                                        item { SettingsLink("Проверить обновления", null, !busy, checkUpdates) }
+                                        item { SettingsLink("Уведомления", SettingsIcon.Notifications, !busy) { page = SettingsPage.Notifications } }
+                                        item { SettingsLink("Экраны", SettingsIcon.Screens, !busy) { page = SettingsPage.Screens } }
+                                        item { SettingsLink("Оформление", SettingsIcon.Appearance, !busy) { page = SettingsPage.Appearance } }
+                                        item { SettingsLink("Проверить обновления", SettingsIcon.Updates, !busy, checkUpdates) }
                                         item { SettingsSectionLabel("Безопасность") }
                                         item {
                                             var available by remember { mutableStateOf(salaryBiometricAvailable(context)) }
@@ -207,12 +223,14 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
 }
 
 @Composable
-private fun SettingsLink(title: String, icon: Int?, enabled: Boolean, onClick: () -> Unit) {
+private fun SettingsLink(title: String, icon: SettingsIcon, enabled: Boolean, onClick: () -> Unit) {
     AppPanel(onClick = onClick, enabled = enabled, shape = MaterialTheme.shapes.medium) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (icon != null) Icon(painterResource(icon), null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
-            else Icon(Icons.Default.Settings, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+            Box(Modifier.size(36.dp).background(icon.color.copy(alpha = if (enabled) 1f else 0.38f), CircleShape),
+                contentAlignment = Alignment.Center) {
+                Icon(icon.vector, null, Modifier.size(22.dp), tint = Color.White)
+            }
             Text(title, Modifier.weight(1f))
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }

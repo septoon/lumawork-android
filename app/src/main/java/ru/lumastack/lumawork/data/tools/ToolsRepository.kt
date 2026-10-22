@@ -115,12 +115,12 @@ class ToolsRepository(
         val state = read(owner)
         if (state.history.any { it.id == installation.operationId }) return@withLock
         val kind = when (installation.phase) {
-            PaxInstallPhase.Complete -> ToolsEventKind.InstallationConfirmed
+            PaxInstallPhase.Complete -> if (installation.model == PaxModel.S210) ToolsEventKind.InstallationWritten else ToolsEventKind.InstallationConfirmed
             PaxInstallPhase.Interrupted -> ToolsEventKind.Interrupted
             else -> ToolsEventKind.InstallationUnknown
         }
         val event = ToolsEvent(installation.operationId, installation.updatedAt, kind,
-            "PAX D270 · ${installation.step?.title ?: "Подготовка"}. ${installation.detail}")
+            "${installation.model.title} · ${installation.mode.titleFor(installation.model)} · ${installation.step?.titleFor(installation.model) ?: "Подготовка"}. ${installation.detail}")
         store.write(owner, state.copy(history = (listOf(event) + state.history).take(500)))
     } }
     private suspend fun read(owner: String): ToolsSnapshot {

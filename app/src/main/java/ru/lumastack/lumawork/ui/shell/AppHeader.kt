@@ -35,6 +35,7 @@ internal class AppHeaderState {
 internal class AppHeaderContent(
     val title: (@Composable () -> Unit)?,
     val actions: @Composable RowScope.() -> Unit,
+    val background: androidx.compose.ui.graphics.Brush? = null,
 )
 
 internal val LocalAppHeader = staticCompositionLocalOf<AppHeaderState?> { null }
@@ -57,15 +58,17 @@ fun AppHeaderActions(title: (@Composable () -> Unit)? = null, actions: @Composab
 @Composable
 internal fun AppMenuButton(onClick: () -> Unit) {
     val haptics = LocalHapticFeedback.current
-    val tint = if (LocalAppDarkTheme.current) Color.White else Color(.08f, .10f, .11f)
+    val dark = LocalAppDarkTheme.current
+    val tint = if (dark) Color.White else Color(.08f, .10f, .11f)
     IconButton(onClick = {
         haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         onClick()
     }, modifier = Modifier.size(48.dp)) {
         androidx.compose.material3.Surface(modifier = Modifier.size(40.dp), shape = androidx.compose.foundation.shape.CircleShape,
-            color = ru.lumastack.lumawork.ui.theme.AppSurfaces.card,
-            border = androidx.compose.foundation.BorderStroke(1.dp, ru.lumastack.lumawork.ui.theme.AppSurfaces.border),
-            shadowElevation = 3.dp) {
+            color = if (dark) ru.lumastack.lumawork.ui.theme.AppSurfaces.card else Color.Transparent,
+            border = androidx.compose.foundation.BorderStroke(1.dp,
+                if (dark) ru.lumastack.lumawork.ui.theme.AppSurfaces.border else tint.copy(alpha = .16f)),
+            shadowElevation = if (dark) 3.dp else 0.dp) {
         androidx.compose.foundation.layout.Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
         Canvas(Modifier.size(22.dp, 18.dp).then(Modifier.semantics {
             contentDescription = "Открыть меню"

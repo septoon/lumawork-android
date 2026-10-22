@@ -12,7 +12,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 
-fun isPaxUsbCandidate(device: UsbEquipment): Boolean = device.vendorId == 0x2FB8 && device.productId == 0x1101 &&
+fun isPaxUsbCandidate(device: UsbEquipment): Boolean = isPaxPinpadCandidate(device) || isPaxXcbCandidate(device)
+internal fun isPaxXcbCandidate(device: UsbEquipment): Boolean = device.vendorId == 0x2FB8 && device.productId == 0x1101 &&
     device.interfaces.any { it.id == 0 && it.alternate == 0 && it.deviceClass == 255 }
 
 /** One owner and one close path for diagnostics and the installer. Never takes an interface forcibly. */
@@ -27,14 +28,14 @@ internal class PaxUsbConnection private constructor(
             paxRequire(result == 0, "PAX не подтвердил начальную настройку USB-транспорта.")
         }
         override fun write(bytes: ByteArray) {
-            paxRequire(!closed.get() && connection.bulkTransfer(output, bytes, bytes.size, 1000) == bytes.size,
-                "Ошибка передачи USB Bulk. Операция остановлена без повтора команды.")
+            if (closed.get() || connection.bulkTransfer(output, bytes, bytes.size, 1000) != bytes.size)
+                throw PaxConnectionLostException("Ошибка передачи USB Bulk. Подключите PAX повторно и продолжите операцию.")
         }
         override fun read(): ByteArray {
             val buffer = ByteArray(16_384)
             paxRequire(!closed.get(), "USB-сеанс закрыт.")
             val size = connection.bulkTransfer(input, buffer, buffer.size, 1000)
-            paxRequire(size > 0, "Нет ответа USB Bulk. Проверьте кабель и XCB service → USB в main menu.")
+            if (size <= 0) throw PaxConnectionLostException("Нет ответа USB Bulk. Проверьте кабель и XCB service → USB в main menu.")
             return buffer.copyOf(size)
         }
     })
@@ -64,7 +65,7 @@ internal class PaxUsbConnection private constructor(
 
 internal class PaxUsbDiagnosticsAdapter(private val manager: UsbManager) : UsbProtocolDiagnosticsAdapter {
     private val active = AtomicReference<PaxUsbConnection?>(null)
-    override fun supports(device: UsbEquipment) = isPaxUsbCandidate(device)
+    override fun supports(device: UsbEquipment) = isPaxXcbCandidate(device)
     override suspend fun inspect(device: UsbDevice, onStage: (UsbProbeStage) -> Unit): UsbDiagnosticResult = withTimeout(15_000) {
         onStage(UsbProbeStage.Opening)
         val connection = PaxUsbConnection.open(manager, device)

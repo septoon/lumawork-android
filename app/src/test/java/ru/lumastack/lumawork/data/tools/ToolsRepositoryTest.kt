@@ -119,6 +119,15 @@ class ToolsRepositoryTest {
         assertTrue(runCatching { repository().recordInstallation("other", installation) }.isFailure)
         assertTrue(repository().refresh("other").snapshot.history.isEmpty())
     }
+    @Test fun `pinpad writing result is distinct from verified installation and keeps actual model`() = runBlocking {
+        val installation = PaxInstallState(owner = "owner", phase = PaxInstallPhase.Complete, model = PaxModel.S210,
+            detail = "Writing 100%; check APP version after Cancel", operationId = "pinpad-result", updatedAt = 123)
+        repository().recordInstallation("owner", installation)
+        val event = repository().refresh("owner").snapshot.history.single()
+        assertEquals(ToolsEventKind.InstallationWritten, event.kind)
+        assertTrue(event.detail.startsWith("PAX S210"))
+        assertFalse(event.detail.contains("D270"))
+    }
     @Test fun `running or interrupted installation never appears as confirmed`() = runBlocking {
         val installation = PaxInstallState(owner = "owner", phase = PaxInstallPhase.Running, operationId = "installation-id")
         repository().recordInstallation("owner", installation)

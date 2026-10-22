@@ -52,11 +52,13 @@ val hasReleaseSigning = listOf(
 android {
     namespace = "ru.lumastack.lumawork"
     compileSdk = 37
+    compileSdkMinor = 2
 
     defaultConfig {
         applicationId = "ru.lumastack.lumawork"
         minSdk = 26
         targetSdk = 37
+        testInstrumentationRunner = "ru.lumastack.lumawork.data.tools.RarImportInstrumentation"
         versionCode = releaseVersionCode
         versionName = releaseVersionName
 
@@ -136,6 +138,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.zxing.embedded)
     implementation(libs.zxing.core)
+    implementation(libs.libarchive)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
