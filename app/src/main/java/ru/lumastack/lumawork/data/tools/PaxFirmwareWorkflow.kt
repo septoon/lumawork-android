@@ -176,12 +176,18 @@ internal class PaxFirmwareWorkflow(
     }
 }
 
-/** RELEASE.TXT contains build suffixes that devinfo omits; compare the entire released version core. */
+/** RELEASE.TXT uses -r13278 while devinfo can report .13278R or omit the build. */
 internal fun paxVersionMatches(actual: String?, expected: String?): Boolean {
     if (actual == null || expected == null) return false
     if (actual == expected) return true
-    fun core(value: String): String? = Regex("[0-9]+(?:\\.[0-9]+){2,4}").find(value)?.value
-    return core(actual) != null && core(actual) == core(expected)
+    fun version(value: String) = Regex("([0-9]+(?:\\.[0-9]+){2,4})(?:-[rR]([0-9]+))?").find(value)
+    val received = version(actual) ?: return false
+    val released = version(expected) ?: return false
+    val receivedCore = received.groupValues[1]; val releasedCore = released.groupValues[1]
+    val receivedBuild = received.groups[2]?.value; val releasedBuild = released.groups[2]?.value
+    if (receivedCore == releasedCore) return receivedBuild == null || releasedBuild == null || receivedBuild == releasedBuild
+    return (receivedBuild == null && releasedBuild != null && receivedCore == "$releasedCore.$releasedBuild") ||
+        (releasedBuild == null && receivedBuild != null && releasedCore == "$receivedCore.$receivedBuild")
 }
 
 internal fun PaxFirmwareBundle.asPackage() = PaxFirmwarePackage(directory, PaxModel.D270, boot, os, application,

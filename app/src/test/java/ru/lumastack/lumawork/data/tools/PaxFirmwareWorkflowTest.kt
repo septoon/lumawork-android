@@ -20,6 +20,32 @@ class PaxFirmwareWorkflowTest {
     private fun asset(name: String) = PaxFirmwareAsset(name, File("unused/$name"), "synthetic")
     private fun workflow() = PaxFirmwareWorkflow(host) { _, _ -> }
 
+    @Test fun `Q25 continues saved OS checkpoint when devinfo spells the revision with a dot`() = runBlocking {
+        val installed = passport().copy(model = "Q25", os = "prolin-pelican-2.7.181.13278R-Inpas")
+        before.current = installed; after.current = installed
+        val q25 = bundle.asPackage().copy(model = PaxModel.Q25, boot = null, expectedBoot = null, expectedOs = "2.7.181-r13278")
+        val result = workflow().execute(q25, PaxInstallMode.Full, "usb", "same", PaxModel.Q25,
+            completed = listOf("remove", "os", "reboot"), pending = "reconnect")
+        assertEquals("3.0.65.014", result.mainApp)
+        assertTrue(actions.contains("app"))
+        assertEquals(1, actions.count { it == "remove" })
+        assertFalse(actions.any { it in listOf("os", "boot", "reboot", "upload:os.zip") })
+    }
+
+    @Test fun `PAX dotted and release revision formats match without dropping an explicit revision`() {
+        assertTrue(paxVersionMatches("prolin-pelican-2.7.181.13278R-Inpas", "2.7.181-r13278"))
+        assertTrue(paxVersionMatches("2.7.181-r13278", "prolin-pelican-2.7.181.13278R-Inpas"))
+        assertTrue(paxVersionMatches("Nuxiums3.1.45", "3.1.45-r13454"))
+        assertTrue(paxVersionMatches("8.1.12.274(R)", "8.1.12.274"))
+        assertFalse(paxVersionMatches("prolin-pelican-2.7.181.13277R-Inpas", "2.7.181-r13278"))
+        assertFalse(paxVersionMatches("2.7.181-r13277", "2.7.181-r13278"))
+        assertFalse(paxVersionMatches("2.7.159.12409R-Inpas", "2.7.181-r13278"))
+        assertFalse(paxVersionMatches("8.1.12.273(R)", "8.1.12.274"))
+        assertFalse(paxVersionMatches("3.0.65", "3.0.65.014"))
+        assertFalse(paxVersionMatches(null, "2.7.181-r13278"))
+        assertFalse(paxVersionMatches("unknown", "2.7.181-r13278"))
+    }
+
     @Test fun `full sequence verifies same terminal after reboot and final versions`() = runBlocking {
         val result = workflow().execute(bundle, "usb-old", "same")
         assertEquals("3.0.65.014", result.mainApp)
