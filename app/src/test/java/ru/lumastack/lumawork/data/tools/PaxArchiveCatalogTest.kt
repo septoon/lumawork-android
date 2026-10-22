@@ -12,6 +12,68 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 class PaxArchiveCatalogTest {
+    @Test fun `single disk ZIP64 POS Loader wrapper validates its directory`() {
+        val os = zip(mapOf("RELEASE.TXT" to "Product : OS\nVersion : 2.7.181-r13278\nModel : PAXQ25\n".toByteArray()))
+        val source = zip64(zip(mapOf("OS_RemoteUpdatePkg_1.2.2.0.zip" to zip(mapOf("q25-os.zip" to os)),
+            "POS Loader 4.1.zip" to byteArrayOf(1))))
+        val archive = File(temporary.root, "zip64.zip").apply { writeBytes(source) }
+        assertEquals(PaxArchiveCatalog.ZipMetadata(encrypted = false, zip64 = true), PaxArchiveCatalog.validateCentralDirectory(archive))
+    }
+
+    @Test fun `ZIP64 still rejects multiple disks invalid offsets excessive sizes and truncated extra fields`() {
+        val valid = zip64(zip(files()))
+        val end = valid.size - 22
+        val locator = end - 20
+        val record = locator - 56
+        fun rejected(change: (java.nio.ByteBuffer) -> Unit) {
+            val bytes = valid.copyOf()
+            change(java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN))
+            val archive = File(temporary.root, "invalid-${System.nanoTime()}.zip").apply { writeBytes(bytes) }
+            assertTrue(runCatching { PaxArchiveCatalog.validateCentralDirectory(archive) }.isFailure)
+        }
+        rejected { it.putInt(locator + 16, 2) }
+        rejected { it.putInt(record + 16, 1) }
+        rejected { it.putLong(locator + 8, Long.MAX_VALUE) }
+        rejected { it.putLong(record + 40, Long.MAX_VALUE) }
+        rejected { it.putLong(record + 32, 10001) }
+        val central = java.nio.ByteBuffer.wrap(valid).order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(record + 48).toInt()
+        rejected { it.putInt(central + 46 + it.getShort(central + 28).toInt() + 2, 0) }
+        rejected { it.putInt(central + 34, 1) }
+    }
+
+    // Same ZIP64 layout as the real FTP POS Loader archive, even for small payloads.
+    private fun zip64(source: ByteArray): ByteArray {
+        val little = java.nio.ByteOrder.LITTLE_ENDIAN
+        val original = java.nio.ByteBuffer.wrap(source).order(little)
+        val end = source.size - 22
+        val count = original.getShort(end + 10).toInt() and 65535
+        val start = original.getInt(end + 16)
+        val output = ByteArrayOutputStream().apply { write(source, 0, start) }
+        var cursor = start
+        repeat(count) {
+            val nameSize = original.getShort(cursor + 28).toInt() and 65535
+            val extraSize = original.getShort(cursor + 30).toInt() and 65535
+            val commentSize = original.getShort(cursor + 32).toInt() and 65535
+            val header = source.copyOfRange(cursor, cursor + 46)
+            java.nio.ByteBuffer.wrap(header).order(little).putInt(20, -1).putInt(24, -1).putInt(42, -1).putShort(34, -1).putShort(30, (extraSize + 32).toShort())
+            output.write(header); output.write(source, cursor + 46, nameSize)
+            output.write(java.nio.ByteBuffer.allocate(32).order(little).putShort(1).putShort(28)
+                .putLong(original.getInt(cursor + 24).toLong() and 0xffffffffL)
+                .putLong(original.getInt(cursor + 20).toLong() and 0xffffffffL)
+                .putLong(original.getInt(cursor + 42).toLong() and 0xffffffffL).putInt(0).array())
+            output.write(source, cursor + 46 + nameSize, extraSize + commentSize)
+            cursor += 46 + nameSize + extraSize + commentSize
+        }
+        val record = output.size()
+        output.write(java.nio.ByteBuffer.allocate(56).order(little).putInt(0x06064b50).putLong(44).putShort(45).putShort(45)
+            .putInt(0).putInt(0).putLong(count.toLong()).putLong(count.toLong()).putLong((record - start).toLong()).putLong(start.toLong()).array())
+        output.write(java.nio.ByteBuffer.allocate(20).order(little).putInt(0x07064b50).putInt(0).putLong(record.toLong()).putInt(1).array())
+        val footer = source.copyOfRange(end, source.size)
+        java.nio.ByteBuffer.wrap(footer).order(little).putShort(4, -1).putShort(6, -1).putInt(12, -1).putInt(16, -1)
+        output.write(footer)
+        return output.toByteArray()
+    }
+
     @Test fun `POS Loader archive selects remote OS package and only compatible OS and boot`() {
         val remote = zip(mapOf(
             "os-d270.zip" to zip(mapOf("RELEASE.TXT" to "Product : OS\nVersion : 3.1.45-r13454\nModel : PAXD270_PAXQ25S\n".toByteArray())),

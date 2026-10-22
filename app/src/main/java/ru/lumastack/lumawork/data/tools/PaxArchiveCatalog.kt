@@ -146,9 +146,13 @@ object PaxArchiveCatalog {
                 if (current != input) current.delete()
                 current = normalized
             }
-            if (kind == PaxArchiveKind.Prolin && validateCentralDirectory(current, allowEncrypted = true)) {
-                val normalized = File.createTempFile("pax-decrypted-os-", ".zip", parent).also { temporary += it }
-                PaxCompressedArchive.convertRemoteOs(current, normalized)
+            val metadata = validateCentralDirectory(current, allowEncrypted = kind == PaxArchiveKind.Prolin)
+            // Android 9 ZipFile accepts the ZIP64 directory but misreads entry offsets.
+            // Normalize only the outer container; the selected firmware payload bytes stay intact.
+            if (metadata.zip64 || metadata.encrypted) {
+                val normalized = File.createTempFile("pax-normalized-zip-", ".zip", parent).also { temporary += it }
+                if (metadata.encrypted) PaxCompressedArchive.convertRemoteOs(current, normalized)
+                else PaxCompressedArchive.convertZip(current, normalized)
                 if (current != input) current.delete()
                 current = normalized
             }
@@ -446,8 +450,10 @@ object PaxArchiveCatalog {
         }
     }
 
-    /** ZIP64, encrypted archives, special UNIX files and multi-disk ZIPs are unsupported. */
-    private fun validateCentralDirectory(file: File, allowSignedTrailer: Boolean = false, allowEncrypted: Boolean = false): Boolean =
+    /** Single-disk ZIP/ZIP64 only, with the same bounded payloads and regular files. */
+    internal data class ZipMetadata(val encrypted: Boolean, val zip64: Boolean)
+
+    internal fun validateCentralDirectory(file: File, allowSignedTrailer: Boolean = false, allowEncrypted: Boolean = false): ZipMetadata =
         RandomAccessFile(file, "r").use { input ->
             var encrypted = false
             require(input.length() >= 22) { "Некорректный ZIP" }
@@ -463,24 +469,85 @@ object PaxArchiveCatalog {
                     trailing == 0 || (allowSignedTrailer && signedSuffix && trailing in 16..4096)
                 }
             } ?: error("ZIP не завершён")
-            require(u16(tail, end + 4) == 0 && u16(tail, end + 6) == 0) { "Многотомный ZIP запрещён" }
-            val count = u16(tail, end + 10)
-            require(count in 1..MAX_ENTRIES && count == u16(tail, end + 8)) { "Некорректное число файлов ZIP" }
-            val start = u32(tail, end + 16); val length = u32(tail, end + 12)
-            require(start + length == input.length() - tailSize + end) { "Некорректный каталог ZIP" }
+            fun u64(bytes: ByteArray, at: Int): Long =
+                (u32(bytes, at) or (u32(bytes, at + 4) shl 32)).also { require(it >= 0) { "Некорректный ZIP64" } }
+            val endOffset = input.length() - tailSize + end
+            var count = u16(tail, end + 10).toLong()
+            var start = u32(tail, end + 16)
+            var length = u32(tail, end + 12)
+            var centralEnd = endOffset
+            val zip64 = listOf(4, 6, 8, 10).any { u16(tail, end + it) == 65535 } ||
+                start == 0xffffffffL || length == 0xffffffffL
+            if (zip64) {
+                require(endOffset >= 76) { "Нет каталога ZIP64" }
+                val locator = ByteArray(20)
+                input.seek(endOffset - 20); input.readFully(locator)
+                require(u32(locator, 0) == 0x07064b50L && u32(locator, 4) == 0L && u32(locator, 16) == 1L) { "Многотомный или повреждённый ZIP64" }
+                centralEnd = u64(locator, 8)
+                require(centralEnd <= endOffset - 76) { "Некорректный каталог ZIP64" }
+                val record = ByteArray(56)
+                input.seek(centralEnd); input.readFully(record)
+                require(u32(record, 0) == 0x06064b50L && u64(record, 4) == endOffset - 32 - centralEnd) { "Некорректный каталог ZIP64" }
+                require(u32(record, 16) == 0L && u32(record, 20) == 0L) { "Многотомный ZIP64 запрещён" }
+                count = u64(record, 32); start = u64(record, 48); length = u64(record, 40)
+                require(count == u64(record, 24)) { "Некорректное число файлов ZIP64" }
+                for ((offset, value) in listOf(4 to 0L, 6 to 0L, 8 to count, 10 to count)) {
+                    require(u16(tail, end + offset).let { it == 65535 || it.toLong() == value }) { "Несогласованный каталог ZIP64" }
+                }
+                require(u32(tail, end + 12).let { it == 0xffffffffL || it == length } &&
+                    u32(tail, end + 16).let { it == 0xffffffffL || it == start }) { "Несогласованный каталог ZIP64" }
+            } else {
+                require(u16(tail, end + 4) == 0 && u16(tail, end + 6) == 0) { "Многотомный ZIP запрещён" }
+                require(count == u16(tail, end + 8).toLong()) { "Некорректное число файлов ZIP" }
+            }
+            require(count in 1..MAX_ENTRIES.toLong()) { "Некорректное число файлов ZIP" }
+            require(start <= centralEnd && length == centralEnd - start) { "Некорректный каталог ZIP" }
             input.seek(start)
-            repeat(count) {
-                require(input.filePointer + 46 <= start + length) { "Повреждённый каталог ZIP" }
+            repeat(count.toInt()) {
+                require(input.filePointer + 46 <= centralEnd) { "Повреждённый каталог ZIP" }
                 val header = ByteArray(46); input.readFully(header)
                 val protected = u16(header, 8) and 1 != 0
                 encrypted = encrypted || protected
                 require(u32(header, 0) == 0x02014b50L && (!protected || allowEncrypted)) { "Неподдерживаемый ZIP" }
                 val mode = (u32(header, 38) ushr 16).toInt() and 0xf000
                 require(mode in setOf(0, 0x4000, 0x8000)) { "Ссылки и специальные файлы ZIP запрещены" }
-                require(listOf(20, 24, 42).none { u32(header, it) == 0xffffffffL }) { "ZIP64 запрещён" }
-                input.seek(input.filePointer + u16(header, 28) + u16(header, 30) + u16(header, 32))
+                val nameSize = u16(header, 28); val extraSize = u16(header, 30); val commentSize = u16(header, 32)
+                require(nameSize + extraSize + commentSize <= centralEnd - input.filePointer) { "Повреждённый каталог ZIP" }
+                input.seek(input.filePointer + nameSize)
+                val extra = ByteArray(extraSize); input.readFully(extra)
+                var uncompressed = u32(header, 24); var compressed = u32(header, 20)
+                var offset = u32(header, 42); var disk = u16(header, 34).toLong()
+                if (listOf(uncompressed, compressed, offset).any { it == 0xffffffffL } || disk == 65535L) {
+                    var cursor = 0
+                    var found = false
+                    while (cursor < extra.size) {
+                        require(cursor + 4 <= extra.size) { "Повреждённое поле ZIP64" }
+                        val size = u16(extra, cursor + 2)
+                        require(size <= extra.size - cursor - 4) { "Повреждённое поле ZIP64" }
+                        if (u16(extra, cursor) == 1) {
+                            require(!found) { "Повторяющееся поле ZIP64" }; found = true
+                            var position = cursor + 4
+                            fun next(): Long {
+                                require(position + 8 <= cursor + 4 + size) { "Неполное поле ZIP64" }
+                                return u64(extra, position).also { position += 8 }
+                            }
+                            if (uncompressed == 0xffffffffL) uncompressed = next()
+                            if (compressed == 0xffffffffL) compressed = next()
+                            if (offset == 0xffffffffL) offset = next()
+                            if (disk == 65535L) {
+                                require(position + 4 <= cursor + 4 + size) { "Неполное поле ZIP64" }
+                                disk = u32(extra, position)
+                            }
+                        }
+                        cursor += 4 + size
+                    }
+                    require(found) { "Нет поля ZIP64" }
+                }
+                require(disk == 0L) { "Многотомный ZIP запрещён" }
+                require(uncompressed <= MAX_FILE && compressed <= MAX_ARCHIVE && offset < start) { "Превышен размер или смещение файла ZIP" }
+                input.seek(input.filePointer + commentSize)
             }
-            require(input.filePointer == start + length) { "Некорректный каталог ZIP" }
-            encrypted
+            require(input.filePointer == centralEnd) { "Некорректный каталог ZIP" }
+            ZipMetadata(encrypted, zip64)
         }
 }

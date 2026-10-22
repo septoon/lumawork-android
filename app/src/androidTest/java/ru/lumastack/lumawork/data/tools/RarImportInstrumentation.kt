@@ -40,10 +40,22 @@ import me.zhanghai.android.libarchive.ArchiveEntry
 
 /** Runs the actual JNI decoder on Android; no USB or firmware service is involved. */
 class RarImportInstrumentation : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var arguments: Bundle? = null
+    override fun onCreate(arguments: Bundle?) { this.arguments = arguments; super.onCreate(arguments); start() }
     override fun onStart() {
         val directory = File(targetContext.cacheDir, "rar-test-${System.nanoTime()}").apply { mkdirs() }
         try {
+            arguments?.getString("archivePath")?.let { path ->
+                val model = PaxModel.valueOf(requireNotNull(arguments?.getString("model")))
+                val destination = File(directory, "real-import")
+                val bundle = File(path).inputStream().use {
+                    if (arguments?.getString("kind") == "Prolin") PaxArchiveCatalog.prepareProlin(it, destination, model)
+                    else PaxArchiveCatalog.prepare(it, destination, model)
+                }
+                check(PaxArchiveCatalog.read(destination, model) == bundle)
+                finish(0, Bundle().apply { putString("stream", "PASS: ${model.name} MAINAPP=${bundle.expectedMainApp} OS=${bundle.expectedOs} BOOT=${bundle.expectedBoot} data=${bundle.appData.size} options=${bundle.options.size}\n"); putBoolean("passed", true) })
+                return
+            }
             val app = byteArrayOf(1, 2, 3, 4)
             val os = byteArrayOf(5, 6, 7)
             val archive = File(directory, "package.rar")
@@ -54,6 +66,18 @@ class RarImportInstrumentation : Instrumentation() {
             check(prepared.os!!.file.readBytes().contentEquals(os))
             check(prepared.model == PaxModel.S210)
             check(directory.listFiles()!!.none { it.name.startsWith("pax-rar-") || it.name.startsWith("pax-catalog-") })
+            val unicode = File(directory, "unicode.rar")
+            unicode.writeBytes(rar4(mapOf("Прошивка ЦР/soft PP pax s210/APP/S210.APP" to app,
+                "Прошивка ЦР/soft PP pax s210/OS/S210.BIN" to os), unicode = true))
+            val fromUnicode = unicode.inputStream().use { PaxArchiveCatalog.prepare(it, File(directory, "unicode-import"), PaxModel.S210) }
+            check(fromUnicode.application!!.file.readBytes().contentEquals(app))
+            check(fromUnicode.os!!.file.readBytes().contentEquals(os))
+            val zip64 = File(directory, "zip64.zip").apply { writeBytes(Base64.decode("UEsDBC0ACAgAAAAAAAAAAAAA//////////8NABQA0KbQoC90ZXN0LnR4dAEAEAANAAAAAAAAAA0AAAAAAAAAemlwNjQgcGF5bG9hZFBLBwjW7AD0DQAAAAAAAAANAAAAAAAAAFBLAQItAC0ACAgAAAAAAADW7AD0//////////8NACAAAAD//wAAAAAAAP/////QptCgL3Rlc3QudHh0AQAcAA0AAAAAAAAADQAAAAAAAAAAAAAAAAAAAAAAAABQSwYGLAAAAAAAAAAtAC0AAAAAAAAAAAABAAAAAAAAAAEAAAAAAAAAWwAAAAAAAABkAAAAAAAAAFBLBgcAAAAAvwAAAAAAAAABAAAAUEsFBv////8BAAEA//////////8AAA==", Base64.DEFAULT)) }
+            check(PaxArchiveCatalog.validateCentralDirectory(zip64).zip64)
+            val normalized = File(directory, "zip64-normalized.zip")
+            PaxCompressedArchive.convertZip(zip64, normalized)
+            check(!PaxArchiveCatalog.validateCentralDirectory(normalized).zip64)
+            ZipFile(normalized).use { check(it.getInputStream(it.getEntry("ЦР/test.txt")).bufferedReader().readText() == "zip64 payload") }
             val badModel = File(directory, "wrong-model")
             check(runCatching { archive.inputStream().use { PaxArchiveCatalog.prepare(it, badModel, PaxModel.D270) } }.isFailure)
             check(!badModel.exists())
@@ -81,6 +105,11 @@ class RarImportInstrumentation : Instrumentation() {
             // https://github.com/libarchive/libarchive/blob/master/libarchive/test/test_read_format_rar5_stored.rar.uu
             val rar5 = File(directory, "v5.rar").apply { writeBytes(Base64.decode("UmFyIRoHAQAzkrXlCgEFBgAFAQGAgAA4MAZjLAIDC50ABJ0ApIMCtEOglYAAAQ5oZWxsb3dvcmxkLnR4dAoDE34Oq1tW6Q4aaGVsbG8gbGliYXJjaGl2ZSB0ZXN0IHN1aXRlIQodd1ZRAwUEAA==", Base64.DEFAULT)) }
             val zip = File(directory, "v5.zip")
+            // The BSD fixture above with a Cyrillic RAR5 pathname and recalculated header CRC.
+            val unicode5 = File(directory, "unicode5.rar").apply { writeBytes(Base64.decode("UmFyIRoHAQAzkrXlCgEFBgAFAQGAgADupe5JPAIDC50ABJ0ApIMCtEOglYAAAR7Qn9GA0L7RiNC40LLQutCwINCm0KAvdGVzdC50eHQKAxN+DqtbVukOGmhlbGxvIGxpYmFyY2hpdmUgdGVzdCBzdWl0ZSEKHXdWUQMFBAA=", Base64.DEFAULT)) }
+            val unicode5Zip = File(directory, "unicode5.zip")
+            PaxCompressedArchive.convert(unicode5, unicode5Zip)
+            ZipFile(unicode5Zip).use { check(it.getInputStream(it.getEntry("Прошивка ЦР/test.txt")).bufferedReader().readText() == "hello libarchive test suite!\n") }
             PaxCompressedArchive.convert(rar5, zip)
             ZipFile(zip).use { check(it.getInputStream(it.getEntry("helloworld.txt")).bufferedReader().readText() == "hello libarchive test suite!\n") }
             // Additional fixtures from the same libarchive BSD-licensed test suite.
@@ -109,7 +138,7 @@ class RarImportInstrumentation : Instrumentation() {
             check(runCatching { PaxCompressedArchive.convert(archive, File(directory, "volume.zip")) }.exceptionOrNull()?.message?.contains("Многотомный") == true)
             archive.writeBytes(rar4(mapOf("same" to app, "SAME" to os)))
             check(runCatching { PaxCompressedArchive.convert(archive, File(directory, "duplicate.zip")) }.isFailure)
-            finish(0, Bundle().apply { putString("stream", "7z direct and nested FTP import, 7z corruption and traversal rejection, RAR4 package/model/hash import, RAR5 stored/compressed content, password rejection, traversal, duplicate, multi-volume, corrupt and cleanup checks passed\n"); putBoolean("passed", true) })
+            finish(0, Bundle().apply { putString("stream", "7z direct and nested FTP import, 7z corruption and traversal rejection, RAR4 Unicode/package/model/hash import, RAR5 Unicode/stored/compressed content, password rejection, traversal, duplicate, multi-volume, corrupt and cleanup checks passed\n"); putBoolean("passed", true) })
         } catch (failure: Throwable) {
             finish(1, Bundle().apply { putString("stream", failure.stackTraceToString()); putBoolean("passed", false) })
         } finally { directory.deleteRecursively() }
@@ -137,7 +166,7 @@ class RarImportInstrumentation : Instrumentation() {
         } finally { Archive.writeFree(archive) }
     }
 
-    private fun rar4(files: Map<String, ByteArray>): ByteArray {
+    private fun rar4(files: Map<String, ByteArray>, unicode: Boolean = false): ByteArray {
         val output = ByteArrayOutputStream()
         fun block(type: Int, flags: Int, body: ByteArray) {
             val header = ByteBuffer.allocate(5 + body.size).order(ByteOrder.LITTLE_ENDIAN)
@@ -148,12 +177,18 @@ class RarImportInstrumentation : Instrumentation() {
         output.write(byteArrayOf(82,97,114,33,26,7,0))
         block(0x73, 0, ByteArray(6))
         files.forEach { (name, bytes) ->
-            val path = name.toByteArray(Charsets.UTF_8)
+            val path = if (!unicode) name.toByteArray(Charsets.UTF_8) else ByteArrayOutputStream().apply {
+                write(name.toByteArray(charset("CP866"))); write(0); write(0)
+                name.chunked(4).forEach { chars ->
+                    write(chars.indices.fold(0) { flags, index -> flags or (2 shl (6 - index * 2)) })
+                    chars.forEach { write(it.code and 255); write(it.code ushr 8) }
+                }
+            }.toByteArray()
             val body = ByteBuffer.allocate(25 + path.size).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(bytes.size).putInt(bytes.size).put(3.toByte())
                 .putInt(CRC32().apply { update(bytes) }.value.toInt()).putInt(0)
                 .put(20.toByte()).put(0x30.toByte()).putShort(path.size.toShort()).putInt(0x81a4).put(path).array()
-            block(0x74, 0x8000, body); output.write(bytes)
+            block(0x74, if (unicode) 0x8200 else 0x8000, body); output.write(bytes)
         }
         block(0x7b, 0, byteArrayOf())
         return output.toByteArray()

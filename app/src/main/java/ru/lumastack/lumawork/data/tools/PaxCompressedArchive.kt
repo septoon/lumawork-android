@@ -45,27 +45,29 @@ internal object PaxCompressedArchive {
 
     fun convert(source: File, destination: File) = convert(source, destination, null)
 
+    fun convertZip(source: File, destination: File) = convert(source, destination, null, zipArchive = true)
+
     // OS RemoteUpdate uses the format passphrase distributed inside POSLoader itself.
     // It is not an FTP/account credential. Other password-protected archives remain unsupported.
-    fun convertRemoteOs(source: File, destination: File) = convert(source, destination, remoteOsPassphrase)
+    fun convertRemoteOs(source: File, destination: File) = convert(source, destination, remoteOsPassphrase, zipArchive = true)
 
     private val remoteOsPassphrase = byteArrayOf(72, 101, 108, 108, 48, 72, 97, 99, 107, 101, 114)
 
-    private fun convert(source: File, destination: File, passphrase: ByteArray?) {
-        require(passphrase != null || isCompressed(source)) { "Нужен ZIP, RAR4/RAR5 или 7z" }
+    private fun convert(source: File, destination: File, passphrase: ByteArray?, zipArchive: Boolean = false) {
+        require(zipArchive || isCompressed(source)) { "Нужен ZIP, RAR4/RAR5 или 7z" }
         val sevenZip = source.inputStream().use { input ->
             val header = ByteArray(8); input.read(header); is7z(header)
         }
-        val format = if (passphrase != null) "OS RemoteUpdate ZIP" else if (sevenZip) "7z" else "RAR"
-        if (passphrase == null && !sevenZip) requireSingleVolume(source)
+        val format = if (zipArchive) { if (passphrase != null) "OS RemoteUpdate ZIP" else "ZIP64" } else if (sevenZip) "7z" else "RAR"
+        if (!zipArchive && !sevenZip) requireSingleVolume(source)
         val archive = Archive.readNew()
         try {
             // Android native locale is C; 7z stores UTF-16LE paths, including Cyrillic folders.
             Archive.setCharset(archive, Charsets.UTF_8.name().toByteArray(Charsets.UTF_8))
             Archive.readSupportFilterNone(archive)
-            if (passphrase != null) {
+            if (zipArchive) {
                 Archive.readSupportFormatZip(archive)
-                Archive.readAddPassphrase(archive, passphrase)
+                if (passphrase != null) Archive.readAddPassphrase(archive, passphrase)
             } else if (sevenZip) Archive.readSupportFormat7zip(archive) else {
                 Archive.readSupportFormatRar(archive)
                 Archive.readSupportFormatRar5(archive)
@@ -85,11 +87,12 @@ internal object PaxCompressedArchive {
                     val type = ArchiveEntry.filetype(entry)
                     require(type == ArchiveEntry.AE_IFREG || type == ArchiveEntry.AE_IFDIR) { "Ссылки и специальные файлы $format запрещены" }
                     require(ArchiveEntry.symlink(entry) == null && ArchiveEntry.hardlink(entry) == null) { "Ссылки в $format запрещены" }
-                    // libarchive entry UTF-8 accessor may still use Android's C locale. The archive
-                    // charset above guarantees that the raw pathname bytes are UTF-8 instead.
-                    val rawName = requireNotNull(ArchiveEntry.pathname(entry)) { "Не удалось прочитать имя файла $format" }
-                    val name = Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                        .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(rawName)).toString()
+                    // RAR5 retains UTF-8 names even when conversion to Android's C locale
+                    // makes pathname() null. 7z can instead expose only the configured raw UTF-8.
+                    val name = ArchiveEntry.pathnameUtf8(entry) ?: ArchiveEntry.pathname(entry)?.let { raw ->
+                        Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                            .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(raw)).toString()
+                    } ?: error("Не удалось прочитать имя файла $format")
                     val path = checkedPath(name, type == ArchiveEntry.AE_IFDIR)
                     require(names.add(path.lowercase(Locale.ROOT))) { "Повторяющийся путь в $format" }
                     val size = ArchiveEntry.size(entry)
