@@ -166,9 +166,6 @@ fun clientCommentEditorDraft(
 }
 
 fun clientPersonalCommentRows(comment: ClientPersonalComment): List<Pair<String, String>> = listOf(
-    "ИНН" to comment.displayTIN,
-    "Адреса" to (if (comment.targets.isEmpty()) "Все адреса" else comment.targets.joinToString("\n") { it.displayText }),
-    "ID терминалов" to comment.terminalIDs.joinToString(", "),
     "Контактное лицо" to comment.contactPerson,
     "Телефон" to displayClientCommentPhone(comment.phone),
     "Почта" to comment.email,

@@ -1,11 +1,15 @@
 package ru.lumastack.lumawork.ui.requests
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -17,6 +21,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -31,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -342,24 +351,31 @@ private fun CommentCheckRow(title: String, selected: Boolean, enabled: Boolean, 
 
 @Composable
 fun ClientPersonalCommentBlock(comment: ClientPersonalComment, modifier: Modifier = Modifier, onEdit: (() -> Unit)? = null) {
-    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .12f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .22f))) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Личный комментарий", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                if (onEdit != null) TextButton(onClick = onEdit) { Text("Изменить") }
+                Text("Личный комментарий", style = MaterialTheme.typography.titleSmall, fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                if (onEdit != null) IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Edit, "Редактировать комментарий", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                }
             }
             SelectionContainer {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     clientPersonalCommentRows(comment).forEach { (title, value) ->
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                            Text(title, Modifier.width(98.dp), style = MaterialTheme.typography.bodySmall, fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(value, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+                                color = if (title == "Почта") androidx.compose.ui.graphics.Color(0xFF009DFF) else MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
             }
             val metadata = clientPersonalCommentMetadata(comment)
-            if (metadata.isNotBlank()) Text(metadata, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (metadata.isNotBlank()) Text(metadata, style = MaterialTheme.typography.labelSmall, fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

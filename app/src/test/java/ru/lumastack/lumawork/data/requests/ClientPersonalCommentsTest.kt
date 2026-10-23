@@ -12,6 +12,18 @@ import ru.lumastack.lumawork.domain.model.AppUser
 import ru.lumastack.lumawork.domain.requests.*
 
 class ClientPersonalCommentsTest {
+    @Test fun `card hides matching scope while editor retains it`() {
+        val comment = ClientPersonalComment("comment", displayTIN = "1234567890",
+            targets = listOf(ClientPersonalCommentTarget("Адрес клиента")), terminalIDs = listOf("000123"),
+            contactPerson = "Контакт", phone = "+79780000000", email = "contact@example.test", extraInfo = "Заметка")
+        assertEquals(listOf("Контактное лицо", "Телефон", "Почта", "Дополнительно"),
+            clientPersonalCommentRows(comment).map { it.first })
+        val draft = clientCommentEditorDraft(comment.displayTIN, comment, null, "", emptyList(), null)
+        assertEquals(comment.displayTIN, draft.tin)
+        assertEquals(comment.targets, draft.targets)
+        assertEquals(comment.terminalIDs, draft.terminalIDs)
+    }
+
     @Test fun `matching prefers address then terminal then all-address fallback within correct TIN`() {
         val tin = "1234567890"
         val comments = listOf(

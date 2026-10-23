@@ -29,7 +29,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -68,7 +67,6 @@ import ru.lumastack.lumawork.domain.simpleone.RequestsMode
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.domain.simpleone.filterActiveRequests
 import ru.lumastack.lumawork.domain.simpleone.filterClosedRequests
-import ru.lumastack.lumawork.domain.simpleone.parseSimpleOneDate
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.AppButton
@@ -470,8 +468,6 @@ private fun RequestCardInfo(title: String, value: String) {
     }
 }
 
-private data class DetailField(val title: String, val value: String, val isLong: Boolean = false)
-
 @Composable
 fun SimpleOneRequestDetailContent(
     request: SimpleOneRequest,
@@ -479,126 +475,36 @@ fun SimpleOneRequestDetailContent(
     isLoading: Boolean,
     errorMessage: String?,
     onBack: () -> Unit,
-    gridState: LazyGridState = rememberLazyGridState(),
     showBackButton: Boolean = false,
 ) {
-    val columns = if (widthClass == AppWidthClass.Compact) 1 else 2
-    val fields = remember(request) { request.detailFields() }
-    LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(20.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.widthIn(max = 980.dp).fillMaxSize(),
-    ) {
-        item(key = "detail-header", span = { GridItemSpan(maxLineSpan) }) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (showBackButton || isLoading) Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (showBackButton) ru.lumastack.lumawork.ui.shell.AppBackButton(onBack)
-                    if (isLoading) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                }
-                Text(request.displayNumber, style = MaterialTheme.typography.headlineMedium)
-                request.displayState.takeIf(String::isNotBlank)?.let {
-                    Text(
-                        it,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                }
-                errorMessage?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-        items(
-            items = fields,
-            key = { it.title },
-            span = { field ->
-                if (field.isLong) GridItemSpan(maxLineSpan) else GridItemSpan(1)
-            },
-        ) { field ->
-            DetailFieldCard(field)
-        }
-        item(key = "detail-bottom", span = { GridItemSpan(maxLineSpan) }) {
-            Spacer(Modifier.height(4.dp))
-        }
+    val data = remember(request) { ru.lumastack.lumawork.domain.requests.RequestDetailsData(request) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val copy: (String) -> Unit = { value ->
+        (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+            .setPrimaryClip(android.content.ClipData.newPlainText("Заявка", value))
     }
-}
-
-@Composable
-private fun DetailFieldCard(field: DetailField) {
-    AppCard(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        SelectionContainer {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Text(
-                    field.title,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                Text(field.value, style = MaterialTheme.typography.bodyLarge)
-            }
-        }
+    var map by androidx.compose.runtime.saveable.rememberSaveable(request.id) { mutableStateOf<String?>(null) }
+    if (!showBackButton) ru.lumastack.lumawork.ui.shell.AppHeaderActions(title = { Text("Детали") }) {
+        if (isLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
     }
+    Column(Modifier.fillMaxSize()) {
+        if (showBackButton) Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            ru.lumastack.lumawork.ui.shell.AppBackButton(onBack)
+            Text("Детали", Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
+            if (isLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            else Spacer(Modifier.size(48.dp))
+        }
+        RequestDetailsBody(request, data, onCopy = copy, onFieldClick = { field ->
+            if (field.title == "Адрес") map = android.net.Uri.parse("https://yandex.ru/maps/").buildUpon()
+                .appendQueryParameter("text", field.value).appendQueryParameter("z", "16").build().toString()
+            else copy(field.value)
+        }, beforeSections = {
+            errorMessage?.let { message -> item("detail-error") { Text(message, color = MaterialTheme.colorScheme.error) } }
+        })
+    }
+    map?.let { ru.lumastack.lumawork.ui.home.HomeRouteBrowser(it) { map = null } }
 }
-
-private fun SimpleOneRequest.detailFields(): List<DetailField> {
-    val primary = listOf(
-        DetailField("Номер SimpleOne", number),
-        DetailField("Входящий номер", incomingNumber),
-        DetailField("Регистрация", registeredAt.displaySimpleOneDate()),
-        DetailField("Предельный срок", deadline.displaySimpleOneDate()),
-        DetailField("Выполнена", completedAt.ifBlank { resolvedAt }.displaySimpleOneDate()),
-        DetailField("Закрыта", closedAt.displaySimpleOneDate()),
-        DetailField("Причина ожидания", waitingReason),
-        DetailField("Тип заявки", requestType),
-        DetailField("Группа назначения", assignmentGroup),
-        DetailField("Инициатор", initiator),
-        DetailField("Приоритет", priority),
-        DetailField("Клиентский сервис", clientService),
-        DetailField("Родительский сервис", clientServiceParent),
-        DetailField("Исполнитель", assignedUser),
-        DetailField("Заказчик", customer),
-        DetailField("Адрес", address),
-        DetailField("Модель POS-терминала", terminalModel),
-        DetailField("ID терминала", terminalId),
-        DetailField("Контактное лицо", contactPerson),
-        DetailField("Телефон ТСП", contactPhone),
-        DetailField("Код закрытия", closureCode),
-        DetailField("Серийный номер установленного ФН", installedFiscalStorageSerialNumber),
-        DetailField("Код активации тарифа ОФД", ofdTariffActivationCode),
-        DetailField("Использованная SIM-карта", usedSimCard),
-        DetailField("Краткое описание", shortDescription, isLong = true),
-        DetailField("Описание", description, isLong = true),
-        DetailField("Информация", additionalInformation, isLong = true),
-        DetailField("Комментарий инженера", engineerComment, isLong = true),
-        DetailField("Решение", resolution, isLong = true),
-    ).filter { it.value.isNotBlank() }
-    val primaryTitles = primary.map { it.title.normalizedDetailTitle() }.toSet()
-    val exported = tableFields.entries
-        .filter { it.value.isNotBlank() && it.key.normalizedDetailTitle() !in primaryTitles }
-        .map { (title, value) -> DetailField(title, value, isLong = value.length > 100 || value.contains('\n')) }
-    return primary + exported
-}
-
-private fun String.normalizedDetailTitle(): String = trim()
-    .replace('ё', 'е')
-    .replace('Ё', 'Е')
-    .lowercase(Locale.ROOT)
-    .replace(Regex("\\s+"), " ")
-
-private fun String.displaySimpleOneDate(): String = parseSimpleOneDate(this)?.format(DEADLINE_FORMATTER)
-    ?: if (startsWith("1970-")) "" else this
 
 private val RUSSIAN_LOCALE = Locale.forLanguageTag("ru")
 private val DEADLINE_FORMATTER = DateTimeFormatter.ofPattern("d MMM, HH:mm", RUSSIAN_LOCALE)

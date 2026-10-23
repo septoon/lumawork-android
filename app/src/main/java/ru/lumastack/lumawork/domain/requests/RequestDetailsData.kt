@@ -3,11 +3,15 @@ package ru.lumastack.lumawork.domain.requests
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 import ru.lumastack.lumawork.domain.simpleone.parseSimpleOneDate
+import java.time.Duration
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** Field order and fallbacks mirror ActiveSimpleOneRequestData on iOS, including archived requests. */
 data class RequestDetailField(val title: String, val value: String)
 data class RequestDetailSection(val id: String, val title: String, val fields: List<RequestDetailField>)
+data class RequestDetailSLA(val progress: Float, val remainingText: String, val isOverdue: Boolean)
 
 fun requestInformation(request: SimpleOneRequest): Map<String, String> {
     val labels = listOf("Номер заявки Мультикарты", "Принадлежность оборудования по заявке", "Серийный номер демонтируемого ТО",
@@ -46,6 +50,21 @@ class RequestDetailsData(val request: SimpleOneRequest) {
     val address = normalizedClosedAddress(first(request.address, value("Адрес установки терминала", "Адрес ТСП")))
     val legalName = first(request.customer, value("Заказчик")).replace("OOO", "ООО").replace("OОO", "ООО")
     val type = first(value("Тип заявки"), request.requestType)
+    private val deadline = first(value("Предельный срок СУТС"), request.deadline,
+        if (request.source == SimpleOneRequestSource.Closed) request.resolvedAt else "")
+    val deadlineText = parseSimpleOneDate(deadline)?.format(DateTimeFormatter.ofPattern("d MMM, HH:mm", Locale.forLanguageTag("ru"))) ?: deadline
+    fun sla(now: LocalDateTime = LocalDateTime.now()): RequestDetailSLA? {
+        val start = parseSimpleOneDate(first(value("Время создания в МК"), request.registeredAt)) ?: return null
+        val end = parseSimpleOneDate(first(value("Предельный срок СУТС"), request.deadline)) ?: return null
+        if (!end.isAfter(start)) return null
+        val remaining = Duration.between(now, end)
+        val minutes = remaining.abs().toMinutes()
+        return RequestDetailSLA(
+            (Duration.between(start, now).seconds.toDouble() / Duration.between(start, end).seconds).toFloat().coerceIn(0f, 1f),
+            "${if (remaining.isNegative) "Просрочено на" else "Осталось"} ${minutes / 60} ч. ${minutes % 60} м.",
+            remaining.isNegative,
+        )
+    }
     val installType = first(value("Тип устанавливаемого ТО", "Тип терминала"))
     val showsChatQuestions = installType.lowercase() in listOf("fiscal_pos", "universal_pos")
     val showsEvotorDrivers = installType == "intel_pin"
@@ -62,7 +81,7 @@ class RequestDetailsData(val request: SimpleOneRequest) {
         }
     val sections: List<RequestDetailSection> = buildList {
         fun addSection(id: String, title: String, vararg pairs: Pair<String, String>, always: Boolean = true) {
-            val fields = pairs.filter { it.second.isMeaningful() }.map { RequestDetailField(it.first, it.second) }
+            val fields = pairs.filter { it.second.isNotBlank() }.map { RequestDetailField(it.first, it.second) }
             if (always || fields.isNotEmpty()) add(RequestDetailSection(id, title, fields))
         }
         addSection("task", "Задача", "Дата создания" to date(first(value("Время создания в МК"), request.registeredAt)),
