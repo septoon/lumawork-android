@@ -258,7 +258,11 @@ class PaxFirmwareService : Service() {
     override fun onDestroy() {
         job?.cancel(); runCatching { link.getAndSet(null)?.close() }
         if (observingUsb) { unregisterReceiver(usbReceiver); observingUsb = false }
-        val finished: () -> Unit = { synchronized(Companion) { serviceAlive = false }; scope.cancel() }
+        val operation = snapshot.operationId
+        val finished: () -> Unit = {
+            terminalOperationGate.release(operation)
+            synchronized(Companion) { serviceAlive = false }; scope.cancel()
+        }
         job?.invokeOnCompletion { finished() } ?: finished()
         super.onDestroy()
     }
@@ -287,10 +291,14 @@ class PaxFirmwareService : Service() {
                 deviceFingerprint = fingerprint, operationId = operation, expectedPinpadOs = expectedPinpadOs, detail = "Подготовка операции")
             check(model != PaxModel.S210 || start.mode != PaxInstallMode.MainApp || start.deviceFingerprint != null) { "Перед отдельной записью APP прочитайте данные S210 в системном меню." }
             start = start.copy(updatedAt = System.currentTimeMillis())
-            store.write(start)
-            PaxFirmwareRuntime.mutable.value = start
-            try { ContextCompat.startForegroundService(context, Intent(context, PaxFirmwareService::class.java).putExtra("device", device).putExtra("operation", operation)) }
+            check(terminalOperationGate.tryAcquire(operation)) { "Другая USB-операция ещё выполняется. Дождитесь её завершения." }
+            try {
+                store.write(start)
+                PaxFirmwareRuntime.mutable.value = start
+                ContextCompat.startForegroundService(context, Intent(context, PaxFirmwareService::class.java).putExtra("device", device).putExtra("operation", operation))
+            }
             catch (failure: Exception) {
+                terminalOperationGate.release(operation)
                 val interrupted = start.copy(phase = PaxInstallPhase.Interrupted, detail = "USB-служба не запущена. Нажмите «Продолжить».")
                 PaxFirmwareRuntime.mutable.value = interrupted
                 runCatching { store.write(interrupted) }

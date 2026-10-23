@@ -9,11 +9,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.lumastack.lumawork.ui.auth.AuthContent
 import ru.lumastack.lumawork.ui.auth.AuthViewModel
 import ru.lumastack.lumawork.ui.theme.LumaWorkTheme
+import ru.lumastack.lumawork.ui.home.HomeSkeletonScreen
 import ru.lumastack.lumawork.ui.update.AppUpdateHost
 import ru.lumastack.lumawork.ui.update.LocalUpdateCheck
 import ru.lumastack.lumawork.ui.update.UpdateViewModel
@@ -40,10 +45,21 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         receiveNotification(intent)
-        val container = (application as LumaWorkApplication).container
+        val app = application as LumaWorkApplication
 
         setContent {
             LumaWorkTheme {
+                val startupContainer by produceState<AppContainer?>(null, app) {
+                    // Let the lightweight loading screen reach the display before composing the shell.
+                    withFrameNanos { }
+                    withFrameNanos { }
+                    value = withContext(Dispatchers.IO) { app.container }
+                }
+                val container = startupContainer
+                if (container == null) {
+                    HomeSkeletonScreen()
+                    return@LumaWorkTheme
+                }
                 val viewModel: AuthViewModel = viewModel(factory = AuthViewModel.factory(container.authRepository))
                 val state by viewModel.state.collectAsStateWithLifecycle()
                 val updateViewModel: UpdateViewModel = viewModel()

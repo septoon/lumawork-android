@@ -61,5 +61,6 @@
             </intent-filter>
         </activity>
         <service android:name=".data.tools.PaxFirmwareService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="connectedDevice" />
+        <service android:name=".data.tools.MtkFirmwareService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>

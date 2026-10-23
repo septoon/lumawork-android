@@ -120,6 +120,8 @@ class UsbToolsMonitor(context: Context, private val scope: CoroutineScope,
             return
         }
         val generation = ++revision
+        val lease = "diagnostic-${java.util.UUID.randomUUID()}"
+        if (!terminalOperationGate.tryAcquire(lease)) return
         mutable.update { it.copy(probingKey = key, probeStage = UsbProbeStage.Opening, error = null,
             passports = it.passports - key, pinpads = it.pinpads - key, pinpadOsBoot = it.pinpadOsBoot - key, failures = it.failures - key, diagnostics = it.diagnostics - key,
             devices = it.devices.map { device -> if (device.key == key) device.copy(confirmedModel = null) else device }) }
@@ -147,8 +149,12 @@ class UsbToolsMonitor(context: Context, private val scope: CoroutineScope,
                         else "Ответ устройства не подтверждён. Проверьте USB-разрешение, подключение и режим терминала."
                     failProbe(key, message)
                 }
-            } finally { if (generation == revision) mutable.update { it.copy(probingKey = null, probeStage = null) } }
+            } finally {
+                terminalOperationGate.release(lease)
+                if (generation == revision) mutable.update { it.copy(probingKey = null, probeStage = null) }
+            }
         }
+        probeJob?.invokeOnCompletion { terminalOperationGate.release(lease) }
     }
     private fun failProbe(key: String, message: String) {
         mutable.update { it.copy(failures = it.failures + (key to message), passports = it.passports - key, pinpads = it.pinpads - key, pinpadOsBoot = it.pinpadOsBoot - key) }

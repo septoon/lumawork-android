@@ -13,6 +13,21 @@ class ToolsRepositoryTest {
     private val store = TestToolsStore()
     private fun repository() = ToolsRepository(files, store) { 100L }
 
+    @Test fun `MTK inspection stays diagnostic and preserves owner and local binding across reentry`() = runBlocking {
+        val result = MtkInstallState(owner = "owner", operationId = "mtk-inspection", phase = MtkInstallPhase.Inspected,
+            detail = "SoC 0717; модель не подтверждена; eMMC не изменялась", packageHash = "hash", updatedAt = 123)
+        repository().recordMtkInspection("owner", result)
+        repository().bindRequest("owner", result.operationId, ToolRequestRef("sys", "INC123"))
+        repository().recordMtkInspection("owner", result)
+        val history = repository().refresh("owner").snapshot.history
+        assertEquals(1, history.size)
+        assertEquals(ToolsEventKind.Diagnostic, history.single().kind)
+        assertEquals("INC123", history.single().request?.number)
+        assertTrue(history.single().detail.contains("SHA-256 комплекта: hash"))
+        assertTrue(repository().refresh("other").snapshot.history.isEmpty())
+        assertTrue(runCatching { repository().recordMtkInspection("other", result) }.isFailure)
+    }
+
     @Test fun `selection restores by stable FTP id after process restart`() = runBlocking {
         val selected = repository().select("owner", "ftp-id")
         val restored = repository().refresh("owner")
@@ -98,6 +113,18 @@ class ToolsRepositoryTest {
         val result = repository().refresh("owner")
         assertEquals(UpdatePhase.Interrupted, result.snapshot.operation.phase)
         assertFalse(result.snapshot.operation.canDisconnect)
+    }
+    @Test fun `mtk write and manual boot confirmation remain separate account scoped facts`() = runBlocking {
+        val written=MtkInstallState(owner="owner",operationId="p8-write",phase=MtkInstallPhase.WriteComplete,detail=MTK_WRITE_SUCCESS,packageHash="verified",updatedAt=100)
+        repository().recordMtkInspection("owner",written)
+        var events=repository().refresh("owner").snapshot.history
+        assertEquals(ToolsEventKind.InstallationWritten,events.single().kind)
+        repository().recordMtkInspection("owner",written.copy(bootConfirmedAt=200,updatedAt=200))
+        repository().recordMtkInspection("owner",written.copy(bootConfirmedAt=200,updatedAt=200))
+        events=repository().refresh("owner").snapshot.history
+        assertEquals(2,events.size)
+        assertEquals(setOf(ToolsEventKind.InstallationWritten,ToolsEventKind.InstallationConfirmed),events.map { it.kind }.toSet())
+        assertTrue(repository().refresh("other").snapshot.history.isEmpty())
     }
     @Test fun `history binding preserves real SimpleOne identifiers locally`() = runBlocking {
         repository().select("owner", "ftp-id")

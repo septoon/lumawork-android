@@ -52,6 +52,7 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
     }
     val model: ToolsViewModel = viewModel(key = "tools-$owner", factory = ToolsViewModel.factory(context, repository, owner, token))
     val state by model.state.collectAsStateWithLifecycle()
+    val mtk by model.mtk.state.collectAsStateWithLifecycle()
     val usb by model.usb.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var section by rememberSaveable(owner) { mutableStateOf(ToolsSection.Pax) }
@@ -62,6 +63,12 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
     val scope = rememberCoroutineScope()
     val importFirmware = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) model.importFirmware(uri, importKind)
+    }
+    val importMtkAgent = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) model.importMtkAgent(uri)
+    }
+    val importMtkFirmware = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) model.importMtkFirmware(uri)
     }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         if (uri != null) scope.launch {
@@ -82,6 +89,12 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
         }
     }
     LaunchedEffect(token) { model.updateToken(token) }
+    LaunchedEffect(model, lifecycle, section) {
+        if (section == ToolsSection.P8) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            model.mtk.setVisible(true)
+            try { kotlinx.coroutines.awaitCancellation() } finally { model.mtk.setVisible(false) }
+        }
+    }
     LaunchedEffect(model, lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             model.usb.start(); model.usb.scan(); model.refresh()
@@ -119,7 +132,15 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
                                         firmwareBusy = state.globalInstallBusy, paxModel = state.paxModel)
                                 })
                         }
-                        ToolsSection.P8 -> item { ToolCard("UniTodi P8") { Text("Скоро..") } }
+                        ToolsSection.P8 -> item {
+                            MtkFirmwarePanel(mtk, state,
+                                onAgent = { importMtkAgent.launch(arrayOf("*/*")) },
+                                onArchive = { importMtkFirmware.launch(arrayOf("application/zip", "application/octet-stream")) },
+                                onFtp = model::openMtkArchivePicker, onInspect = model.mtk::inspect,
+                                onInspectAgent = model.mtk::inspectAgent,
+                                onCancel = model.mtk::cancelInspection, onCancelDownload = model::cancelMtkDownload,
+                                onDownload=model.mtk::download,onEmergency=model.mtk::emergencyStop,onBootConfirmed=model.mtk::confirmBoot)
+                        }
                         ToolsSection.Morefun -> item { ToolCard("Morefun") { Text("Скоро..") } }
                         ToolsSection.History -> {
                             item { Text("События хранятся на этом устройстве. Привязка к заявке локальная; вложения в SimpleOne не отправляются.", style = MaterialTheme.typography.bodyMedium) }
@@ -142,6 +163,9 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
         PaxArchivePicker(state, model::closeArchivePicker, model::navigateArchiveFtp, model::downloadArchive,
             onSaved = { id -> val kind = state.archivePicker!!; model.closeArchivePicker(); model.prepareFirmwareFromFtp(id, kind) })
     }
+    if (state.mtkArchivePicker) MtkArchivePicker(state, model::closeArchivePicker,
+        onRefresh = { model.navigateArchiveFtp(MTK_P8_FTP_PATH) }, onDownload = model::downloadMtkArchive,
+        onSaved = { id -> model.closeArchivePicker(); model.prepareMtkFromFtp(id) })
     if (state.installation.awaitingCompletionAcknowledgement) {
         val completed = state.installation
         AlertDialog(

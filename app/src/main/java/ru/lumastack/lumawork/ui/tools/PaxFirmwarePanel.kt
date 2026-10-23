@@ -231,7 +231,7 @@ internal fun PaxFirmwarePanel(
 private fun paxModeTitle(model: PaxModel, mode: PaxInstallMode): String = mode.titleFor(model)
 
 @Composable
-private fun FirmwareSummaryRow(icon: ImageVector, text: String, accent: Color = ToolsColors.current.muted, emphasized: Boolean = false) {
+internal fun FirmwareSummaryRow(icon: ImageVector, text: String, accent: Color = ToolsColors.current.muted, emphasized: Boolean = false) {
     val colors = ToolsColors.current
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(if (emphasized) 27.dp else 21.dp), tint = accent)

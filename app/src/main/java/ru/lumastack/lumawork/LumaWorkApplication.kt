@@ -56,12 +56,11 @@ import ru.lumastack.lumawork.data.admin.FileAdminCache
 import ru.lumastack.lumawork.data.admin.OkHttpAdminApi
 
 class LumaWorkApplication : Application() {
-    lateinit var container: AppContainer
-        private set
+    // Activity startup awaits this on IO; background services share the same instance.
+    val container: AppContainer by lazy { AppContainer(this) }
 
     override fun onCreate() {
         super.onCreate()
-        container = AppContainer(this)
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try { if (container.ftpTransfers.hasPendingFolderCopies()) FtpTransferJobService.schedule(this@LumaWorkApplication) }
             catch (_: Exception) { /* The FTP screen reports cache errors when opened. */ }

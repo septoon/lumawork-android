@@ -123,6 +123,30 @@ class ToolsRepository(
             "${installation.model.title} · ${installation.mode.titleFor(installation.model)} · ${installation.step?.titleFor(installation.model) ?: "Подготовка"}. ${installation.detail}")
         store.write(owner, state.copy(history = (listOf(event) + state.history).take(500)))
     } }
+    suspend fun recordMtkInspection(owner: String, inspection: MtkInstallState) = withContext(Dispatchers.IO) { mutex.withLock {
+        require(inspection.owner == owner)
+        if (inspection.operationId.isBlank() || inspection.phase !in listOf(MtkInstallPhase.Inspected, MtkInstallPhase.AgentInspected, MtkInstallPhase.Failed,
+                MtkInstallPhase.Interrupted,MtkInstallPhase.WriteComplete,MtkInstallPhase.RecoveryRequired)) return@withLock
+        val state = read(owner)
+        val events=mutableListOf<ToolsEvent>()
+        if(state.history.none { it.id==inspection.operationId }) {
+            val kind=when(inspection.phase) {
+                MtkInstallPhase.WriteComplete -> ToolsEventKind.InstallationWritten
+                MtkInstallPhase.RecoveryRequired -> ToolsEventKind.InstallationUnknown
+                MtkInstallPhase.Interrupted -> ToolsEventKind.Interrupted
+                else -> ToolsEventKind.Diagnostic
+            }
+            events+=ToolsEvent(inspection.operationId,inspection.updatedAt,kind,
+                "UniTodi P8 · ${if(inspection.upgradeRequested || inspection.phase==MtkInstallPhase.WriteComplete) "Firmware Upgrade" else if (inspection.agentStarted) "Агент в RAM" else "Preloader"} · ${inspection.phase}. ${inspection.detail}" +
+                    (inspection.packageHash?.let { "\nПрофиль: ${MTK_P8_PROFILE.id}\nSHA-256 комплекта: $it" } ?: "")+
+                    inspection.confirmedActions.takeIf { it.isNotEmpty() }?.joinToString(", ",prefix="\nПодтверждённые этапы: ").orEmpty())
+        }
+        val bootId="${inspection.operationId}:boot"
+        if(inspection.phase==MtkInstallPhase.WriteComplete && inspection.bootConfirmedAt!=null && state.history.none { it.id==bootId })
+            events.add(0,ToolsEvent(bootId,inspection.bootConfirmedAt,ToolsEventKind.InstallationConfirmed,
+                "UniTodi P8 · инженер подтвердил самостоятельную загрузку терминала. Версия и платёжные операции автоматически не проверялись."))
+        if(events.isNotEmpty()) store.write(owner,state.copy(history=(events+state.history).take(500)))
+    } }
     private suspend fun read(owner: String): ToolsSnapshot {
         require(owner.isNotBlank())
         val state = store.read(owner)

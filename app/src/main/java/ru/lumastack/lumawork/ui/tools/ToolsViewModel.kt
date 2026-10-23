@@ -30,12 +30,19 @@ data class ToolsUiState(
     val library: PaxLibrarySnapshot = PaxLibrarySnapshot(), val archiveDownload: FtpTransfer? = null,
     val archivePicker: PaxArchiveKind? = null, val ftpPath: String = "", val ftpItems: List<FtpItem> = emptyList(),
     val ftpLoading: Boolean = false, val ftpError: String? = null,
+    val mtkArchivePicker: Boolean = false, val mtkDownload: FtpTransfer? = null,
 )
 class ToolsViewModel(context: Context, private val ftp: FtpRepository, private val owner: String, private var token: String) : ViewModel() {
     private val transfers = requireNotNull(ftp.transfers)
     private val context = context.applicationContext as android.app.Application
     private val localFiles = FtpLocalToolFiles(transfers)
     private val repository = ToolsRepository(localFiles, FileToolsStore(context))
+    val mtk = MtkFirmwareController(context, owner, viewModelScope) { result ->
+        try { repository.recordMtkInspection(owner, result); refresh(verifyHash = false) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { notice("Результат диагностики P8 доступен в карточке, но не сохранён в общей истории.") }
+    }
+    private var mtkDownloadWork: Job? = null
     private val firmwareStore = PaxFirmwareStore(context)
     private val library = PaxFirmwareLibrary(firmwareStore.ownerDirectory(owner))
     private var downloadWork: Job? = null
@@ -53,6 +60,7 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
         catch (_: Exception) { notice("Не удалось сохранить событие USB в историю.") }
     } }
     init {
+        viewModelScope.launch { terminalOperationGate.owner.collect { lease -> mutable.update { it.copy(globalInstallBusy = lease != null) } } }
         viewModelScope.launch {
             try {
                 val saved = withContext(Dispatchers.IO) { firmwareStore.read(owner) }
@@ -77,7 +85,7 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
             finally { mutable.update { it.copy(firmwareBusy = false) } }
             state.value.library.pending?.let(::watchDownload)
             PaxFirmwareRuntime.state.collect { current ->
-                mutable.update { it.copy(globalInstallBusy = current.active,
+                mutable.update { it.copy(globalInstallBusy = terminalOperationGate.owner.value != null,
                     installation = if (current.owner == owner) current else it.installation) }
                 if (current.owner == owner && current.operationId.isNotBlank() && !current.active) {
                     try { repository.recordInstallation(owner, current); refresh(verifyHash = false) }
@@ -101,6 +109,37 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
         }
     }
     fun updateToken(value: String) { token = value }
+    fun importMtkAgent(uri: Uri) = mtk.importAgent { requireNotNull(context.contentResolver.openInputStream(uri)) { "Не удалось открыть агент." } }
+    fun importMtkFirmware(uri: Uri) = mtk.preparePackage { requireNotNull(context.contentResolver.openInputStream(uri)) { "Не удалось открыть ZIP." } }
+    fun prepareMtkFromFtp(id: String) = mtk.preparePackage { requireNotNull(transfers.savedFile(owner, id)) { "Файл FTP недоступен." }.inputStream() }
+    fun openMtkArchivePicker() {
+        if (state.value.globalInstallBusy || mtk.state.value.loading || state.value.mtkDownload != null) return
+        mutable.update { it.copy(mtkArchivePicker = true, archivePicker = null, ftpItems = emptyList(), ftpError = null) }
+        navigateArchiveFtp(MTK_P8_FTP_PATH)
+    }
+    fun downloadMtkArchive(item: FtpItem) {
+        if (!state.value.mtkArchivePicker || state.value.mtkDownload != null || item.isDirectory || item.name != MTK_P8_ARCHIVE ||
+            normalizeFtpPath(item.path) != "$MTK_P8_FTP_PATH/$MTK_P8_ARCHIVE") return
+        closeArchivePicker()
+        mtkDownloadWork = viewModelScope.launch {
+            try {
+                val started = transfers.start(owner, token, item, FtpTransferAction.Download)
+                mutable.update { it.copy(mtkDownload = started) }
+                while (true) {
+                    val current = transfers.refresh(owner).firstOrNull { it.id == started.id } ?: error("Загрузка P8 не найдена.")
+                    mutable.update { it.copy(mtkDownload = current) }
+                    when (current.state) {
+                        FtpTransferState.Completed -> { prepareMtkFromFtp(current.id); break }
+                        FtpTransferState.Failed, FtpTransferState.Cancelled -> error(current.errorMessage ?: "Загрузка P8 отменена.")
+                        else -> delay(2000)
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { notice(failure.message ?: "Не удалось скачать комплект P8.") }
+            finally { mutable.update { it.copy(mtkDownload = null) }; refresh(verifyHash = false) }
+        }
+    }
+    fun cancelMtkDownload() { state.value.mtkDownload?.let { record -> viewModelScope.launch { transfers.cancel(owner, record.id) } } }
     fun importFirmware(uri: Uri, kind: PaxArchiveKind = PaxArchiveKind.Firmware) {
         val name = runCatching { context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
             if (it.moveToFirst()) it.getString(0) else null
@@ -151,11 +190,11 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
         mutable.update { it.copy(archivePicker = kind, ftpItems = emptyList(), ftpError = null) }
         navigateArchiveFtp(kind.ftpPath)
     }
-    fun closeArchivePicker() { catalogWork?.cancel(); mutable.update { it.copy(archivePicker = null, ftpLoading = false) } }
+    fun closeArchivePicker() { catalogWork?.cancel(); mutable.update { it.copy(archivePicker = null, mtkArchivePicker = false, ftpLoading = false) } }
     fun navigateArchiveFtp(path: String) {
-        val kind = state.value.archivePicker ?: return
+        val root = state.value.archivePicker?.ftpPath ?: if (state.value.mtkArchivePicker) MTK_P8_FTP_PATH else return
         val normalized = normalizeFtpPath(path)
-        if (normalized != kind.ftpPath && !normalized.startsWith(kind.ftpPath + "/")) return
+        if (normalized != root && !normalized.startsWith(root + "/")) return
         catalogWork?.cancel()
         val samePath = state.value.ftpPath == normalized
         mutable.update { it.copy(ftpPath = normalized, ftpItems = if (samePath) it.ftpItems else emptyList(), ftpLoading = true, ftpError = null) }
@@ -344,7 +383,7 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
             refresh(verifyHash = hash)
         }
     }
-    override fun onCleared() { usb.close() }
+    override fun onCleared() { mtk.close(); usb.close() }
     companion object {
         fun factory(context: Context, ftp: FtpRepository, owner: String, token: String) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST") override fun <T : ViewModel> create(modelClass: Class<T>): T =

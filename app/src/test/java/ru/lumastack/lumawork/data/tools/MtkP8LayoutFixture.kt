@@ -1,0 +1,58 @@
+package ru.lumastack.lumawork.data.tools
+
+// Sanitized names and geometry only; no device GUIDs, CID or partition contents.
+internal fun mtkP8LayoutFixture(): MtkGptInfo {
+    val parts = listOf(
+    MtkPartition("boot_para",0x8000L,0x100000L),
+    MtkPartition("para",0x108000L,0x80000L),
+    MtkPartition("expdb",0x188000L,0x1400000L),
+    MtkPartition("frp",0x1588000L,0x100000L),
+    MtkPartition("nvcfg",0x1688000L,0x2000000L),
+    MtkPartition("nvdata",0x3688000L,0x4000000L),
+    MtkPartition("md_udc",0x7688000L,0x169a000L),
+    MtkPartition("metadata",0x8d22000L,0x2000000L),
+    MtkPartition("protect1",0xad22000L,0x800000L),
+    MtkPartition("protect2",0xb522000L,0xade000L),
+    MtkPartition("seccfg",0xc000000L,0x800000L),
+    MtkPartition("sec1",0xc800000L,0x200000L),
+    MtkPartition("proinfo",0xca00000L,0x300000L),
+    MtkPartition("nvram",0xcd00000L,0x4000000L),
+    MtkPartition("logo",0x10d00000L,0xb00000L),
+    MtkPartition("md1img_a",0x11800000L,0x6400000L),
+    MtkPartition("spmfw_a",0x17c00000L,0x100000L),
+    MtkPartition("scp_a",0x17d00000L,0x100000L),
+    MtkPartition("sspm_a",0x17e00000L,0x100000L),
+    MtkPartition("gz_a",0x17f00000L,0x1000000L),
+    MtkPartition("lk_a",0x18f00000L,0x100000L),
+    MtkPartition("boot_a",0x19000000L,0x2000000L),
+    MtkPartition("vendor_boot_a",0x1b000000L,0x4000000L),
+    MtkPartition("dtbo_a",0x1f000000L,0x800000L),
+    MtkPartition("tee_a",0x1f800000L,0x800000L),
+    MtkPartition("vbmeta_a",0x20000000L,0x800000L),
+    MtkPartition("vbmeta_system_a",0x20800000L,0x800000L),
+    MtkPartition("vbmeta_vendor_a",0x21000000L,0x800000L),
+    MtkPartition("md1img_b",0x21800000L,0x6400000L),
+    MtkPartition("spmfw_b",0x27c00000L,0x100000L),
+    MtkPartition("scp_b",0x27d00000L,0x100000L),
+    MtkPartition("sspm_b",0x27e00000L,0x100000L),
+    MtkPartition("gz_b",0x27f00000L,0x1000000L),
+    MtkPartition("lk_b",0x28f00000L,0x100000L),
+    MtkPartition("boot_b",0x29000000L,0x2000000L),
+    MtkPartition("vendor_boot_b",0x2b000000L,0x4000000L),
+    MtkPartition("dtbo_b",0x2f000000L,0x800000L),
+    MtkPartition("tee_b",0x2f800000L,0x800000L),
+    MtkPartition("super",0x30000000L,0x140000000L),
+    MtkPartition("vbmeta_b",0x170000000L,0x800000L),
+    MtkPartition("vbmeta_system_b",0x170800000L,0x800000L),
+    MtkPartition("vbmeta_vendor_b",0x171000000L,0x800000L),
+    MtkPartition("privdata",0x171800000L,0x13000000L),
+    MtkPartition("keychain",0x184800000L,0x800000L),
+    MtkPartition("hardwareinfo",0x185000000L,0x800000L),
+    MtkPartition("userdata",0x185800000L,0x5bfcf8000L),
+    MtkPartition("otp",0x7454f8000L,0x2b00000L),
+    MtkPartition("flashinfo",0x747ff8000L,0x1000000L),
+    )
+    val size = 31289507840L
+    val canonical = "$size\n" + parts.joinToString("\n") { "${it.name}:${it.startBytes}:${it.sizeBytes}" }
+    return MtkGptInfo(size,parts,mtkSha256(canonical.toByteArray()))
+}
