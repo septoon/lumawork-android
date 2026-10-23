@@ -111,7 +111,7 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
         CompositionLocalProvider(LocalOnBackPressedDispatcherOwner provides dispatcher) {
             Surface(Modifier.widthIn(max = 760.dp).fillMaxSize(), shape = RoundedCornerShape(20.dp)) {
                 when (page) {
-                    SettingsPage.Gsm -> GsmProfileSettingsScreen(session, offline, auto,
+                    SettingsPage.Gsm -> GsmProfileSettingsScreen(session, offline, auto, auth,
                         onBack = { page = SettingsPage.Root }, onAddVehicle = { addVehicle = true },
                         onSaved = { saved -> onGsmProfileSaved(); fuel.setFuelTypes(session.user.id, saved.fuelTypes.ifEmpty { listOf(saved.fuelType) }) })
                     SettingsPage.Notifications -> NotificationSettingsScreen(session, offline) { page = SettingsPage.Root }

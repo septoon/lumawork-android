@@ -1,5 +1,7 @@
 package ru.lumastack.lumawork.ui.gsm
 
+import ru.lumastack.lumawork.domain.model.UserProfile
+import ru.lumastack.lumawork.data.auth.AuthRepository
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,6 +58,7 @@ fun GsmProfileSettingsScreen(
     session: AppSession,
     offline: Boolean,
     autoRepository: AutoRepository,
+    auth: AuthRepository,
     onBack: () -> Unit,
     onAddVehicle: (() -> Unit)? = null,
     onSaved: suspend (GsmProfile) -> Unit = {},
@@ -180,6 +183,13 @@ fun GsmProfileSettingsScreen(
                                 if (odometerInput.toIntOrNull()?.let { it >= 0 } != true)
                                     throw GsmProfileFailure.Validation("Введите стартовый одометр целым неотрицательным числом.")
                                 val saved = repository.saveWithVehicle(session, editor.draft, autoRepository)
+                                if (imported.sources.isNotEmpty()) {
+                                    try { auth.fillProfileFromGsm(saved.profile, owner) }
+                                    catch (error: CancellationException) { throw error }
+                                    catch (error: Exception) {
+                                        throw GsmXlsxFailure("ГСМ и авто сохранены, но профиль LumaWork не заполнен. Повторите «Сохранить»: ${error.message.orEmpty()}")
+                                    }
+                                }
                                 editor = editor.saved(saved, submittedRevision)
                                 drafts.edit().remove(owner).apply()
                                 // Consumers can update their local allowed-fuel list from the confirmed profile.
@@ -219,6 +229,9 @@ fun GsmProfileSettingsScreen(
                     OutlinedButton(enabled = enabled && serverConfirmedEmpty, onClick = { if (editor.isEdited) confirmReplace = true else openPicker() }) { Text("Загрузить XLSX за предыдущий месяц") }
                     if (imported.sources.isNotEmpty()) {
                         Text("Проверьте все поля. Данные сохранятся в аккаунте только после нажатия «Сохранить».", style = MaterialTheme.typography.bodyMedium)
+                        Text("При сохранении ФИО и должность дополнят пустые поля профиля LumaWork. Город переносится только при явном указании в адресе; заполненные поля сохранятся.", style = MaterialTheme.typography.bodySmall)
+                        val city = draft.fillingUserProfile(UserProfile()).city
+                        if (city != null) Text("Город из адреса: $city", style = MaterialTheme.typography.bodySmall)
                         imported.notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         TextButton(onClick = { sourcesOpen = !sourcesOpen }) { Text(if (sourcesOpen) "Скрыть источники" else "Источники полей XLSX") }
                         if (sourcesOpen) imported.sources.forEach { (field, source) -> Text("$field: $source", style = MaterialTheme.typography.bodySmall) }

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.data.auth
 
+import ru.lumastack.lumawork.data.gsm.GsmProfile
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
@@ -15,6 +16,43 @@ import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.domain.model.AppUser
 
 class AuthRepositoryTest {
+    @Test
+    fun `GSM import merges fresh server profile and persists updated session`() = runBlocking {
+        val api = FakeAuthApi()
+        val remote = UserProfile(firstName = "Серверное имя", workEmail = "Keep@Example.COM", city = "Ялта", departmentTitle = "Dept")
+        api.updateProfile("token", remote)
+        val store = FakeSessionStore(session())
+        val repository = AuthRepository(api, store, FakeEmailStore())
+        val gsm = GsmProfile(employeeFullName = "Иванов Иван Иванович", employeeJobTitle = "Инженер", employeeAddress = "г. Алушта, ул. Тестовая")
+        repository.fillProfileFromGsm(gsm, "1")
+        val expected = remote.copy(lastName = "Иванов", middleName = "Иванович", jobTitle = "Инженер")
+        assertEquals(expected, repository.session?.user?.profile)
+        assertEquals(expected, store.read()?.user?.profile)
+        val writes = api.profileWrites
+        repository.fillProfileFromGsm(gsm, "1")
+        assertEquals(writes, api.profileWrites)
+    }
+
+    @Test
+    fun `GSM import rejects other account before any profile write`() = runBlocking {
+        val api = FakeAuthApi()
+        val repository = repository(api, session())
+        val result = runCatching { repository.fillProfileFromGsm(GsmProfile(employeeFullName = "Иванов Иван Иванович"), "other") }
+        assertEquals(true, result.isFailure)
+        assertEquals(0, api.profileWrites)
+        assertEquals("1", repository.session?.user?.id)
+    }
+
+    @Test
+    fun `failed fresh profile read makes no user mutation`() = runBlocking {
+        val api = FakeAuthApi(currentUserError = IOException("offline"))
+        val repository = repository(api, session())
+        val result = runCatching { repository.fillProfileFromGsm(GsmProfile(), "1") }
+        assertEquals(true, result.isFailure)
+        assertEquals(0, api.profileWrites)
+        assertNull(repository.session?.user?.profile)
+    }
+
     @Test
     fun `late profile response cannot restore a session after logout`() = runBlocking {
         val started = CompletableDeferred<Unit>()
@@ -98,10 +136,12 @@ private class FakeAuthApi(
     private val beforeProfileUpdate: suspend () -> Unit = {},
 ) : AuthApi {
     var requestedEmail: String? = null
+    var profileWrites = 0
     private var user = AppUser(id = "1", email = "user@example.com", role = "user")
 
     override suspend fun updateProfile(token: String, profile: UserProfile): AppUser {
         beforeProfileUpdate()
+        profileWrites += 1
         return user.copy(profile = profile).also { user = it }
     }
     override suspend fun uploadAvatar(token: String, bytes: ByteArray): AppUser = user.copy(avatarUrl = "https://example.com/avatar.webp").also { user = it }
@@ -115,7 +155,7 @@ private class FakeAuthApi(
 
     override suspend fun currentUser(token: String): AppUser {
         currentUserError?.let { throw it }
-        return AppUser(id = "1", email = "user@example.com", role = "user")
+        return user
     }
 
     override suspend fun logout(token: String) = Unit

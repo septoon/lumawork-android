@@ -1,6 +1,7 @@
 package ru.lumastack.lumawork.data.gsm
 
 import kotlinx.serialization.Serializable
+import ru.lumastack.lumawork.domain.model.UserProfile
 import ru.lumastack.lumawork.domain.auto.Vehicle
 import ru.lumastack.lumawork.domain.auto.VehicleInputValidation
 
@@ -45,6 +46,26 @@ data class GsmProfile(
         val plate = VehicleInputValidation.normalizePlate(licensePlate)
         if (plate.isBlank()) return emptyList()
         return vehicles.filter { VehicleInputValidation.normalizePlate(it.licensePlate.orEmpty()) == plate }
+    }
+
+    /** Only requested blank account fields; ambiguous names and cities stay manual. */
+    fun fillingUserProfile(current: UserProfile): UserProfile {
+        val names = employeeFullName.trim().split(Regex("\\s+"))
+        val word = Regex("[\\p{L}]+(?:[-'’][\\p{L}]+)*")
+        val fullName = names.takeIf { it.size == 3 && it.all { part -> part.length >= 2 && word.matches(part) } }
+        val cities = employeeAddress.split(',', ';').mapNotNull { segment ->
+            Regex("""^(?:г\.\s*|г\s+|город\s+)([\p{L}]+(?:[ -][\p{L}]+)*)$""", RegexOption.IGNORE_CASE)
+                .matchEntire(segment.trim())?.groupValues?.get(1)
+        }
+        fun fill(existing: String?, imported: String?): String? = existing.takeUnless { it.isNullOrBlank() }
+            ?: imported?.trim()?.takeIf(String::isNotEmpty) ?: existing
+        return current.copy(
+            lastName = fill(current.lastName, fullName?.get(0)),
+            firstName = fill(current.firstName, fullName?.get(1)),
+            middleName = fill(current.middleName, fullName?.get(2)),
+            jobTitle = fill(current.jobTitle, employeeJobTitle),
+            city = fill(current.city, cities.singleOrNull()),
+        )
     }
 
     fun toggleFuelType(value: String): GsmProfile {

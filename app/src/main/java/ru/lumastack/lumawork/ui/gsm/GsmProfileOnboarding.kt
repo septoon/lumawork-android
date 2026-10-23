@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.gsm
 
+import ru.lumastack.lumawork.data.auth.AuthRepository
 import android.content.Context
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +27,7 @@ import ru.lumastack.lumawork.domain.model.AppSession
 
 /** Prompts only after a successful account-scoped server read, once per account on this device. */
 @Composable
-fun GsmProfileOnboarding(session: AppSession, offline: Boolean, auto: AutoRepository, fuel: FuelRepository, onProfileSaved: () -> Unit = {}) {
+fun GsmProfileOnboarding(session: AppSession, offline: Boolean, auto: AutoRepository, fuel: FuelRepository, auth: AuthRepository, onProfileSaved: () -> Unit = {}) {
     val context = LocalContext.current.applicationContext
     val dispatcher = LocalOnBackPressedDispatcherOwner.current!!
     val preferences = remember(context) { context.getSharedPreferences("gsm-onboarding", Context.MODE_PRIVATE) }
@@ -58,7 +59,7 @@ fun GsmProfileOnboarding(session: AppSession, offline: Boolean, auto: AutoReposi
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
         CompositionLocalProvider(LocalOnBackPressedDispatcherOwner provides dispatcher) {
             Surface(Modifier.widthIn(max = 760.dp).fillMaxSize()) {
-                GsmProfileSettingsScreen(session, offline, auto, onBack = { form = false }, importOnOpen = importOnOpen,
+                GsmProfileSettingsScreen(session, offline, auto, auth, onBack = { form = false }, importOnOpen = importOnOpen,
                     onSaved = { profile -> onProfileSaved(); fuel.setFuelTypes(session.user.id, profile.fuelTypes.ifEmpty { listOf(profile.fuelType) }) })
             }
         }

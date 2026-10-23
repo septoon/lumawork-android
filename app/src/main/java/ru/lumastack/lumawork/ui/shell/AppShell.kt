@@ -247,7 +247,7 @@ fun AppShell(
     val onSelect: (AppDestination) -> Unit = { selectedName = it.name }
     val home = destinations.firstOrNull { it == AppDestination.Home } ?: destinations.first()
     BackHandler(enabled = selected != home) { onSelect(home) }
-    ru.lumastack.lumawork.ui.gsm.GsmProfileOnboarding(session, isOffline, autoRepository, fuelRepository,
+    ru.lumastack.lumawork.ui.gsm.GsmProfileOnboarding(session, isOffline, autoRepository, fuelRepository, authRepository,
         onProfileSaved = { routeRepository.gsmProfileSaved(session.user.id) })
     RequestNotificationsHost(session, isOffline, simpleOneState.snapshot, simpleOneState.isAuthorized)
     val notification = LocalRequestNotification.current

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.data.gsm
 
+import ru.lumastack.lumawork.domain.model.UserProfile
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
@@ -18,6 +19,36 @@ import ru.lumastack.lumawork.domain.auto.Vehicle
 import ru.lumastack.lumawork.domain.auto.VehicleGsmSettings
 
 class GsmProfileTest {
+    @Test fun `report fills only missing requested LumaWork profile fields`() {
+        val current = UserProfile(workEmail = "Keep@Example.COM", personalPhone = "keep", vehicleVin = "VIN", departmentTitle = "Dept")
+        val gsm = GsmProfile(employeeFullName = "  Иванов  Иван Иванович ", employeeJobTitle = " Инженер ", employeeAddress = "Республика Крым, г. Алушта, ул. Тестовая, 1")
+        val filled = gsm.fillingUserProfile(current)
+        assertEquals(current.copy(lastName = "Иванов", firstName = "Иван", middleName = "Иванович", jobTitle = "Инженер", city = "Алушта"), filled)
+        assertEquals(filled, gsm.fillingUserProfile(filled))
+    }
+
+    @Test fun `existing profile fields are never replaced by report values`() {
+        val current = UserProfile(lastName = "Другая", firstName = "Мария", middleName = "Петровна", jobTitle = "Руководитель", city = "Ялта")
+        val gsm = GsmProfile(employeeFullName = "Иванов Иван Иванович", employeeJobTitle = "Инженер", employeeAddress = "г. Алушта, ул. Тестовая")
+        assertEquals(current, gsm.fillingUserProfile(current))
+    }
+
+    @Test fun `ambiguous names initials and addresses do not invent profile values`() {
+        for (name in listOf("Иванов И. И.", "Иванов Иван", "Иванов Иван Иванович Дополнение", "Иванов 123 Иванович")) {
+            val filled = GsmProfile(employeeFullName = name, employeeAddress = "Республика Крым, ул. Тестовая").fillingUserProfile(UserProfile())
+            assertNull(filled.firstName); assertNull(filled.lastName); assertNull(filled.middleName); assertNull(filled.city)
+        }
+        val duplicate = GsmProfile(employeeAddress = "г. Ялта, г. Алушта").fillingUserProfile(UserProfile())
+        assertNull(duplicate.city)
+    }
+
+    @Test fun `city markers and hyphenated names are supported without treating street as city`() {
+        for (address in listOf("г.Москва, ул. Тестовая", "город Москва; ул. Тестовая", "Г. Москва, ул. Тестовая")) {
+            val filled = GsmProfile(employeeFullName = "Иванова-Петрова Анна-Мария Ивановна", employeeAddress = address).fillingUserProfile(UserProfile())
+            assertEquals("Москва", filled.city); assertEquals("Анна-Мария", filled.firstName)
+        }
+    }
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
 
     @Test fun `profile accepts supported wrappers snake aliases numeric strings and legacy fuel`() {

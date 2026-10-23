@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.data.auth
 
+import ru.lumastack.lumawork.data.gsm.GsmProfile
 import ru.lumastack.lumawork.data.session.RememberedEmailStore
 import ru.lumastack.lumawork.data.session.SessionStore
 import ru.lumastack.lumawork.domain.model.AppSession
@@ -60,6 +61,17 @@ class AuthRepository(
     }
 
     suspend fun updateProfile(profile: UserProfile) = updateUser { api.updateProfile(it, profile) }
+    /** Runs only from the explicit Save of an imported GSM draft. */
+    suspend fun fillProfileFromGsm(profile: GsmProfile, owner: String) = updateUser { token ->
+        val current = api.currentUser(token)
+        check(current.id == owner && session?.user?.id == owner && session?.token == token) {
+            "Аккаунт изменился. Откройте ГСМ профиль заново."
+        }
+        val existing = current.profile ?: UserProfile()
+        val filled = profile.fillingUserProfile(existing)
+        if (filled == existing) current else api.updateProfile(token, filled)
+    }
+
     suspend fun uploadAvatar(bytes: ByteArray) = updateUser { api.uploadAvatar(it, bytes) }
     suspend fun deleteAvatar() = updateUser { api.deleteAvatar(it) }
 
