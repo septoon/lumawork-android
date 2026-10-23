@@ -188,11 +188,11 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
         if (state.value.firmwareBusy || state.value.globalInstallBusy || state.value.paxModel == PaxModel.D230) return
         if (kind == PaxArchiveKind.Prolin && state.value.paxModel == PaxModel.S210) return
         mutable.update { it.copy(archivePicker = kind, ftpItems = emptyList(), ftpError = null) }
-        navigateArchiveFtp(kind.ftpPath)
+        navigateArchiveFtp(kind.ftpPathFor(state.value.paxModel))
     }
     fun closeArchivePicker() { catalogWork?.cancel(); mutable.update { it.copy(archivePicker = null, mtkArchivePicker = false, ftpLoading = false) } }
     fun navigateArchiveFtp(path: String) {
-        val root = state.value.archivePicker?.ftpPath ?: if (state.value.mtkArchivePicker) MTK_P8_FTP_PATH else return
+        val root = state.value.archivePicker?.ftpPathFor(state.value.paxModel) ?: if (state.value.mtkArchivePicker) MTK_P8_FTP_PATH else return
         val normalized = normalizeFtpPath(path)
         if (normalized != root && !normalized.startsWith(root + "/")) return
         catalogWork?.cancel()
@@ -212,7 +212,7 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
         val target = state.value.paxModel
         if (state.value.firmwareBusy || state.value.globalInstallBusy || !item.name.isPaxArchiveName() || item.isDirectory) return
         val path = normalizeFtpPath(item.path)
-        if (!path.startsWith(kind.ftpPath + "/")) return
+        if (!path.startsWith(kind.ftpPathFor(target) + "/")) return
         mutable.update { it.copy(firmwareBusy = true, firmwareError = null) }
         viewModelScope.launch {
             try {

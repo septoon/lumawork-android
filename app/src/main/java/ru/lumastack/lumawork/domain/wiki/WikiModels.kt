@@ -81,12 +81,21 @@ object WikiDocumentParser {
             if (items.isNotEmpty()) blocks += WikiBlock.Bullets(items)
         }
         lines.forEach { raw ->
-            val line = raw.trim()
+            var line = raw.trim()
             if (line.isEmpty()) {
                 flushParagraph(); flushBullets(); return@forEach
             }
             imageTitle(line)?.let {
-                flushParagraph(); flushBullets(); blocks += WikiBlock.Image(it); return@forEach
+                flushParagraph(); flushBullets(); blocks += WikiBlock.Image(it)
+                val remainingText = line.removeWikiImageMarkup().cleanWikiText()
+                if (remainingText.isNotEmpty()) paragraph += remainingText
+                return@forEach
+            }
+            val withoutImageWrapper = line.removeWikiImageWrapperPrefix()
+            if (withoutImageWrapper != line) {
+                flushParagraph(); flushBullets()
+                line = withoutImageWrapper
+                if (line.isEmpty()) return@forEach
             }
             if (line.startsWith("## ") || line.startsWith("### ")) {
                 flushParagraph(); flushBullets()
@@ -111,12 +120,32 @@ object WikiDocumentParser {
     private fun firstValue(prefix: String, lines: List<String>): String? = lines.firstOrNull { it.trim().startsWith("$prefix ") }
         ?.trim()?.removePrefix(prefix)?.trim()?.takeIf(String::isNotEmpty)
     private fun imageTitle(value: String): String? {
-        val match = Regex("\\[!\\[([^]]+)\\]\\([^)]+\\)\\]\\([^)]+\\)").find(value) ?: return null
-        return match.groupValues[1].cleanWikiText().takeIf(String::isNotEmpty)
+        if (wikiEmptyImageMarkup.containsMatchIn(value)) return "Изображение"
+        val title = wikiImageMarkup.firstNotNullOfOrNull { it.find(value)?.groupValues?.get(1) } ?: return null
+        return title.cleanWikiText().ifEmpty { "Изображение" }
     }
 }
 
-fun String.cleanWikiText(): String = replace(Regex("\\[!\\[([^]]*)\\]\\([^)]+\\)\\]\\([^)]+\\)"), "$1")
+private val wikiImageMarkup = listOf(
+    Regex("""\[!\[([^]]*)\]\([^)]+\)\]\([^)]+\)"""),
+    Regex("""!\[([^]]*)\]\([^)]+\)"""),
+)
+private val wikiEmptyImageMarkup = Regex("""\[\]\([^)]+\)""")
+
+private fun String.removeWikiImageMarkup(): String = wikiImageMarkup.fold(this) { value, pattern ->
+    value.replace(pattern, "")
+}.replace(wikiEmptyImageMarkup, "").removeWikiImageWrapperPrefix()
+
+private fun String.removeWikiImageWrapperPrefix(): String {
+    val source = trim()
+    val withoutLink = source.replace(Regex("""^(?:>\s*)*\]\(https?://[^)]+\)"""), "").trim()
+    val meaningfulText = withoutLink.replace(Regex("""[>\[\]\\*_;⇒→.\-]"""), "").trim()
+    if (meaningfulText.isEmpty()) return ""
+    if (withoutLink == source) return source
+    return withoutLink.replace(Regex("""^[>\[\]\\;⇒→.]+\s*"""), "").trim()
+}
+
+fun String.cleanWikiText(): String = removeWikiImageMarkup()
     .replace(Regex("\\[([^]]+)\\]\\([^)]+\\)"), "$1")
     .replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")
     .replace(Regex("__([^_]+)__"), "$1")

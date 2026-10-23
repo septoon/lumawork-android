@@ -21,20 +21,21 @@ internal fun PaxArchivePicker(state: ToolsUiState, onClose: () -> Unit, onNaviga
     onDownload: (FtpItem) -> Unit, onSaved: (String) -> Unit,
 ) {
     val kind = state.archivePicker ?: return
+    val root = kind.ftpPathFor(state.paxModel)
     var query by rememberSaveable(state.paxModel, kind, state.ftpPath) { mutableStateOf("") }
     val items = state.ftpItems.filter { (it.isDirectory || it.name.isPaxArchiveName()) && it.name.contains(query.trim(), true) }
         .sortedWith(compareByDescending<FtpItem> { it.isDirectory }.thenBy(String.CASE_INSENSITIVE_ORDER) { it.name })
-    val saved = state.files.filter { !it.downloading && it.remotePath?.startsWith(kind.ftpPath + "/") == true && it.name.isPaxArchiveName() && it.name.contains(query.trim(), true) }
+    val saved = state.files.filter { !it.downloading && it.remotePath?.startsWith(root + "/") == true && it.name.isPaxArchiveName() && it.name.contains(query.trim(), true) }
     AlertDialog(onDismissRequest = onClose,
         title = { Text("${state.paxModel.title} · ${kind.title}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Выберите архив. Приложение скачает его и подготовит файлы для этой модели.", style = MaterialTheme.typography.bodySmall)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (state.ftpPath != kind.ftpPath) IconButton(onClick = { onNavigate(state.ftpPath.substringBeforeLast('/')) }) {
+                    if (state.ftpPath != root) IconButton(onClick = { onNavigate(state.ftpPath.substringBeforeLast('/')) }) {
                         Icon(Icons.Outlined.ArrowBack, "На уровень выше")
                     }
-                    Text(state.ftpPath.removePrefix(kind.ftpPath).ifBlank { if (kind == PaxArchiveKind.Prolin) "POSLoader" else "Прошивки" },
+                    Text(state.ftpPath.removePrefix(root).ifBlank { if (kind == PaxArchiveKind.Prolin) "POSLoader" else "Прошивки" },
                         modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, maxLines = 3)
                     IconButton(onClick = { onNavigate(state.ftpPath) }, enabled = !state.ftpLoading) { Icon(Icons.Outlined.Refresh, "Обновить каталог") }
                 }

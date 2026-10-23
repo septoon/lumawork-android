@@ -30,6 +30,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
@@ -44,12 +45,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.net.toUri
+import ru.lumastack.lumawork.R
 import ru.lumastack.lumawork.data.wiki.WikiRepository
 import ru.lumastack.lumawork.domain.wiki.WikiBlock
 import ru.lumastack.lumawork.domain.wiki.WikiSearchResult
@@ -350,7 +354,17 @@ private fun WikiBlockView(block: WikiBlock) {
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
             shape = RoundedCornerShape(16.dp),
         ) {
-            Text("Изображение: ${block.title}", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(13.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(13.dp).semantics(mergeDescendants = true) {},
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(painterResource(R.drawable.ic_wiki_image), contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Фото недоступно в статье", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Изображение доступно в PDF", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
     }
 }
