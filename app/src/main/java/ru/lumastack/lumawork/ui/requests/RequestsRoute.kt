@@ -175,10 +175,8 @@ private fun RequestsToolbar(state: SimpleOneUiState, actions: RequestsActions, c
         }
     }
     Column {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (state.mode == RequestsMode.Active) "Активные заявки" else "Закрытые заявки",
-                style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        if (busy) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         }
         state.archiveProgress?.let { Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
         state.errorMessage?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }

@@ -81,7 +81,7 @@ internal object ToolsIcons {
 }
 
 @Composable internal fun ToolsStepCard(number: Int, title: String, accent: Color,
-    decoration: ImageVector? = null, content: @Composable ColumnScope.() -> Unit,
+    decoration: ImageVector? = null, artwork: Int? = null, content: @Composable ColumnScope.() -> Unit,
 ) {
     val p = ToolsColors.current
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), color = p.card,
@@ -92,7 +92,8 @@ internal object ToolsIcons {
                     Text(number.toString(), color = accent, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 }
                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                decoration?.let { Icon(it, null, Modifier.size(34.dp), tint = accent.copy(alpha = .7f)) }
+                if (artwork != null) Image(painterResource(artwork), null, Modifier.size(56.dp))
+                else decoration?.let { Icon(it, null, Modifier.size(34.dp), tint = accent.copy(alpha = .7f)) }
             }
             content()
         }

@@ -1,9 +1,11 @@
 package ru.lumastack.lumawork.ui.requests
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,11 +13,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DateRangePicker
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.LocalDate
@@ -55,8 +60,10 @@ import ru.lumastack.lumawork.domain.requests.isClosedReturnEquipment
 import ru.lumastack.lumawork.domain.requests.normalizedClosedAddress
 import ru.lumastack.lumawork.domain.requests.queryClosedRequests
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
+import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.AppSurfaces
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -71,7 +78,9 @@ fun ClosedRequestsContent(
     onOpenTerminal: (String) -> Unit,
     modifier: Modifier = Modifier,
     personalComment: @Composable (SimpleOneRequest) -> Unit = {},
+    widthClass: AppWidthClass = AppWidthClass.Compact,
 ) {
+    val columns = if (widthClass == AppWidthClass.Compact) 1 else 2
     val today = LocalDate.now()
     val automaticPeriod = remember(prepared, today) { defaultClosedRequestsPeriod(prepared, today) }
     var startDay by rememberSaveable { mutableStateOf<String?>(null) }
@@ -150,8 +159,14 @@ fun ClosedRequestsContent(
                     }
                 }
             }
-            items(group, key = { "closed-record-${it.request.id}" }) { item ->
-                ClosedRequestCard(item, { onOpenRequest(item.request) }, onOpenTerminal, personalComment)
+            items(group.chunked(columns), key = { "closed-record-${it.first().request.id}" }) { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    row.forEach { item ->
+                        ClosedRequestCard(item, { onOpenRequest(item.request) }, onOpenTerminal, personalComment,
+                            compact = columns > 1, modifier = Modifier.weight(1f))
+                    }
+                    if (row.size < columns) androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                }
             }
         }
         if (pages > 1) item(key = "closed-pagination") {
@@ -187,38 +202,58 @@ fun ClosedRequestsContent(
 private fun ClosedRequestCard(
     item: ClosedRequestsItem, onClick: () -> Unit, onOpenTerminal: (String) -> Unit,
     personalComment: @Composable (SimpleOneRequest) -> Unit,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     val request = item.request
     val isReturn = isClosedReturnEquipment(request.closedRequestType())
-    AppCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(request.incomingNumber.ifBlank { request.number }, fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Surface(shape = RoundedCornerShape(12.dp), color = closedTypeColor(item.typeText)) {
-                    Text(item.typeText.ifBlank { "Тип не указан" }, Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        color = Color.White, style = MaterialTheme.typography.labelMedium)
+    RequestStatusCard(item.statusText, closed = true, onClick = onClick, compact = compact, modifier = modifier) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(request.incomingNumber.ifBlank { request.number }, fontWeight = FontWeight.SemiBold,
+                style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Surface(shape = RoundedCornerShape(12.dp), color = closedTypeColor(item.typeText)) {
+                Text(item.typeText.ifBlank { "Тип не указан" }, Modifier.widthIn(max = if (compact) 110.dp else 150.dp).padding(horizontal = 10.dp, vertical = 6.dp),
+                    color = Color.White, style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
+            }
+        }
+        ClosedCardRow(item.timeTitle, item.timeText.ifBlank { "Информация отсутствует" })
+        if (!isReturn) {
+            request.closedCustomer().takeIf { it.isNotBlank() }?.let { ClosedCardRow("Заказчик", it) }
+            request.closedAddress().takeIf { it.isNotBlank() }?.let {
+                Column {
+                    Text("Адрес", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(normalizedClosedAddress(it), style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            ClosedCardRow(item.timeTitle, item.timeText.ifBlank { "Информация отсутствует" })
-            if (!isReturn) {
-                request.closedCustomer().takeIf { it.isNotBlank() }?.let { ClosedCardRow("Заказчик", it) }
-                request.closedAddress().takeIf { it.isNotBlank() }?.let {
-                    Column {
-                        Text("Адрес", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(normalizedClosedAddress(it), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-            request.closedTerminalId().takeIf { it.isNotBlank() }?.let { terminal ->
-                RequestTerminalRow(terminal, onOpenTerminal)
-            }
-            if (!isReturn) personalComment(request)
         }
-        Surface(color = requestStatusColor(item.statusText, closed = true)) {
-            Text(item.statusText, Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
-                color = requestStatusTextColor(item.statusText), style = MaterialTheme.typography.labelLarge)
+        request.closedTerminalId().takeIf { it.isNotBlank() }?.let { terminal ->
+            RequestTerminalRow(terminal, onOpenTerminal)
         }
+        if (!isReturn) personalComment(request)
+    }
+}
+
+@Composable
+internal fun RequestStatusCard(
+    status: String,
+    closed: Boolean,
+    onClick: () -> Unit,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+    border: BorderStroke? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val shape = RoundedCornerShape(28.dp)
+    AppCard(onClick = onClick, modifier = modifier.fillMaxWidth(), shape = shape, border = border,
+        colors = CardDefaults.cardColors(containerColor = requestStatusColor(status, closed),
+            contentColor = MaterialTheme.colorScheme.onSurface)) {
+        Surface(shape = shape, color = AppSurfaces.card.copy(alpha = 1f), border = BorderStroke(1.dp, AppSurfaces.border)) {
+            Column(Modifier.fillMaxWidth().padding(if (compact) 14.dp else 18.dp),
+                verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp), content = content)
+        }
+        Text(status, Modifier.fillMaxWidth().heightIn(min = 32.dp).padding(horizontal = 14.dp, vertical = 6.dp),
+            textAlign = TextAlign.Center, color = requestStatusTextColor(status),
+            style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
     }
 }
 

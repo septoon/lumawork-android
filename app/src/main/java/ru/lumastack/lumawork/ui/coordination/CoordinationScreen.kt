@@ -157,25 +157,30 @@ private fun CoordinationActiveContent(state: CoordinationUiState, userName: Stri
     val engineers = remember(group?.requests) { coordinationEngineers(group?.requests.orEmpty()) }
     val detail = state.selectedEngineerId != null
     val returning = state.section == CoordinationSection.ReturnEquipment
+    val header: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            CoordinationSummary(state, userName, engineers, detail, onRegion)
+            if (offline) Text("Сохранённые данные. Для обновления подключитесь к сети.", style = MaterialTheme.typography.bodySmall)
+            listOfNotNull(state.errorMessage, state.statusErrorMessage).distinct().forEach { error ->
+                Text(error, color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+    if (group != null && requests.isEmpty()) {
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            header()
+            ActiveRequestsEmptyState(Modifier.weight(1f).fillMaxWidth())
+        }
+        return
+    }
     LazyVerticalGrid(GridCells.Fixed(if (width == AppWidthClass.Compact) 1 else 2), contentPadding = PaddingValues(16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
         item("summary", span = { GridItemSpan(maxLineSpan) }) {
-            CoordinationSummary(state, userName, engineers, detail, onRegion)
-        }
-        if (offline) item("offline", span = { GridItemSpan(maxLineSpan) }) { Text("Сохранённые данные. Для обновления подключитесь к сети.", style = MaterialTheme.typography.bodySmall) }
-        listOfNotNull(state.errorMessage, state.statusErrorMessage).distinct().forEachIndexed { index, error ->
-            item("error-$index", span = { GridItemSpan(maxLineSpan) }) { Text(error, color = MaterialTheme.colorScheme.error) }
+            header()
         }
         when {
             state.isLoading && group == null -> item("loading", span = { GridItemSpan(maxLineSpan) }) { Row(Modifier.padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) { CircularProgressIndicator(Modifier.size(22.dp)); Text("Загружаю активные заявки") } }
             group == null -> item("no-cache", span = { GridItemSpan(maxLineSpan) }) { CoordinationMessage("Нет сохранённых данных", "Подключитесь к интернету и обновите координацию.") }
-            requests.isEmpty() -> item("empty", span = { GridItemSpan(maxLineSpan) }) { CoordinationMessage(if (returning) "Заявок «Возврат ТО» нет" else "Активных заявок нет", when {
-                state.errorMessage != null -> "В последних сохранённых данных активных заявок нет."
-                returning -> "У текущего пользователя нет активных заявок этого типа."
-                detail && state.selectedEngineerId == CoordinationEngineer.UNASSIGNED_ID -> "Все активные заявки региона уже назначены инженерам."
-                detail -> "У инженера больше нет активных заявок в выбранном регионе."
-                else -> "В выбранном регионе нет активных заявок."
-            }) }
             !detail && !returning -> {
                 item("engineers-title", span = { GridItemSpan(maxLineSpan) }) { Column { Text("Распределение", style = MaterialTheme.typography.titleMedium); Text("По инженерам и без назначения", style = MaterialTheme.typography.bodySmall) } }
                 items(engineers, key = { it.id }) { engineer -> AppCard(onClick = { onEngineer(engineer.id) }) {

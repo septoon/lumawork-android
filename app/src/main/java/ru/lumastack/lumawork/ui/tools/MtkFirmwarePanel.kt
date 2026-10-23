@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import ru.lumastack.lumawork.R
 import ru.lumastack.lumawork.data.ftp.FtpItem
 import ru.lumastack.lumawork.data.tools.*
 
@@ -35,7 +36,7 @@ internal fun MtkFirmwarePanel(state: MtkFirmwareUiState, tools: ToolsUiState, on
     var composition by remember(state.firmware?.sha256) { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        ToolsStepCard(1, "Терминал", colors.orange, decoration = ToolsIcons.terminal) {
+        ToolsStepCard(1, "Терминал", colors.orange, artwork = R.drawable.tools_unitodi_p8) {
             Text("UniTodi P8", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         }
         ToolsStepCard(2, "Комплект прошивки", colors.mint) {

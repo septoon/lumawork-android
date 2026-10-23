@@ -2,8 +2,10 @@ package ru.lumastack.lumawork.ui.requests
 
 import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -22,6 +25,8 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -46,13 +51,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import ru.lumastack.lumawork.R
 import ru.lumastack.lumawork.domain.simpleone.ActiveRequestsSortOrder
 import ru.lumastack.lumawork.domain.simpleone.ActiveRequestsStatusFilter
 import ru.lumastack.lumawork.domain.simpleone.ClosedArchiveSource
@@ -109,6 +117,8 @@ fun RequestsScreen(
     val selected = state.selectedRequest
     val listState = rememberLazyGridState()
     val savedLists = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    val showsDetailPane = widthClass == AppWidthClass.Expanded && selected != null
+    val listWidthClass = if (showsDetailPane) AppWidthClass.Compact else widthClass
     BackHandler(enabled = selected != null, onBack = actions.onCloseRequest)
     val list: @Composable () -> Unit = {
         if (state.mode == RequestsMode.Closed) {
@@ -116,19 +126,18 @@ fun RequestsScreen(
             PullToRefreshBox(isRefreshing = state.isClosedLoading, onRefresh = actions.onRefresh) {
                 ClosedRequestsContent(state.closedArchiveItems, state.searchQuery, actions.onSearchQueryChange,
                     state.isClosedLoading, state.hasLoadedClosedArchive, state.isOffline || !state.isAuthorized,
-                    actions.onOpenRequest, onOpenTerminal, personalComment = personalComment)
+                    actions.onOpenRequest, onOpenTerminal, personalComment = personalComment, widthClass = listWidthClass)
             }
             }
-        } else RequestsListContent(state, if (widthClass == AppWidthClass.Expanded) AppWidthClass.Compact else widthClass, actions, listState, personalComment, onOpenTerminal)
+        } else RequestsListContent(state, listWidthClass, actions, listState, personalComment, onOpenTerminal)
     }
     Column(modifier.fillMaxSize()) {
         if (selected == null || widthClass == AppWidthClass.Expanded) toolbar()
-        if (widthClass == AppWidthClass.Expanded) {
+        if (showsDetailPane) {
             Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 AppPanel(Modifier.weight(.43f).fillMaxHeight()) { list() }
                 AppPanel(Modifier.weight(.57f).fillMaxHeight()) {
-                    if (selected != null) detail(selected)
-                    else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Выберите заявку") }
+                    detail(selected)
                 }
             }
         } else if (selected != null) detail(selected) else list()
@@ -148,7 +157,7 @@ private fun RequestsListContent(
     val columns = when (widthClass) {
         AppWidthClass.Compact -> 1
         AppWidthClass.Medium -> 2
-        AppWidthClass.Expanded -> 3
+        AppWidthClass.Expanded -> 2
     }
     val activeRequests = remember(
         state.activeRequests,
@@ -176,6 +185,13 @@ private fun RequestsListContent(
         },
         modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize(),
     ) {
+        if (state.mode == RequestsMode.Active && state.isAuthorized && !state.isLoading && visibleRequests.isEmpty()) {
+            Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                RequestsSearchAndFilters(state = state, count = 0, actions = actions)
+                ActiveRequestsEmptyState(Modifier.weight(1f).fillMaxWidth())
+            }
+            return@PullToRefreshBox
+        }
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(columns),
@@ -206,9 +222,35 @@ private fun RequestsListContent(
                 }
             } else {
                 items(visibleRequests, key = SimpleOneRequest::id) { request ->
-                    RequestCard(request, request.id == state.selectedRequest?.id, { actions.onOpenRequest(request) }, onOpenTerminal, personalComment)
+                    RequestCard(request, request.id == state.selectedRequest?.id, { actions.onOpenRequest(request) }, onOpenTerminal, personalComment, compact = columns > 1)
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun ActiveRequestsEmptyState(modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier) {
+        val viewportHeight = maxHeight
+        val imageSize = minOf(240.dp, viewportHeight * .65f)
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                .heightIn(min = viewportHeight).padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
+        ) {
+            Image(
+                painter = painterResource(R.drawable.active_requests_empty),
+                contentDescription = null,
+                modifier = Modifier.size(imageSize),
+            )
+            Text(
+                text = "Активных заявок нет",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }
@@ -314,7 +356,7 @@ private fun EmptyRequestsCard(state: SimpleOneUiState) {
                 state.mode == RequestsMode.Closed && state.isClosedLoading -> "Загружаем архив…"
                 state.mode == RequestsMode.Closed && !state.isAuthorized -> "Войдите в SimpleOne, чтобы загрузить архив."
                 state.mode == RequestsMode.Closed -> "Закрытых заявок по поиску нет."
-                state.isAuthorized && !state.isLoading -> "Активных заявок по текущему фильтру нет."
+                state.isAuthorized && !state.isLoading -> "Активных заявок нет"
                 !state.isAuthorized -> "После входа здесь появятся активные заявки."
                 else -> "Загружаю заявки…"
             },
@@ -391,39 +433,33 @@ internal fun SimpleOneConnectionCard(
 
 @Composable
 private fun RequestCard(request: SimpleOneRequest, selected: Boolean, onClick: () -> Unit,
-    onOpenTerminal: (String) -> Unit, personalComment: @Composable (SimpleOneRequest) -> Unit) {
+    onOpenTerminal: (String) -> Unit, personalComment: @Composable (SimpleOneRequest) -> Unit, compact: Boolean) {
     val data = remember(request) { ru.lumastack.lumawork.domain.requests.RequestDetailsData(request) }
     val type = ru.lumastack.lumawork.domain.requests.closedRequestTypeTitle(data.type)
-    AppCard(onClick = onClick, border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-        modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(Modifier.weight(1f)) {
-                    Text(data.number, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    if (data.number != request.number) Text(request.number, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Surface(shape = RoundedCornerShape(12.dp), color = closedTypeColor(type)) {
-                    Text(type.ifBlank { "Тип не указан" }, Modifier.widthIn(max = 150.dp).padding(horizontal = 10.dp, vertical = 6.dp),
-                        color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.labelMedium)
-                }
+    RequestStatusCard(request.displayState, closed = false, onClick = onClick, compact = compact,
+        border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(data.number, style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                if (data.number != request.number) Text(request.number, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            request.registeredDateTime()?.let { RequestCardInfo("Зарегистрирована", it.format(DEADLINE_FORMATTER)) }
-            request.deadlineDateTime()?.let { RequestCardInfo("Предельный срок", it.format(DEADLINE_FORMATTER)) }
-            request.slaStatusText()?.let { Text(it, color = if (request.isOverdue()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
-            if (request.contactPhone.isNotBlank()) RequestCardInfo("Телефон", request.contactPhone)
-            RequestCardInfo("Заказчик", data.legalName.ifBlank { "Информация отсутствует" })
-            Column {
-                Text("Адрес", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(data.address.ifBlank { "Информация отсутствует" }, style = MaterialTheme.typography.bodyMedium)
+            Surface(shape = RoundedCornerShape(12.dp), color = closedTypeColor(type)) {
+                Text(type.ifBlank { "Тип не указан" }, Modifier.widthIn(max = if (compact) 110.dp else 150.dp).padding(horizontal = 10.dp, vertical = 6.dp),
+                    color = androidx.compose.ui.graphics.Color.White, style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
             }
-            if (data.terminal.isNotBlank()) RequestTerminalRow(data.terminal, onOpenTerminal)
-            personalComment(request)
         }
-        Surface(color = requestStatusColor(request.displayState, closed = false)) {
-            Text(request.displayState, Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
-                color = requestStatusTextColor(request.displayState), style = MaterialTheme.typography.labelLarge)
+        request.registeredDateTime()?.let { RequestCardInfo("Зарегистрирована", it.format(DEADLINE_FORMATTER)) }
+        request.deadlineDateTime()?.let { RequestCardInfo("Предельный срок", it.format(DEADLINE_FORMATTER)) }
+        request.slaStatusText()?.let { Text(it, color = if (request.isOverdue()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+        if (request.contactPhone.isNotBlank()) RequestCardInfo("Телефон", request.contactPhone)
+        RequestCardInfo("Заказчик", data.legalName.ifBlank { "Информация отсутствует" })
+        Column {
+            Text("Адрес", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(data.address.ifBlank { "Информация отсутствует" }, style = MaterialTheme.typography.bodyMedium)
         }
+        if (data.terminal.isNotBlank()) RequestTerminalRow(data.terminal, onOpenTerminal)
+        personalComment(request)
     }
 }
 @Composable

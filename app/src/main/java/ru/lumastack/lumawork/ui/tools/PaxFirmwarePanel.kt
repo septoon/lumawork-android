@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import ru.lumastack.lumawork.R
 import ru.lumastack.lumawork.data.tools.*
 import ru.lumastack.lumawork.ui.theme.AppTextField
 
@@ -66,7 +67,12 @@ internal fun PaxFirmwarePanel(
         !(state.paxModel == PaxModel.S210 && state.installMode == PaxInstallMode.RemoveMainApp)
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        ToolsStepCard(1, "Модель PAX", colors.orange, decoration = ToolsIcons.terminal) {
+        ToolsStepCard(1, "Модель PAX", colors.orange, artwork = when (state.paxModel) {
+            PaxModel.D230 -> R.drawable.tools_pax_d230
+            PaxModel.D270 -> R.drawable.tools_pax_d270
+            PaxModel.Q25 -> R.drawable.tools_pax_q25
+            PaxModel.S210 -> R.drawable.tools_pax_s210
+        }) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PaxModel.entries.forEach { model ->
                     ToolsChoiceChip(model.name, state.paxModel == model, { onModel(model) }, enabled = !busy,
