@@ -1,10 +1,12 @@
 package ru.lumastack.lumawork.ui.home
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
@@ -55,10 +57,13 @@ import ru.lumastack.lumawork.ui.theme.AppCard
 @Composable
 internal fun RouteArchiveSheet(
     state: RouteUiState, session: AppSession, offline: Boolean, repository: RouteRepository,
-    onDismiss: () -> Unit, onOdometerChange: (String) -> Unit,
+    onDismiss: () -> Unit, onOdometerChange: (String) -> Unit, onDeleteDay: suspend (String) -> Unit,
     embedded: Boolean = false, modifier: Modifier = Modifier, refreshRevision: Int = 0,
     onReportMessage: (String) -> Unit = {},
 ) {
+    var contextDay by remember { mutableStateOf<String?>(null) }
+    var confirmDeleteDay by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf(false) }
     var monthKey by rememberSaveable { mutableStateOf(state.record.date.take(7)) }
     var selectedDay by rememberSaveable { mutableStateOf<String?>(state.record.date) }
     var records by remember { mutableStateOf(emptyList<RouteDayRecord>()) }
@@ -95,13 +100,14 @@ internal fun RouteArchiveSheet(
         (records + listOf(state.record).filter { it.date.startsWith(monthKey) && (it.hasWorkData() || it.distanceKm != null || it.sent) })
             .associateBy { it.workType.storageKey(it.date) }.values.toList()
     }
+    BackHandler(enabled = deleting) { }
     val archiveContent: @Composable () -> Unit = {
         LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(if (embedded) 16.dp else 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (embedded) "Архив маршрутов" else "Все маршруты", style = if (embedded) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { revision++ }, enabled = !loading) { Text("Обновить") }
-                    if (!embedded) TextButton(onClick = onDismiss) { Text("Готово") }
+                    TextButton(onClick = { revision++ }, enabled = !loading && !deleting) { Text("Обновить") }
+                    if (!embedded) TextButton(enabled = !deleting, onClick = onDismiss) { Text("Готово") }
                 }
             }
             if (!embedded) item {
@@ -164,11 +170,18 @@ internal fun RouteArchiveSheet(
                                             hasRecords -> MaterialTheme.colorScheme.onSurface
                                             else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f)
                                         }
-                                        Surface(modifier = Modifier.weight(1f).clip(shape)
-                                            .clickable(enabled = hasRecords, role = Role.Button) {
-                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                selectedDay = if (selected) null else key
-                                            }.semantics(mergeDescendants = true) {
+                                        Box(Modifier.weight(1f)) {
+                                        Surface(modifier = Modifier.fillMaxWidth().clip(shape)
+                                            .combinedClickable(enabled = hasRecords && !deleting, role = Role.Button,
+                                                onClick = {
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    selectedDay = if (selected) null else key
+                                                }, onLongClickLabel = "Удалить день из архива", onLongClick = {
+                                                    if (!loading && !state.isSending && !state.isDeletingArchivedDay) {
+                                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        contextDay = key
+                                                    }
+                                                }).semantics(mergeDescendants = true) {
                                                 contentDescription = "${date.format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.forLanguageTag("ru")))}, " +
                                                     if (hasRecords) "${dayRecords.joinToString(" и ") { it.workType.title }}, $distance" else "маршрута нет"
                                             }, shape = shape,
@@ -193,6 +206,12 @@ internal fun RouteArchiveSheet(
                                                         minFontSize = distanceStyle.fontSize * .72f, maxFontSize = distanceStyle.fontSize))
                                             }
                                         }
+                                        DropdownMenu(expanded = contextDay == key, onDismissRequest = { contextDay = null }) {
+                                            DropdownMenuItem(text = { Text("Удалить день из архива", color = MaterialTheme.colorScheme.error) },
+                                                enabled = !loading && !deleting && !offline && !state.isSending,
+                                                onClick = { contextDay = null; confirmDeleteDay = key })
+                                        }
+                                        }
                                     }
                                 }
                             }
@@ -200,7 +219,7 @@ internal fun RouteArchiveSheet(
                     }
                 }
             }
-            if (loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            if (loading || deleting) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             item {
                 val editable = monthKey == state.record.date.take(7)
@@ -242,13 +261,32 @@ internal fun RouteArchiveSheet(
     }
     if (embedded) archiveContent() else {
         ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim,
-            onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+            onDismissRequest = { if (!deleting) onDismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
             Box(Modifier.fillMaxWidth()) {
                 archiveContent()
                 RouteReportMessage(reportMessage, onDismiss = { reportMessage = null },
                     modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
             }
         }
+    }
+    confirmDeleteDay?.let { date ->
+        AlertDialog(onDismissRequest = { if (!deleting) confirmDeleteDay = null },
+            title = { Text("Удалить день из архива?") },
+            text = { Text("День $date будет удалён из архива и исключён из последующих ГСМ-отчётов. Его можно будет добавить заново. Уже отправленные отчёты не изменятся.") },
+            confirmButton = { TextButton(enabled = !deleting && !loading && !offline && !state.isSending, onClick = {
+                deleting = true
+                scope.launch {
+                    try {
+                        onDeleteDay(date)
+                        records = records.filter { it.date != date }
+                        if (selectedDay == date) selectedDay = null
+                        confirmDeleteDay = null
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { error = failure.message ?: "Не удалось удалить день из архива."; confirmDeleteDay = null }
+                    finally { deleting = false }
+                }
+            }) { Text("Удалить", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(enabled = !deleting, onClick = { confirmDeleteDay = null }) { Text("Отмена") } })
     }
     if (odometerOpen) {
         var draft by rememberSaveable { mutableStateOf(state.odometerText) }

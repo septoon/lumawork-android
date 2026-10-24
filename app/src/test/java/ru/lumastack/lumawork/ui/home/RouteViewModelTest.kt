@@ -332,6 +332,85 @@ class RouteViewModelTest {
         assertEquals(9000, model.state.value.record.periodStartOdometer)
     }
 
+    @Test fun `deleting day clears both work types and queue and resets current draft`() = runTest(dispatcher) {
+        api.responseFor(today).complete(defaultRouteDay(today.toString(), settings).copy(distanceKm = 20, sent = true))
+        val model = model()
+        advanceUntilIdle()
+        cache.days[RouteWorkType.Arm.storageKey(today.toString())] = defaultRouteDay(today.toString(), settings, RouteWorkType.Arm).copy(queuedForSend = true)
+        cache.days["2026-10-15"] = defaultRouteDay("2026-10-15", settings).copy(distanceKm = 12)
+        model.deleteArchivedDay(today.toString())
+        advanceUntilIdle()
+        assertNull(cache.days[today.toString()])
+        assertNull(cache.days[RouteWorkType.Arm.storageKey(today.toString())])
+        assertEquals(12, cache.days["2026-10-15"]?.distanceKm)
+        assertTrue(cache.readQueued(session.user.id).isEmpty())
+        assertFalse(model.state.value.record.sent)
+        assertNull(model.state.value.record.distanceKm)
+        assertFalse(model.state.value.isDeletingArchivedDay)
+        assertEquals(listOf(today.toString()), api.deleted)
+    }
+
+    @Test fun `failed deletion preserves saved day and active state`() = runTest(dispatcher) {
+        val saved = defaultRouteDay(today.toString(), settings).copy(distanceKm = 20, sent = true)
+        api.responseFor(today).complete(saved)
+        val model = model()
+        advanceUntilIdle()
+        api.deleteFailure = IllegalStateException("server failed")
+        try { model.deleteArchivedDay(today.toString()); org.junit.Assert.fail("Must report failure") }
+        catch (_: IllegalStateException) { }
+        assertEquals(saved, cache.days[today.toString()])
+        assertEquals(saved, model.state.value.record)
+        assertFalse(model.state.value.isDeletingArchivedDay)
+    }
+
+    @Test fun `late response after deletion cannot restore the removed day`() = runTest(dispatcher) {
+        val model = model()
+        runCurrent()
+        model.deleteArchivedDay(today.toString())
+        api.responseFor(today).complete(defaultRouteDay(today.toString(), settings).copy(distanceKm = 999, sent = true))
+        advanceUntilIdle()
+        assertNull(cache.days[today.toString()])
+        assertNull(model.state.value.record.distanceKm)
+        assertFalse(model.state.value.record.sent)
+    }
+
+    @Test fun `deleted date cannot be automatically repopulated by closed requests after reentry`() = runTest(dispatcher) {
+        api.responseFor(today).complete(null)
+        val model = model()
+        advanceUntilIdle()
+        model.deleteArchivedDay(today.toString())
+        // Explicit editing is allowed, automatic closed-request import is suppressed even after a new ViewModel.
+        val reopened = model()
+        advanceUntilIdle()
+        reopened.autoImportClosedRequests(listOf(SimpleOneRequest(sysId = "closed", number = "REQ", address = "Клиент", closedAt = "16.10.2026 12:00:00")))
+        assertFalse(reopened.state.value.record.hasWorkDataForTest())
+        reopened.updateStop(reopened.state.value.record.stops[1].id, "Добавлено вручную", "REQ")
+        advanceUntilIdle()
+        assertTrue(reopened.state.value.record.hasWorkDataForTest())
+    }
+
+    @Test fun `explicit readd survives network failure exclusions sync and queued retry`() = runTest(dispatcher) {
+        api.responseFor(today).complete(null)
+        val model = model()
+        advanceUntilIdle()
+        model.deleteArchivedDay(today.toString())
+        model.updateStop(model.state.value.record.stops[1].id, "Повторно добавленный клиент", "0001")
+        model.updateDistance("12")
+        model.updateOdometer("1000")
+        api.sendFailure = ru.lumastack.lumawork.data.route.RouteFailure.Network(java.io.IOException("offline"))
+        model.send()
+        advanceUntilIdle()
+        assertTrue(model.state.value.record.queuedForSend)
+        api.sendFailure = null
+        val reopened = model()
+        advanceUntilIdle()
+        assertTrue(reopened.state.value.record.sent)
+        assertFalse(reopened.state.value.record.queuedForSend)
+        assertEquals("Повторно добавленный клиент", reopened.state.value.record.stops[1].address)
+        assertEquals(2, api.sent.size)
+        assertTrue(cache.pendingRestores(session.user.id).isEmpty())
+    }
+
     private fun RouteDayRecord.hasWorkDataForTest() = stops.drop(1).dropLast(1).any { it.address.isNotBlank() || it.requestNumber.isNotBlank() }
 
     private fun model(offline: Boolean = false) = RouteViewModel(RouteRepository(api, cache), session, offline, today)
@@ -340,6 +419,12 @@ class RouteViewModelTest {
 private class MemoryRouteCache : RouteCache {
     val days = mutableMapOf<String, RouteDayRecord>()
     private val odometers = mutableMapOf<String, Int?>()
+    private var excluded = emptySet<String>()
+    private var pending = emptySet<String>()
+    override suspend fun pendingRestores(userId: String) = pending
+    override suspend fun savePendingRestores(userId: String, dates: Set<String>) { pending = dates }
+    override suspend fun excludedDates(userId: String) = excluded
+    override suspend fun saveExcludedDates(userId: String, dates: Set<String>) { excluded = dates; days.entries.removeAll { it.value.date in dates && it.value.date !in pending && (it.value.sent || it.value.queuedForSend) } }
     override suspend fun hasOdometerSetting(userId: String, monthKey: String) = odometers.containsKey(monthKey) || readOdometer(userId, monthKey) != null
     override suspend fun readOdometer(userId: String, monthKey: String) = if (odometers.containsKey(monthKey)) odometers[monthKey] else days.values.firstNotNullOfOrNull { it.periodStartOdometer.takeIf { _ -> it.date.startsWith(monthKey) } }
     override suspend fun saveOdometer(userId: String, monthKey: String, value: Int?) { odometers[monthKey] = value }
@@ -347,6 +432,7 @@ private class MemoryRouteCache : RouteCache {
     override suspend fun readQueued(userId: String) = days.values.filter { it.queuedForSend }
     override suspend fun readMonth(userId: String, monthKey: String) = days.values.filter { it.date.startsWith("$monthKey-") }
     override suspend fun save(userId: String, record: RouteDayRecord) { days[record.workType.storageKey(record.date)] = record }
+    override suspend fun deleteDay(userId: String, date: String) { days.entries.removeAll { it.value.date == date }; excluded = excluded + date }
 }
 
 private class DeferredRouteApi : RouteApi {
@@ -354,6 +440,10 @@ private class DeferredRouteApi : RouteApi {
     fun responseFor(date: LocalDate, workType: RouteWorkType = RouteWorkType.Pos) = responses.getOrPut(workType.storageKey(date.toString())) { CompletableDeferred() }
     var suggestedValue: Int? = null
     override suspend fun suggestedOdometer(token: String, month: String): Int? = suggestedValue
+    val deleted = mutableListOf<String>()
+    override suspend fun excludedDates(token: String) = deleted.toSet()
+    var deleteFailure: Exception? = null
+    override suspend fun deleteDay(token: String, date: String) { deleteFailure?.let { throw it }; deleted += date }
     var sendGate: CompletableDeferred<Unit>? = null
     var sendFailure: Exception? = null
     val sent = mutableListOf<RouteDayRecord>()

@@ -17,6 +17,11 @@ interface RouteCache {
     suspend fun hasOdometerSetting(userId: String, monthKey: String): Boolean = readOdometer(userId, monthKey) != null
     suspend fun readOdometer(userId: String, monthKey: String): Int? = readMonth(userId, monthKey).firstNotNullOfOrNull { it.periodStartOdometer }
     suspend fun saveOdometer(userId: String, monthKey: String, value: Int?) {}
+    suspend fun pendingRestores(userId: String): Set<String> = emptySet()
+    suspend fun savePendingRestores(userId: String, dates: Set<String>) {}
+    suspend fun excludedDates(userId: String): Set<String> = emptySet()
+    suspend fun saveExcludedDates(userId: String, dates: Set<String>) {}
+    suspend fun deleteDay(userId: String, date: String) { throw UnsupportedOperationException("Удаление маршрута недоступно.") }
     suspend fun save(userId: String, record: RouteDayRecord)
 }
 
@@ -58,6 +63,36 @@ class SharedPreferencesRouteCache(
 
     override suspend fun saveOdometer(userId: String, monthKey: String, value: Int?) = withContext(Dispatchers.IO) {
         preferences.edit { putInt("odometer_${userId.sha256()}_$monthKey", value ?: -1) }
+    }
+
+    override suspend fun pendingRestores(userId: String): Set<String> = withContext(Dispatchers.IO) {
+        preferences.getStringSet("restores_${userId.sha256()}", emptySet())!!.toSet()
+    }
+    override suspend fun savePendingRestores(userId: String, dates: Set<String>) = withContext(Dispatchers.IO) {
+        preferences.edit(commit = true) { putStringSet("restores_${userId.sha256()}", dates) }
+    }
+
+    override suspend fun excludedDates(userId: String): Set<String> = withContext(Dispatchers.IO) {
+        preferences.getStringSet("excluded_${userId.sha256()}", emptySet())!!.toSet()
+    }
+    override suspend fun saveExcludedDates(userId: String, dates: Set<String>) = withContext(Dispatchers.IO) {
+        preferences.edit(commit = true) { putStringSet("excluded_${userId.sha256()}", dates) }
+        val pending = pendingRestores(userId)
+        val prefix = "day_${userId.sha256()}_"
+        val obsolete = preferences.all.filterKeys { it.startsWith(prefix) }.mapNotNull { (_, value) ->
+            (value as? String)?.let { runCatching { json.decodeFromString<RouteDayRecord>(it) }.getOrNull() }
+        }.filter { it.date in dates && it.date !in pending && (it.sent || it.queuedForSend) }
+        obsolete.forEach { deleteDay(userId, it.date) }
+    }
+
+    override suspend fun deleteDay(userId: String, date: String) = withContext(Dispatchers.IO) {
+        val excluded = excludedDates(userId) + date
+        savePendingRestores(userId, pendingRestores(userId) - date)
+        preferences.edit(commit = true) {
+            putStringSet("excluded_${userId.sha256()}", excluded)
+            RouteWorkType.entries.forEach { remove(key(userId, it.storageKey(date))) }
+        }
+        Unit
     }
 
     override suspend fun save(userId: String, record: RouteDayRecord) = withContext(Dispatchers.IO) {

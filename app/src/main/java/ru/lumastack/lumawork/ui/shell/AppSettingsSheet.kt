@@ -51,6 +51,7 @@ import ru.lumastack.lumawork.ui.adaptive.appContentWidthClass
 import ru.lumastack.lumawork.ui.auto.AutoViewModel
 import ru.lumastack.lumawork.ui.auto.VehicleEditor
 import ru.lumastack.lumawork.ui.feedback.FeedbackRoute
+import ru.lumastack.lumawork.ui.gsm.GsmDeliverySettingsScreen
 import ru.lumastack.lumawork.ui.gsm.GsmProfileSettingsScreen
 import ru.lumastack.lumawork.ui.notifications.NotificationSettingsScreen
 import ru.lumastack.lumawork.ui.profile.ProfileAvatarEditor
@@ -62,7 +63,7 @@ import ru.lumastack.lumawork.ui.theme.appTopBarColors
 import ru.lumastack.lumawork.ui.theme.AppPanel
 
 private enum class SettingsPage(val title: String) {
-    Root("Настройки"), Appearance("Оформление"), Screens("Экраны"), Route("Маршрут"), Gsm("ГСМ профиль"), Notifications("Уведомления")
+    Root("Настройки"), Appearance("Оформление"), Screens("Экраны"), Route("Маршрут"), Gsm("ГСМ профиль"), GsmDelivery("Отправка ГСМ отчета"), Notifications("Уведомления")
 }
 
 private enum class SettingsIcon(val color: Color, path: String) {
@@ -115,6 +116,7 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                         onBack = { page = SettingsPage.Root }, onAddVehicle = { addVehicle = true },
                         onSaved = { saved -> onGsmProfileSaved(); fuel.setFuelTypes(session.user.id, saved.fuelTypes.ifEmpty { listOf(saved.fuelType) }) })
                     SettingsPage.Notifications -> NotificationSettingsScreen(session, offline) { page = SettingsPage.Root }
+                    SettingsPage.GsmDelivery -> GsmDeliverySettingsScreen(session, offline) { page = SettingsPage.Root }
                     SettingsPage.Route -> RouteSettingsPage(session, offline, auth) { page = SettingsPage.Root }
                     else -> {
                         BackHandler { back() }
@@ -140,6 +142,7 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                                         item { SettingsLink("ГСМ профиль", SettingsIcon.Fuel, !busy) { page = SettingsPage.Gsm } }
                                         item { SettingsSectionLabel("Маршрут") }
                                         item { SettingsLink("Старт и финиш", SettingsIcon.Route, !busy) { page = SettingsPage.Route } }
+                                        item { SettingsLink("Отправка ГСМ отчета", SettingsIcon.Notifications, !busy) { page = SettingsPage.GsmDelivery } }
                                         item { SettingsSectionLabel("Приложение") }
                                         item { SettingsLink("Уведомления", SettingsIcon.Notifications, !busy) { page = SettingsPage.Notifications } }
                                         item { SettingsLink("Экраны", SettingsIcon.Screens, !busy) { page = SettingsPage.Screens } }

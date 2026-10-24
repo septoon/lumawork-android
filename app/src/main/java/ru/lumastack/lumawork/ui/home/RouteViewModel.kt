@@ -38,6 +38,7 @@ data class RouteUiState(
     val dateTitle: String,
     val settings: RouteSettings,
     val isRefreshing: Boolean = true,
+    val isDeletingArchivedDay: Boolean = false,
     val isSending: Boolean = false,
     val sentReport: RouteDayRecord? = null,
     val officeAddresses: List<String> = emptyList(),
@@ -47,7 +48,7 @@ data class RouteUiState(
 ) {
     val distanceText: String get() = record.distanceKm?.toString().orEmpty()
     val odometerText: String get() = record.periodStartOdometer?.toString().orEmpty()
-    val canSend: Boolean get() = !isSending && reportValidationError(record) == null
+    val canSend: Boolean get() = !isDeletingArchivedDay && !isSending && reportValidationError(record) == null
 }
 
 class RouteViewModel(
@@ -61,6 +62,7 @@ class RouteViewModel(
     private var loadJob: Job? = null
     private var generation = 0L
     private var editRevision = 0L
+    private var excludedDates = emptySet<String>()
     private val requestedOdometerMonths = mutableSetOf<String>()
     private var odometerRevision = 0L
     private var isProcessingQueue = false
@@ -100,18 +102,21 @@ class RouteViewModel(
     }
 
     fun refresh() {
+        if (state.value.isDeletingArchivedDay) return
         if (state.value.isRefreshing || state.value.isSending) return
         mutableState.update { it.copy(isRefreshing = true) }
         load()
     }
 
     fun selectDate(date: LocalDate) {
+        if (state.value.isDeletingArchivedDay) return
         if (date.toString() == state.value.record.date) return
         mutableState.value = dayState(date, state.value.record.workType).copy(isSending = state.value.isSending, officeAddresses = state.value.officeAddresses, isLoadingOffices = state.value.isLoadingOffices)
         load()
     }
 
     fun selectWorkType(workType: RouteWorkType) {
+        if (state.value.isDeletingArchivedDay) return
         if (state.value.record.workType == workType) return
         mutableState.value = dayState(LocalDate.parse(state.value.record.date), workType).copy(isSending = state.value.isSending, officeAddresses = state.value.officeAddresses, isLoadingOffices = state.value.isLoadingOffices)
         load()
@@ -133,7 +138,7 @@ class RouteViewModel(
 
     fun autoImportClosedRequests(requests: List<SimpleOneRequest>) {
         val current = state.value
-        if (current.isRefreshing || current.record.workType != RouteWorkType.Pos || current.record.hasWorkData()) return
+        if (current.record.date in excludedDates || current.isDeletingArchivedDay || current.isRefreshing || current.record.workType != RouteWorkType.Pos || current.record.hasWorkData()) return
         val template = closedRouteTemplate(requests, current.record.date, settings.startAddress)
         if (template.isEmpty()) return
         edit { record -> record.copy(stops = listOf(record.stops.first()) + template.map { request ->
@@ -143,6 +148,30 @@ class RouteViewModel(
                         ?: request.shortDescription.takeIf { it.startsWith("SUTS") } ?: request.number
                 })
         } + record.stops.last(), distanceKm = null) }
+    }
+
+    suspend fun deleteArchivedDay(date: String) {
+        if (startOffline) throw IllegalStateException("Для удаления требуется подключение к интернету.")
+        if (isProcessingQueue || state.value.isSending || state.value.isDeletingArchivedDay) {
+            throw IllegalStateException("Дождитесь завершения отправки маршрута.")
+        }
+        mutableState.update { it.copy(isDeletingArchivedDay = true) }
+        ++generation
+        loadJob?.cancel()
+        try {
+            persistMutex.withLock {
+                repository.deleteDay(session, date)
+                excludedDates = excludedDates + date
+                editRevision++
+                if (state.value.record.date == date) {
+                    val cleared = defaultRouteDay(date, settings, state.value.record.workType)
+                        .copy(periodStartOdometer = state.value.record.periodStartOdometer)
+                    mutableState.update { it.copy(record = cleared, sentReport = null) }
+                }
+            }
+        } finally {
+            mutableState.update { it.copy(isDeletingArchivedDay = false, isRefreshing = false) }
+        }
     }
 
     fun dismissSentReport() { mutableState.update { it.copy(sentReport = null) } }
@@ -210,7 +239,7 @@ class RouteViewModel(
     }
 
     fun send() {
-        if (isProcessingQueue || state.value.isSending) return
+        if (state.value.isDeletingArchivedDay || isProcessingQueue || state.value.isSending) return
         val submitted = state.value.record
         val validationError = reportValidationError(submitted)
         if (validationError != null) {
@@ -222,6 +251,7 @@ class RouteViewModel(
         viewModelScope.launch {
             try {
                 val sent = repository.send(session, submitted)
+                excludedDates = excludedDates - submitted.date
                 persistMutex.withLock {
                     // A send must not erase newer edits, even after the selected date changes.
                     if (repository.readLocal(session, submitted.date, settings, submitted.workType) == submitted) {
@@ -256,6 +286,18 @@ class RouteViewModel(
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             try {
+                excludedDates = repository.excludedDates(session)
+                if (!startOffline) {
+                    try { excludedDates = repository.syncExcludedDates(session) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Persisted exclusions still suppress automatic re-import while offline. */ }
+                }
+                if (generation != requestedGeneration) return@launch
+                val current = state.value.record
+                if (editRevision == initialRevision && date in excludedDates && date !in repository.pendingRestores(session)
+                    && (current.sent || current.queuedForSend)) {
+                    mutableState.update { it.copy(record = defaultRouteDay(date, settings, workType).copy(periodStartOdometer = current.periodStartOdometer)) }
+                }
                 val local = persistMutex.withLock { repository.readLocal(session, date, settings, workType) }
                 if (generation != requestedGeneration) return@launch
                 val odometer = repository.readOdometer(session, date.take(7))
@@ -291,11 +333,12 @@ class RouteViewModel(
     }
 
     private fun processQueue() {
-        if (startOffline || isProcessingQueue || state.value.isSending) return
+        if (state.value.isDeletingArchivedDay || startOffline || isProcessingQueue || state.value.isSending) return
         isProcessingQueue = true
         viewModelScope.launch {
             try {
                 for (queued in repository.readQueued(session)) {
+                    if (queued.date in excludedDates && queued.date !in repository.pendingRestores(session)) continue
                     val current = persistMutex.withLock { repository.readLocal(session, queued.date, settings, queued.workType) }
                     if (current == null || !current.queuedForSend || reportValidationError(current) != null) continue
                     mutableState.update { it.copy(isSending = true) }
@@ -336,6 +379,7 @@ class RouteViewModel(
     }
 
     private fun edit(transform: (RouteDayRecord) -> RouteDayRecord) {
+        if (state.value.isDeletingArchivedDay) return
         val previous = state.value.record
         val updated = transform(previous)
         if (previous == updated) return

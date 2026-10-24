@@ -5,6 +5,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -39,8 +40,24 @@ interface RouteApi {
     suspend fun fetchOfficeAddresses(token: String): List<String> = emptyList()
     suspend fun suggestedOdometer(token: String, month: String): Int? = null
     suspend fun sendGsmReport(token: String, month: String): GsmReportResult = throw RouteFailure.InvalidResponse
+    suspend fun excludedDates(token: String): Set<String> = emptySet()
+    suspend fun deleteDay(token: String, date: String) { throw RouteFailure.InvalidResponse }
+    suspend fun deliverySettings(token: String): GsmDeliverySettings { throw RouteFailure.InvalidResponse }
+    suspend fun saveDeliverySettings(token: String, settings: GsmDeliverySettings): GsmDeliverySettings { throw RouteFailure.InvalidResponse }
     suspend fun sendDay(token: String, record: RouteDayRecord)
 }
+
+@Serializable
+data class GsmDeliverySettings(
+    val autoEnabled: Boolean = true,
+    val time: String = "22:00",
+    val timeZone: String = "Europe/Simferopol",
+    val recipientEmail: String? = null,
+    val effectiveEmail: String = "",
+)
+
+@Serializable
+private data class GsmDeliverySettingsResponse(val settings: GsmDeliverySettings)
 
 data class GsmReportResult(val fileName: String, val sentToEmail: String?, val confirmsEmailDelivery: Boolean, val skipEmail: Boolean) {
     val message: String get() = if (confirmsEmailDelivery && !sentToEmail.isNullOrBlank()) "$fileName отправлен на $sentToEmail." else "$fileName сформирован."
@@ -114,6 +131,34 @@ class OkHttpRouteApi(
                 raw.boolean("sent") == true || raw.string("status").equals("SENT", true), raw.boolean("skipEmail") == true)
             if (!result.skipEmail && !result.confirmsEmailDelivery) throw RouteFailure.Http(response.code, "ГСМ отчет сформирован, но письмо не отправлено. Повторите попытку.")
             result
+        }
+    }
+
+    override suspend fun excludedDates(token: String): Set<String> =
+        execute(requestBuilder("/api/v2/routes/exclusions", token).get().build()).use { response ->
+            val root = json.parseToJsonElement(requireSuccess(response)).jsonObject
+            (root["excludedDates"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }?.toSet()
+                ?: throw RouteFailure.InvalidResponse
+        }
+
+    override suspend fun deleteDay(token: String, date: String) {
+        java.time.LocalDate.parse(date)
+        execute(requestBuilder("/api/v2/routes/$date", token).delete().build()).use(::requireSuccess)
+    }
+
+    override suspend fun deliverySettings(token: String): GsmDeliverySettings =
+        execute(requestBuilder("/api/v2/gsm/delivery-settings", token).get().build()).use {
+            json.decodeFromString<GsmDeliverySettingsResponse>(requireSuccess(it)).settings
+        }
+
+    override suspend fun saveDeliverySettings(token: String, settings: GsmDeliverySettings): GsmDeliverySettings {
+        val body = buildJsonObject {
+            put("autoEnabled", settings.autoEnabled)
+            put("time", settings.time)
+            put("recipientEmail", settings.recipientEmail?.let(::JsonPrimitive) ?: JsonNull)
+        }.toString().toRequestBody(JSON_MEDIA_TYPE)
+        return execute(requestBuilder("/api/v2/gsm/delivery-settings", token).put(body).build()).use {
+            json.decodeFromString<GsmDeliverySettingsResponse>(requireSuccess(it)).settings
         }
     }
 

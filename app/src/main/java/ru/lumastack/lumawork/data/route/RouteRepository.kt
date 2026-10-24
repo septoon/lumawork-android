@@ -19,6 +19,7 @@ class RouteRepository(
     val gsmProfileChanges = profileChanges.asSharedFlow()
     fun gsmProfileSaved(owner: String) { profileChanges.tryEmit(owner) }
     private val cacheMutex = Mutex()
+    private var archiveRevision = 0L
     suspend fun monthlyMileage(session: AppSession, monthKey: String): RouteMonthlyMileage? {
         val records = cache.readMonth(session.user.id, monthKey)
         val distanceByDate = records.mapNotNull { record ->
@@ -43,15 +44,38 @@ class RouteRepository(
     suspend fun readQueued(session: AppSession): List<RouteDayRecord> = cache.readQueued(session.user.id)
     suspend fun readMonth(session: AppSession, month: String): List<RouteDayRecord> = cache.readMonth(session.user.id, month)
     suspend fun refreshMonth(session: AppSession, month: String, settings: RouteSettings): List<RouteDayRecord> {
+        val revision = cacheMutex.withLock { archiveRevision }
         val remote = api.fetchMonth(session.token, month, settings)
-        cacheMutex.withLock {
-            remote.forEach { candidate ->
+        return cacheMutex.withLock {
+            if (revision != archiveRevision) return@withLock cache.readMonth(session.user.id, month)
+            val excluded = cache.excludedDates(session.user.id)
+            remote.filterNot { it.date in excluded }.forEach { candidate ->
                 val local = cache.read(session.user.id, candidate.date, candidate.workType)
                 if (local == null || local.sent) cache.save(session.user.id, candidate)
             }
+            remote.filterNot { it.date in excluded }
         }
-        return remote
     }
+    suspend fun pendingRestores(session: AppSession): Set<String> = cache.pendingRestores(session.user.id)
+    suspend fun excludedDates(session: AppSession): Set<String> = cache.excludedDates(session.user.id)
+    suspend fun syncExcludedDates(session: AppSession): Set<String> {
+        val revision = cacheMutex.withLock { archiveRevision }
+        val dates = try { api.excludedDates(session.token) }
+        catch (failure: RouteFailure.Http) { if (failure.status == 404) return cache.excludedDates(session.user.id) else throw failure }
+        return cacheMutex.withLock {
+            if (revision != archiveRevision) return@withLock cache.excludedDates(session.user.id)
+            cache.saveExcludedDates(session.user.id, dates)
+            dates
+        }
+    }
+    suspend fun deleteDay(session: AppSession, date: String) {
+        cacheMutex.withLock {
+            api.deleteDay(session.token, date)
+            cache.deleteDay(session.user.id, date)
+            archiveRevision++
+        }
+    }
+
     suspend fun suggestedOdometer(session: AppSession, month: String): Int? = api.suggestedOdometer(session.token, month)
     suspend fun sendGsmReport(session: AppSession, month: String): GsmReportResult = api.sendGsmReport(session.token, month)
     suspend fun officeAddresses(session: AppSession): List<String> = api.fetchOfficeAddresses(session.token)
@@ -79,7 +103,18 @@ class RouteRepository(
         session: AppSession,
         record: RouteDayRecord,
     ): RouteDayRecord {
+        cacheMutex.withLock {
+            if (record.date in cache.excludedDates(session.user.id)) {
+                cache.savePendingRestores(session.user.id, cache.pendingRestores(session.user.id) + record.date)
+                archiveRevision++
+            }
+        }
         api.sendDay(session.token, record)
+        cacheMutex.withLock {
+            cache.savePendingRestores(session.user.id, cache.pendingRestores(session.user.id) - record.date)
+            cache.saveExcludedDates(session.user.id, cache.excludedDates(session.user.id) - record.date)
+            archiveRevision++
+        }
         return record.copy(sent = true, queuedForSend = false)
     }
 }

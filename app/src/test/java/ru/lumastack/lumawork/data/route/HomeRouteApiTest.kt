@@ -20,6 +20,41 @@ class HomeRouteApiTest {
         inspect(request)
         Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(response.toResponseBody()).build()
     }.build()
+    @Test fun `delivery preferences load and save custom recipient without changing account`() = runBlocking {
+        val response = """{"settings":{"autoEnabled":false,"time":"08:35","timeZone":"Europe/Simferopol","recipientEmail":"other@example.com","effectiveEmail":"other@example.com"}}"""
+        val api = OkHttpRouteApi("https://api.test", client(response) { request ->
+            assertEquals("/api/v2/gsm/delivery-settings", request.url.encodedPath)
+            if (request.method == "PUT") {
+                val payload = Json.parseToJsonElement(Buffer().also { request.body!!.writeTo(it) }.readUtf8()).jsonObject
+                assertEquals("08:35", payload["time"]!!.jsonPrimitive.content)
+                assertEquals("false", payload["autoEnabled"]!!.jsonPrimitive.content)
+                assertEquals("other@example.com", payload["recipientEmail"]!!.jsonPrimitive.content)
+            }
+        })
+        val loaded = api.deliverySettings("token")
+        assertFalse(loaded.autoEnabled)
+        assertEquals(loaded, api.saveDeliverySettings("token", loaded))
+    }
+    @Test fun `clearing recipient sends explicit null to restore account email`() = runBlocking {
+        val response = """{"settings":{"autoEnabled":true,"time":"22:00","timeZone":"Europe/Simferopol","recipientEmail":null,"effectiveEmail":"user@example.com"}}"""
+        val api = OkHttpRouteApi("https://api.test", client(response) { request ->
+            val payload = Json.parseToJsonElement(Buffer().also { request.body!!.writeTo(it) }.readUtf8()).jsonObject
+            assertEquals(kotlinx.serialization.json.JsonNull, payload["recipientEmail"])
+        })
+        val saved = api.saveDeliverySettings("token", GsmDeliverySettings())
+        assertNull(saved.recipientEmail)
+        assertEquals("22:00", saved.time)
+        assertEquals("user@example.com", saved.effectiveEmail)
+    }
+    @Test fun `archive day delete sends authenticated date scoped DELETE`() = runBlocking {
+        val api = OkHttpRouteApi("https://api.test", client("") { request ->
+            assertEquals("DELETE", request.method)
+            assertEquals("/api/v2/routes/2026-10-23", request.url.encodedPath)
+            assertNull(request.url.queryParameter("workType"))
+        })
+        api.deleteDay("token", "2026-10-23")
+    }
+
     @Test fun `ARM query and report payload match iOS work type contract`() = runBlocking {
         val settings = RouteSettings("Склад", "Дом")
         val api = OkHttpRouteApi("https://api.test", client("""{"records":[{"date":"2026-10-16","workType":"ARM","distanceKm":22}]}""") { request ->
