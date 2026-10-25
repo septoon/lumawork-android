@@ -41,15 +41,22 @@ fun RequestsRoute(session: AppSession, repository: SimpleOneRepository, state: S
 private fun RequestsRouteContent(session: AppSession, repository: SimpleOneRepository, state: SimpleOneUiState,
     widthClass: AppWidthClass, actions: RequestsActions) {
     if (!state.initialArchiveReady) {
+        val isBusy = state.isInitializing || state.isClosedLoading || state.isLoading
         Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                AppButton(onClick = actions.onInitialLoad, enabled = !state.isInitializing && !state.isClosedLoading && !state.isLoading) {
-                    if (state.isClosedLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Text("Загрузить заявки")
+                if (isBusy) {
+                    CircularProgressIndicator(Modifier.size(36.dp), strokeWidth = 3.dp)
+                    Text(
+                        if (state.isInitializing) "Читаю заявки…" else state.archiveProgress ?: "Загружаю заявки…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                } else {
+                    AppButton(onClick = actions.onInitialLoad) { Text("Загрузить заявки") }
                 }
-                if (state.initialLoadRequested) {
-                    state.archiveProgress?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                    if (!state.showConnection) state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (state.initialLoadRequested && !state.showConnection) {
+                    state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             }
         }

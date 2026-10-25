@@ -1,7 +1,10 @@
 package ru.lumastack.lumawork.ui.home
 
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 
 import android.content.ClipData
 import androidx.compose.foundation.clickable
@@ -10,20 +13,28 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,7 +42,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import ru.lumastack.lumawork.ui.theme.AppSegmentedControl
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,7 +61,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
@@ -59,9 +73,11 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,6 +92,9 @@ import ru.lumastack.lumawork.ui.theme.AppOutlinedButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import ru.lumastack.lumawork.ui.theme.AppSurfaces
 import ru.lumastack.lumawork.ui.theme.AppCard
+import ru.lumastack.lumawork.ui.theme.LocalAppDarkTheme
+
+private val RouteSelectedGreen = Color(0xFF8CE6AE)
 
 @Composable
 internal fun RouteTimelineCard(
@@ -85,7 +104,6 @@ internal fun RouteTimelineCard(
     onRemoveStop: (String) -> Unit,
     onReorderStop: (String, String) -> Unit,
     onEndpointSelect: (RouteEndpointRole, RouteEndpointKind) -> Unit,
-    compact: Boolean = false,
 ) {
     val bounds = remember(state.record.date, state.record.workType) { mutableStateMapOf<String, Rect>() }
     var draggedId by remember(state.record.date, state.record.workType) { mutableStateOf<String?>(null) }
@@ -94,13 +112,12 @@ internal fun RouteTimelineCard(
     val currentStops by rememberUpdatedState(middleStops)
     val reorder by rememberUpdatedState(onReorderStop)
     val haptics = LocalHapticFeedback.current
+    val accent = if (LocalAppDarkTheme.current) RouteSelectedGreen else MaterialTheme.colorScheme.primary
 
-    AppCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(if (compact) 20.dp else 28.dp)) {
-        Column(Modifier.padding(horizontal = if (compact) 16.dp else 20.dp)) {
-            if (compact) Text("Маршрут", Modifier.padding(top = 16.dp, bottom = 4.dp),
-                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            RouteEndpointSection(RouteEndpointRole.Start, state, onEndpointSelect, compact)
-            HorizontalDivider()
+    AppCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
+        Column(Modifier.padding(horizontal = 18.dp)) {
+            RouteEndpointSection(RouteEndpointRole.Start, state, onEndpointSelect)
+            HorizontalDivider(color = AppSurfaces.border)
             middleStops.forEachIndexed { index, stop ->
                 key(stop.id) {
                     var menuOpen by remember { mutableStateOf(false) }
@@ -120,17 +137,17 @@ internal fun RouteTimelineCard(
                             }.padding(vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Row(Modifier.weight(1f).combinedClickable(onClick = { onEditStop(stop.id) }, onLongClick = { menuOpen = true }),
-                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                                 Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-                                    Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
-                                        Text("${index + 1}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                                        Text("${index + 1}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                                     }
                                 }
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(stop.address.ifBlank { "Адрес не указан" }, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                         style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                     Text(stop.requestNumber.ifBlank { "Номер заявки не указан" }, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                             Box(Modifier.size(48.dp).onGloballyPositioned { handleTop = it.boundsInRoot().top }
@@ -159,15 +176,18 @@ internal fun RouteTimelineCard(
                                 onClick = { menuOpen = false; pendingDelete = stop.id })
                         }
                     }
-                    HorizontalDivider(Modifier.padding(start = 42.dp))
+                    if (index < middleStops.lastIndex) HorizontalDivider(Modifier.padding(start = 50.dp), color = AppSurfaces.border)
                 }
             }
-            TextButton(onClick = onAddStop, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
+            OutlinedButton(onClick = onAddStop, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 44.dp),
+                shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, AppSurfaces.border),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = AppSurfaces.subpanel, contentColor = accent),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(22.dp))
                 Text("Добавить точку", Modifier.padding(start = 8.dp))
             }
-            HorizontalDivider()
-            RouteEndpointSection(RouteEndpointRole.Finish, state, onEndpointSelect, compact)
+            HorizontalDivider(color = AppSurfaces.border)
+            RouteEndpointSection(RouteEndpointRole.Finish, state, onEndpointSelect)
         }
     }
     if (pendingDelete != null) AlertDialog(onDismissRequest = { pendingDelete = null },
@@ -177,61 +197,59 @@ internal fun RouteTimelineCard(
 }
 
 @Composable
-private fun RouteEndpointSection(role: RouteEndpointRole, state: RouteUiState, onSelect: (RouteEndpointRole, RouteEndpointKind) -> Unit, compact: Boolean = false) {
+private fun RouteEndpointSection(role: RouteEndpointRole, state: RouteUiState, onSelect: (RouteEndpointRole, RouteEndpointKind) -> Unit) {
     val stop = if (role == RouteEndpointRole.Start) state.record.stops.first() else state.record.stops.last()
     val isHome = state.settings.homeAddress.isNotBlank() && stop.address.trim().equals(state.settings.homeAddress.trim(), ignoreCase = true)
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     fun copyAddress(address: String) { if (address.isNotBlank()) scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Адрес", address))) } }
     var copyMenuOpen by remember { mutableStateOf(false) }
-    var endpointMenuOpen by remember { mutableStateOf(false) }
-    if (compact) {
-        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(role.title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Box {
-                    androidx.compose.material3.OutlinedButton(onClick = { endpointMenuOpen = true },
-                        shape = RoundedCornerShape(10.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
-                        Text(if (isHome) "Дом" else "Склад")
-                        Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, null, Modifier.size(18.dp))
+    val haptics = LocalHapticFeedback.current
+    val selectedIndex = if (isHome) 1 else 0
+    val selectedColor = if (LocalAppDarkTheme.current) RouteSelectedGreen else MaterialTheme.colorScheme.primary
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val controlWidth = (maxWidth * .58f).coerceAtMost(240.dp)
+        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) {
+                Text(role.title, style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.combinedClickable(onClick = { copyMenuOpen = true }, onLongClick = { copyAddress(stop.address) }))
+                DropdownMenu(copyMenuOpen, onDismissRequest = { copyMenuOpen = false }) {
+                    RouteEndpointKind.entries.forEach { kind ->
+                        DropdownMenuItem(text = { Text("Копировать адрес: ${kind.title}") }, enabled = state.settings.address(kind).isNotBlank(),
+                            onClick = { copyAddress(state.settings.address(kind)); copyMenuOpen = false })
                     }
-                    DropdownMenu(endpointMenuOpen, onDismissRequest = { endpointMenuOpen = false }) {
-                        RouteEndpointKind.entries.forEach { kind ->
-                            val available = state.settings.address(kind).isNotBlank()
-                            DropdownMenuItem(text = { Text(if (available) kind.title else "${kind.title} · адрес не задан") },
-                                enabled = available, onClick = { endpointMenuOpen = false; onSelect(role, kind) })
+                }
+            }
+            Box(Modifier.width(controlWidth).heightIn(min = 48.dp).selectableGroup()) {
+                val warehouseWidth = (controlWidth - 4.dp) * .54f
+                val homeWidth = controlWidth - 4.dp - warehouseWidth
+                val indicatorOffset by animateDpAsState(if (isHome) warehouseWidth else 0.dp, tween(220), label = "route endpoint position")
+                val indicatorWidth by animateDpAsState(if (isHome) homeWidth else warehouseWidth, tween(220), label = "route endpoint width")
+                Box(Modifier.fillMaxWidth().height(44.dp).align(Alignment.Center)
+                    .background(AppSurfaces.subpanel, CircleShape).border(1.dp, AppSurfaces.border, CircleShape))
+                Box(Modifier.align(Alignment.CenterStart).offset(x = 2.dp + indicatorOffset).width(indicatorWidth).height(40.dp)
+                    .background(selectedColor, CircleShape))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
+                    RouteEndpointKind.entries.forEachIndexed { index, kind ->
+                        val enabled = kind != RouteEndpointKind.Home || state.settings.homeAddress.isNotBlank()
+                        Box(Modifier.weight(if (kind == RouteEndpointKind.Warehouse) .54f else .46f).heightIn(min = 48.dp).clip(CircleShape)
+                            .semantics { selected = selectedIndex == index; contentDescription = "${role.title}: ${kind.title}" }
+                            .combinedClickable(enabled = enabled, role = Role.Tab,
+                                onClick = {
+                                    if (selectedIndex != index) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSelect(role, kind)
+                                },
+                                onLongClick = { copyAddress(state.settings.address(kind)) }),
+                            contentAlignment = Alignment.Center) {
+                            Text(kind.title, style = MaterialTheme.typography.labelLarge, maxLines = 1,
+                                color = (if (selectedIndex == index) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    .copy(alpha = if (enabled) 1f else .38f))
                         }
                     }
                 }
             }
-            Text(stop.address.ifBlank { "Адрес не указан" }, style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.fillMaxWidth().combinedClickable(onClick = { copyMenuOpen = true }, onLongClick = { copyAddress(stop.address) }))
-            DropdownMenu(copyMenuOpen, onDismissRequest = { copyMenuOpen = false }) {
-                DropdownMenuItem(text = { Text("Копировать адрес") }, enabled = stop.address.isNotBlank(),
-                    onClick = { copyAddress(stop.address); copyMenuOpen = false })
-            }
         }
-        return
-    }
-    Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box {
-            Text(role.title, style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.combinedClickable(onClick = { copyMenuOpen = true }, onLongClick = { copyAddress(stop.address) }))
-            DropdownMenu(copyMenuOpen, onDismissRequest = { copyMenuOpen = false }) {
-                RouteEndpointKind.entries.forEach { kind ->
-                    DropdownMenuItem(text = { Text("Копировать адрес: ${kind.title}") }, enabled = state.settings.address(kind).isNotBlank(),
-                        onClick = { copyAddress(state.settings.address(kind)); copyMenuOpen = false })
-                }
-            }
-        }
-        AppSegmentedControl(
-            titles = RouteEndpointKind.entries.map { it.title },
-            selectedIndex = RouteEndpointKind.entries.indexOfFirst { isHome == (it == RouteEndpointKind.Home) },
-            onSelect = { onSelect(role, RouteEndpointKind.entries[it]) },
-            modifier = Modifier.align(Alignment.CenterHorizontally),
-            isSegmentEnabled = { RouteEndpointKind.entries[it] != RouteEndpointKind.Home || state.settings.homeAddress.isNotBlank() },
-            onLongClick = { copyAddress(state.settings.address(RouteEndpointKind.entries[it])) },
-        )
     }
 }
 

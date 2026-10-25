@@ -157,7 +157,7 @@ fun HomeScreen(
     val routeCard: @Composable () -> Unit = {
         RouteTimelineCard(state, onEditStop = { editorId = it }, onAddStop = model::addStop,
             onRemoveStop = model::removeStop, onReorderStop = model::reorderStop,
-            onEndpointSelect = model::updateEndpoint, compact = tablet)
+            onEndpointSelect = model::updateEndpoint)
     }
     val archiveCard: @Composable (Modifier) -> Unit = { archiveModifier ->
         AppCard(archiveModifier, shape = RoundedCornerShape(20.dp)) {
