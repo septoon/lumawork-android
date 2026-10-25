@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -72,7 +73,7 @@ internal fun TerminalRequestHistoryDialog(
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            error = failure.message ?: "Не удалось загрузить историю терминала."
+            error = failure.message ?: "Не удалось загрузить историю выездов."
         } finally { loading = false }
     }
 
@@ -96,7 +97,7 @@ internal fun TerminalRequestHistoryDialog(
                             onClick = { saveFilters(showsReturns, !showsExpertise) })
                     }
                 }
-                Text("История терминала", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
+                Text("История выездов", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Закрыть историю") }
             }
@@ -105,7 +106,7 @@ internal fun TerminalRequestHistoryDialog(
                 if (loading) item("loading") {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text(if (hasSnapshot) "Обновляю историю" else "Загружаю историю терминала")
+                        Text(if (hasSnapshot) "Обновляю историю выездов" else "Загружаю историю выездов")
                     }
                 }
                 error?.let { message -> item("error") {
@@ -121,22 +122,23 @@ internal fun TerminalRequestHistoryDialog(
                 items(visible, key = { it.id }) { request ->
                     Card(shape = RoundedCornerShape(16.dp)) {
                         SelectionContainer {
-                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Column(Modifier.fillMaxWidth()) {
                                 val status = terminalHistoryStatus(request)
-                                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Text(request.displayNumber, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                    val color = when (status) {
-                                        "Отказ" -> MaterialTheme.colorScheme.errorContainer
-                                        "Выполнена" -> MaterialTheme.colorScheme.primaryContainer
-                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                val type = terminalHistoryType(request)
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        Text(request.displayNumber, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                        Surface(color = closedTypeColor(type), shape = MaterialTheme.shapes.small) {
+                                            Text(type, Modifier.padding(8.dp), color = Color.White, style = MaterialTheme.typography.labelSmall)
+                                        }
                                     }
-                                    Surface(color = color, shape = RoundedCornerShape(50)) {
-                                        Text(status, Modifier.padding(horizontal = 10.dp, vertical = 5.dp), style = MaterialTheme.typography.labelMedium)
-                                    }
+                                    HistoryField("Дата", terminalHistoryDate(request)?.format(HISTORY_DATE_FORMAT) ?: "Не указана")
+                                    HistoryField("Исполнитель", request.assignedUser.ifBlank { "Не указан" })
                                 }
-                                HistoryField("Дата", terminalHistoryDate(request)?.format(HISTORY_DATE_FORMAT) ?: "Не указана")
-                                HistoryField("Исполнитель", request.assignedUser.ifBlank { "Не указан" })
-                                HistoryField("Тип заявки", terminalHistoryType(request))
+                                Surface(color = requestStatusColor(status, closed = true)) {
+                                    Text(status, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                        color = requestStatusTextColor(status), style = MaterialTheme.typography.labelMedium)
+                                }
                             }
                         }
                     }
@@ -148,9 +150,11 @@ internal fun TerminalRequestHistoryDialog(
 
 @Composable
 private fun HistoryField(title: String, value: String) {
-    Column {
-        Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        SelectionContainer { Text(value, style = MaterialTheme.typography.bodyMedium) }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+        Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SelectionContainer(Modifier.weight(1f)) {
+            Text(value, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End)
+        }
     }
 }
 

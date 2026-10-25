@@ -104,7 +104,7 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
         if (state.isDetailLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         IconButton(onClick = { historyPresented = true },
             enabled = state.isAuthorized && normalizeHistoryTerminalId(historyTerminal).isNotEmpty()) {
-            Icon(RequestDetailIcons.History, "История терминала")
+            Icon(RequestDetailIcons.History, "История выездов")
         }
     }
     val personalComment = comments.commentFor(request)
