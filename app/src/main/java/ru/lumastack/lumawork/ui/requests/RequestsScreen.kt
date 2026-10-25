@@ -485,16 +485,13 @@ fun SimpleOneRequestDetailContent(
             .setPrimaryClip(android.content.ClipData.newPlainText("Заявка", value))
     }
     var map by androidx.compose.runtime.saveable.rememberSaveable(request.id) { mutableStateOf<String?>(null) }
-    if (!showBackButton) ru.lumastack.lumawork.ui.shell.AppHeaderActions(title = { Text("Детали") }) {
-        if (isLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-    }
+    if (!showBackButton) ru.lumastack.lumawork.ui.shell.AppHeaderActions(title = { RequestDetailsTitle(isLoading) }) {}
     Column(Modifier.fillMaxSize()) {
         if (showBackButton) Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically) {
             ru.lumastack.lumawork.ui.shell.AppBackButton(onBack)
-            Text("Детали", Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge)
-            if (isLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            else Spacer(Modifier.size(48.dp))
+            RequestDetailsTitle(isLoading, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.size(48.dp))
         }
         RequestDetailsBody(request, data, onCopy = copy, onFieldClick = { field ->
             if (field.title == "Адрес") map = android.net.Uri.parse("https://yandex.ru/maps/").buildUpon()

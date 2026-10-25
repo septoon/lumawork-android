@@ -12,6 +12,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -30,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -38,7 +45,11 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,6 +74,31 @@ import ru.lumastack.lumawork.ui.theme.AppCard
 import ru.lumastack.lumawork.ui.theme.AppSurfaces
 import ru.lumastack.lumawork.ui.theme.LocalAppDarkTheme
 import ru.lumastack.lumawork.ui.shell.AppHeaderActions
+
+@Composable
+internal fun RequestDetailsTitle(
+    isLoading: Boolean,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalTextStyle.current,
+) {
+    if (!isLoading) {
+        Text("Детали", modifier, style = style, textAlign = TextAlign.Center)
+        return
+    }
+    val transition = rememberInfiniteTransition(label = "request-details-loading")
+    val phase by transition.animateFloat(-1f, 2f,
+        infiniteRepeatable(tween(1550, easing = LinearEasing), RepeatMode.Restart), label = "title-shimmer")
+    var textWidth by remember { mutableFloatStateOf(1f) }
+    val color = LocalContentColor.current
+    val brush = Brush.linearGradient(
+        colors = listOf(color.copy(alpha = .55f), color, color.copy(alpha = .55f)),
+        start = Offset(textWidth * (phase - .5f), 0f),
+        end = Offset(textWidth * (phase + .5f), 0f),
+    )
+    Text("Детали", modifier.semantics { stateDescription = "Загрузка деталей заявки" },
+        style = style.copy(brush = brush), textAlign = TextAlign.Center,
+        onTextLayout = { textWidth = it.size.width.coerceAtLeast(1).toFloat() })
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -100,8 +136,7 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
             }
         }
     }
-    AppHeaderActions(title = { Text("Детали") }) {
-        if (state.isDetailLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+    AppHeaderActions(title = { RequestDetailsTitle(state.isDetailLoading) }) {
         IconButton(onClick = { historyPresented = true },
             enabled = state.isAuthorized && normalizeHistoryTerminalId(historyTerminal).isNotEmpty()) {
             Icon(RequestDetailIcons.History, "История выездов")
