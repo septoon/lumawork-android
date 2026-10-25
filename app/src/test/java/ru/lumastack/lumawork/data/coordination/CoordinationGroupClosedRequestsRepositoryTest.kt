@@ -18,6 +18,69 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class CoordinationGroupClosedRequestsRepositoryTest {
+    @Test fun `switching profile city clears data uses new query and keeps separate offline caches`() = runTest {
+        var city = "alushta"
+        val api = ArchiveApi { _, _, _ -> GroupClosedRequestsPage(listOf(record(city)), 1, false) }
+        val cache = ArchiveCache()
+        val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), cache, this,
+            preparationDispatcher = StandardTestDispatcher(testScheduler))
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
+        advanceUntilIdle()
+        assertEquals("alushta", repository.state.value.records.single().id)
+        city = "yalta"
+        repository.activate("owner", "simple", true, CoordinationRegion.Yalta)
+        assertTrue(repository.state.value.records.isEmpty())
+        assertEquals(CoordinationRegion.Yalta, repository.state.value.region)
+        advanceUntilIdle()
+        assertEquals("yalta", repository.state.value.records.single().id)
+        assertEquals(listOf(CoordinationRegion.Alushta, CoordinationRegion.Yalta), api.regions)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, startOffline = true)
+        assertEquals("alushta", repository.state.value.records.single().id)
+        repository.activate("owner", "simple", true, region = null)
+        advanceUntilIdle()
+        assertTrue(repository.state.value.records.isEmpty())
+        assertFalse(repository.state.value.isLoading)
+        assertEquals(2, api.calls.size)
+    }
+
+    @Test fun `late response from former profile city cannot replace the new city archive`() = runTest {
+        val oldResponse = CompletableDeferred<GroupClosedRequestsPage>()
+        var call = 0
+        val api = ArchiveApi { _, _, _ ->
+            if (call++ == 0) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { oldResponse.await() }
+            else GroupClosedRequestsPage(listOf(record("yalta")), 1, false)
+        }
+        val cache = ArchiveCache()
+        val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), cache, this,
+            preparationDispatcher = StandardTestDispatcher(testScheduler))
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
+        runCurrent()
+        repository.activate("owner", "simple", true, CoordinationRegion.Yalta)
+        runCurrent()
+        assertEquals("yalta", repository.state.value.records.single().id)
+        oldResponse.complete(GroupClosedRequestsPage(listOf(record("old-alushta")), 1, false))
+        advanceUntilIdle()
+        assertEquals(CoordinationRegion.Yalta, repository.state.value.region)
+        assertEquals("yalta", repository.state.value.records.single().id)
+        assertEquals(1, cache.writes.size)
+    }
+
+    @Test fun `legacy archive migrates only to Alushta never another profile city`() = runTest {
+        val legacyKey = groupClosedDigest("5:owner6:simple")
+        val cache = ArchiveCache().apply { values[legacyKey] = GroupClosedRequestsSnapshot(
+            records = listOf(record("legacy-alushta")), nextPage = null, updatedAtEpochMillis = 123L,
+        ) }
+        val api = ArchiveApi { _, _, _ -> error("Offline must not fetch") }
+        val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), cache, this,
+            preparationDispatcher = StandardTestDispatcher(testScheduler))
+        repository.activate("owner", "simple", true, CoordinationRegion.Yalta, startOffline = true)
+        assertTrue(repository.state.value.records.isEmpty())
+        assertFalse(legacyKey in cache.readKeys)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, startOffline = true)
+        assertEquals("legacy-alushta", repository.state.value.records.single().id)
+        assertTrue(legacyKey in cache.readKeys)
+    }
+
     @Test fun `completed cache publishes prepared items before blocked network refresh`() = runTest {
         val session = ArchiveSession()
         val cache = ArchiveCache()
@@ -25,14 +88,14 @@ class CoordinationGroupClosedRequestsRepositoryTest {
             ArchiveApi { _, _, _ -> GroupClosedRequestsPage(listOf(record("cached").copy(requestType = "install")), 1, false) },
             session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler),
         )
-        first.activate("owner", "simple", true)
+        first.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         val response = CompletableDeferred<GroupClosedRequestsPage>()
         val restored = CoordinationGroupClosedRequestsRepository(
             ArchiveApi { _, _, _ -> response.await() }, session, cache, this,
             preparationDispatcher = StandardTestDispatcher(testScheduler),
         )
-        restored.activate("owner", "simple", true)
+        restored.activate("owner", "simple", true, CoordinationRegion.Alushta)
         runCurrent()
         val ready = restored.state.value
         assertTrue(ready.didLoadCache)
@@ -52,11 +115,11 @@ class CoordinationGroupClosedRequestsRepositoryTest {
         val repository = CoordinationGroupClosedRequestsRepository(
             api, ArchiveSession(), ArchiveCache(), this, preparationDispatcher = StandardTestDispatcher(testScheduler),
         )
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         val prepared = repository.state.value.preparedItems
         val types = repository.state.value.availableTypes
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         assertSame(prepared, repository.state.value.preparedItems)
         advanceUntilIdle()
         assertSame(prepared, repository.state.value.preparedItems)
@@ -70,17 +133,17 @@ class CoordinationGroupClosedRequestsRepositoryTest {
         val first = CoordinationGroupClosedRequestsRepository(
             api, session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler),
         )
-        first.activate("owner", "simple", true)
+        first.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         session.auth = "rotated-secret"
         val restored = CoordinationGroupClosedRequestsRepository(
             api, session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler),
         )
-        restored.activate("owner", "simple", true, startOffline = true)
+        restored.activate("owner", "simple", true, CoordinationRegion.Alushta, startOffline = true)
         assertTrue(restored.state.value.didLoadCache)
         assertEquals("cached", restored.state.value.preparedItems.single().request.id)
-        assertEquals(1, cache.readKeys.distinct().size)
-        restored.activate("owner", "different-simple", true, startOffline = true)
+        assertEquals(2, cache.readKeys.distinct().size)
+        restored.activate("owner", "different-simple", true, CoordinationRegion.Alushta, startOffline = true)
         assertTrue(restored.state.value.records.isEmpty())
         assertTrue(restored.state.value.preparedItems.isEmpty())
         assertEquals("different-simple", restored.state.value.simpleOneUserId)
@@ -96,13 +159,13 @@ class CoordinationGroupClosedRequestsRepositoryTest {
             ArchiveApi { _, _, _ -> GroupClosedRequestsPage(listOf(record("cached")), 1, false) },
             session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler),
         )
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         val prepared = repository.state.value.preparedItems
         val gate = CompletableDeferred<Unit>()
         cache.beforeRead = { gate.await() }
         session.auth = "rotated-secret"
-        val rotation = launch { repository.activate("owner", "simple", true, startOffline = true) }
+        val rotation = launch { repository.activate("owner", "simple", true, CoordinationRegion.Alushta, startOffline = true) }
         runCurrent()
         assertFalse(rotation.isCompleted)
         assertTrue(repository.state.value.didLoadCache)
@@ -119,7 +182,7 @@ class CoordinationGroupClosedRequestsRepositoryTest {
         }
         val cache = ArchiveCache()
         val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler)) { 123L }
-        repository.activate("owner", "simple", authorized = true)
+        repository.activate("owner", "simple", authorized = true, region = CoordinationRegion.Alushta)
         advanceUntilIdle()
         assertEquals(listOf(1, 2), api.calls.map { it.first })
         assertEquals(setOf("a", "b"), repository.state.value.records.map { it.id }.toSet())
@@ -139,16 +202,16 @@ class CoordinationGroupClosedRequestsRepositoryTest {
             else throw SimpleOneFailure.InvalidResponse
         }
         val first = CoordinationGroupClosedRequestsRepository(firstApi, session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        first.activate("owner", "simple", true)
+        first.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         val resumedApi = ArchiveApi { _, _, _ -> GroupClosedRequestsPage(listOf(record("b")), hasMore = false) }
         val resumed = CoordinationGroupClosedRequestsRepository(resumedApi, session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        resumed.activate("owner", "simple", true, startOffline = true)
+        resumed.activate("owner", "simple", true, CoordinationRegion.Alushta, startOffline = true)
         advanceUntilIdle()
         assertTrue(resumedApi.calls.isEmpty())
         assertEquals("a", resumed.state.value.records.single().id)
         assertEquals(1, resumed.state.value.loadedCount)
-        resumed.activate("owner", "simple", true)
+        resumed.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         assertEquals(2, resumedApi.calls.single().first)
         assertEquals(setOf("a", "b"), resumed.state.value.records.map { it.id }.toSet())
@@ -166,7 +229,7 @@ class CoordinationGroupClosedRequestsRepositoryTest {
             }
         }
         val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         pass = 1
         repository.refresh(forceFull = true)
@@ -191,7 +254,7 @@ class CoordinationGroupClosedRequestsRepositoryTest {
             }
         }
         val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), ArchiveCache(), this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         pass = 1
         repository.refresh()
@@ -209,7 +272,7 @@ class CoordinationGroupClosedRequestsRepositoryTest {
             else GroupClosedRequestsPage(emptyList(), hasMore = false)
         }
         val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), ArchiveCache(), this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         pass = 1
         repository.refresh()
@@ -222,7 +285,7 @@ class CoordinationGroupClosedRequestsRepositoryTest {
         val response = CompletableDeferred<GroupClosedRequestsPage>()
         val api = ArchiveApi { _, _, _ -> response.await() }
         val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), ArchiveCache(), this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        val screen = launch { repository.activate("owner", "simple", true); repository.awaitRefresh() }
+        val screen = launch { repository.activate("owner", "simple", true, CoordinationRegion.Alushta); repository.awaitRefresh() }
         runCurrent()
         repository.refresh()
         screen.cancel()
@@ -239,7 +302,7 @@ class CoordinationGroupClosedRequestsRepositoryTest {
         val cache = ArchiveCache()
         val api = ArchiveApi { _, _, _ -> response.await() }
         val repository = CoordinationGroupClosedRequestsRepository(api, session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         runCurrent()
         session.auth = "new-auth"
         response.completeExceptionally(SimpleOneFailure.Unauthorized)
@@ -257,11 +320,11 @@ class CoordinationGroupClosedRequestsRepositoryTest {
         val repository = CoordinationGroupClosedRequestsRepository(
             ArchiveApi { _, _, _ -> throw SimpleOneFailure.Unauthorized }, session, ArchiveCache(), this, preparationDispatcher = StandardTestDispatcher(testScheduler),
         )
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         assertTrue(repository.state.value.requiresAuthorization)
         assertEquals(0, session.clearCount)
-        repository.activate("owner", "simple", true, startOffline = true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, startOffline = true)
         assertFalse(repository.state.value.requiresAuthorization)
     }
 
@@ -270,16 +333,16 @@ class CoordinationGroupClosedRequestsRepositoryTest {
         val session = ArchiveSession()
         val api = ArchiveApi { _, _, _ -> GroupClosedRequestsPage(listOf(record("a")), 1, false) }
         val repository = CoordinationGroupClosedRequestsRepository(api, session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
-        repository.activate("owner", "other-simple", true, true)
+        repository.activate("owner", "other-simple", true, CoordinationRegion.Alushta, true)
         assertTrue(repository.state.value.records.isEmpty())
         session.auth = "secret-new-key"
-        repository.activate("owner", "simple", true, true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, true)
         assertEquals("a", repository.state.value.records.single().id)
-        repository.activate("other-owner", "simple", true, true)
+        repository.activate("other-owner", "simple", true, CoordinationRegion.Alushta, true)
         assertTrue(repository.state.value.records.isEmpty())
-        assertEquals(3, cache.readKeys.distinct().size)
+        assertEquals(6, cache.readKeys.distinct().size)
         assertTrue(cache.readKeys.all { it.matches(Regex("[0-9a-f]{64}")) })
     }
 
@@ -289,7 +352,7 @@ class CoordinationGroupClosedRequestsRepositoryTest {
         val cache = ArchiveCache()
         val api = ArchiveApi { _, _, _ -> response.await() }
         val repository = CoordinationGroupClosedRequestsRepository(api, session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         runCurrent()
         session.auth = "new-auth"
         response.complete(GroupClosedRequestsPage(listOf(record("stale")), 1, false))
@@ -311,7 +374,7 @@ class CoordinationGroupClosedRequestsRepositoryTest {
             }
         }
         val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), ArchiveCache(), this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         pass = 1
         repository.refresh()
@@ -332,7 +395,7 @@ class CoordinationGroupClosedRequestsRepositoryTest {
             else GroupClosedRequestsPage(listOf(record("b")), 2, false)
         }
         val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), ArchiveCache(), this, preparationDispatcher = StandardTestDispatcher(testScheduler))
-        repository.activate("owner", "simple", true)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta)
         advanceUntilIdle()
         changed = true
         repository.refresh()
@@ -374,8 +437,10 @@ private class ArchiveApi(
     val fetch: suspend (Int, String, Boolean) -> GroupClosedRequestsPage,
 ) : SimpleOneApi {
     val calls = mutableListOf<Triple<Int, String, Boolean>>()
-    override suspend fun groupClosedRequestsPage(page: Int, authKey: String, perPage: Int, newestFirst: Boolean): GroupClosedRequestsPage {
+    val regions = mutableListOf<CoordinationRegion>()
+    override suspend fun groupClosedRequestsPage(region: CoordinationRegion, page: Int, authKey: String, perPage: Int, newestFirst: Boolean): GroupClosedRequestsPage {
         calls += Triple(page, authKey, newestFirst)
+        regions += region
         return fetch(page, authKey, newestFirst)
     }
     override suspend fun login(username: String, password: String) = "auth"

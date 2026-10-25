@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.withLock
 import ru.lumastack.lumawork.data.simpleone.SimpleOneApi
 import ru.lumastack.lumawork.data.simpleone.SimpleOneFailure
 import ru.lumastack.lumawork.data.simpleone.SimpleOneSessionStore
+import ru.lumastack.lumawork.domain.coordination.CoordinationRegion
 import ru.lumastack.lumawork.domain.coordination.groupClosedRequestTypes
 import ru.lumastack.lumawork.domain.coordination.prepareGroupClosedRequests
 import ru.lumastack.lumawork.domain.requests.ClosedRequestsItem
@@ -26,6 +27,7 @@ import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 data class GroupClosedRequestsState(
     val ownerUserId: String = "",
     val simpleOneUserId: String = "",
+    val region: CoordinationRegion? = null,
     val records: List<SimpleOneRequest> = emptyList(),
     val preparedItems: List<ClosedRequestsItem> = emptyList(),
     val availableTypes: List<Pair<String, String>> = emptyList(),
@@ -48,8 +50,9 @@ class CoordinationGroupClosedRequestsRepository(
     private val preparationDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
 ) {
-    private data class Identity(val owner: String, val user: String, val authKey: String) {
-        val cacheKey: String = groupClosedDigest("${owner.length}:$owner${user.length}:$user")
+    private data class Identity(val owner: String, val user: String, val authKey: String, val region: CoordinationRegion) {
+        val legacyCacheKey: String = groupClosedDigest("${owner.length}:$owner${user.length}:$user")
+        val cacheKey: String = groupClosedDigest("${owner.length}:$owner${user.length}:$user|city:${region.companyLocationId}")
     }
 
     private val mutex = Mutex()
@@ -66,14 +69,15 @@ class CoordinationGroupClosedRequestsRepository(
         ownerUserId: String,
         simpleOneUserId: String,
         authorized: Boolean,
+        region: CoordinationRegion?,
         startOffline: Boolean = false,
     ) = mutex.withLock {
         val authKey = if (authorized) sessionStore.read(ownerUserId)?.authKey else null
-        val next = if (!authKey.isNullOrBlank() && simpleOneUserId.isNotBlank()) {
-            Identity(ownerUserId, simpleOneUserId, authKey)
+        val next = if (!authKey.isNullOrBlank() && simpleOneUserId.isNotBlank() && region != null) {
+            Identity(ownerUserId, simpleOneUserId, authKey, region)
         } else null
         if (identity != next) {
-            val sameAccount = next != null && identity?.owner == next.owner && identity?.user == next.user
+            val sameAccount = next != null && identity?.owner == next.owner && identity?.user == next.user && identity?.region == next.region
             generation += 1
             pendingForceFull = false
             refreshJob?.cancel()
@@ -82,7 +86,7 @@ class CoordinationGroupClosedRequestsRepository(
             if (!sameAccount) {
                 snapshot = GroupClosedRequestsSnapshot()
                 mutableState.value = GroupClosedRequestsState(
-                    ownerUserId = next?.owner.orEmpty(), simpleOneUserId = next?.user.orEmpty(),
+                    ownerUserId = next?.owner.orEmpty(), simpleOneUserId = next?.user.orEmpty(), region = next?.region,
                     revision = mutableState.value.revision + 1,
                 )
             } else {
@@ -92,7 +96,10 @@ class CoordinationGroupClosedRequestsRepository(
                 // Finish initial disk hydration even if the initiating screen leaves. The network pass
                 // is then launched in the application scope, never in the screen scope.
                 val loaded = withContext(NonCancellable) {
-                    val cached = cache.read(next.cacheKey) ?: snapshot
+                    // The legacy namespace was hardcoded to Alushta. Never restore it into another city.
+                    val cached = cache.read(next.cacheKey)
+                        ?: next.takeIf { it.region == CoordinationRegion.Alushta }?.let { cache.read(it.legacyCacheKey) }
+                        ?: snapshot
                     publish(cached, next, generation, didLoadCache = true)
                 }
                 if (!loaded) return@withLock
@@ -163,7 +170,7 @@ class CoordinationGroupClosedRequestsRepository(
                     snapshot
                 }
                 val page = pass.nextPage ?: break
-                val result = api.groupClosedRequestsPage(page, current.authKey, PAGE_SIZE, pass.isIncremental)
+                val result = api.groupClosedRequestsPage(current.region, page, current.authKey, PAGE_SIZE, pass.isIncremental)
                 mutex.withLock {
                     if (!isCurrent(current, requestGeneration)) return
                     val fresh = result.records.distinctBy(SimpleOneRequest::id)

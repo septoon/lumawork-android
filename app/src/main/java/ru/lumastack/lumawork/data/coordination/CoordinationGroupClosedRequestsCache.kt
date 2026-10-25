@@ -22,7 +22,7 @@ data class GroupClosedRequestsSnapshot(
 )
 
 interface CoordinationGroupClosedRequestsCache {
-    /** Opaque digest of owner and SimpleOne user; authorization keys are never part of the persisted namespace. */
+    /** Opaque digest of owner, SimpleOne user and profile city; authorization keys are never part of the persisted namespace. */
     suspend fun read(scopeKey: String): GroupClosedRequestsSnapshot?
     suspend fun save(scopeKey: String, snapshot: GroupClosedRequestsSnapshot)
 }

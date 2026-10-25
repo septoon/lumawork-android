@@ -65,8 +65,9 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
     val model: CoordinationViewModel = viewModel(key = "coordination-$owner-$offline", factory = CoordinationViewModel.factory(repository, simpleOneRepository, owner, offline))
     val state by model.state.collectAsStateWithLifecycle()
     val archive = repository.groupClosedRepository
+    val profileRegion = coordinationRegionForProfileCity(session?.user?.profile?.city)
     val unscopedArchiveState = archive?.state?.collectAsStateWithLifecycle()?.value
-    val archiveState = unscopedArchiveState?.takeIf { it.ownerUserId == owner && it.simpleOneUserId == simpleOne.snapshot.currentUser?.sysId } ?: GroupClosedRequestsState()
+    val archiveState = unscopedArchiveState?.takeIf { it.ownerUserId == owner && it.simpleOneUserId == simpleOne.snapshot.currentUser?.sysId && it.region == profileRegion } ?: GroupClosedRequestsState()
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val holder = rememberSaveableStateHolder()
@@ -81,9 +82,9 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
     LaunchedEffect(state.isAuthorized, state.simpleOneUserId, archiveState.requiresAuthorization) {
         if (!offline && simpleOne.isAuthorized && ((!state.isAuthorized && state.simpleOneUserId.isNotBlank()) || archiveState.requiresAuthorization)) requestsActions?.onSignOut?.invoke()
     }
-    LaunchedEffect(state.isArchiveOpen, user?.sysId, simpleOne.isAuthorized, lifecycle) {
+    LaunchedEffect(state.isArchiveOpen, user?.sysId, simpleOne.isAuthorized, profileRegion, lifecycle) {
         if (state.isArchiveOpen && archive != null) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            archive.activate(owner, user?.sysId.orEmpty(), simpleOne.isAuthorized, offline)
+            archive.activate(owner, user?.sysId.orEmpty(), simpleOne.isAuthorized, profileRegion, offline)
             while (true) { delay(60_000); if (!offline) archive.refresh() }
         }
     }
@@ -115,8 +116,8 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
         } else if (selected != null) {
             SimpleOneRequestDetailContent(selected, width, state.isDetailLoading, state.detailErrorMessage, model::back)
         } else if (state.isArchiveOpen) {
-            holder.SaveableStateProvider("closed-group-${state.simpleOneUserId}") {
-                CoordinationGroupClosedContent("$owner-${state.simpleOneUserId}", archiveState, state.isAuthorized, offline,
+            holder.SaveableStateProvider("closed-group-${state.simpleOneUserId}-${profileRegion?.name}") {
+                CoordinationGroupClosedContent("$owner-${state.simpleOneUserId}", archiveState, state.isAuthorized, offline, profileRegion,
                     onRefresh = { scope.launch { archive?.refresh(forceFull = true) } }, onOpen = { model.openRequest(it) }, copy = copy)
             }
         } else {

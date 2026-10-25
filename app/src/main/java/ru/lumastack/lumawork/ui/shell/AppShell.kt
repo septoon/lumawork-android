@@ -171,15 +171,16 @@ fun AppShell(
     )
     val simpleOneState by simpleOneViewModel.state.collectAsStateWithLifecycle()
     val groupClosed = coordinationRepository.groupClosedRepository
-    androidx.compose.runtime.LaunchedEffect(session.user.id, simpleOneState.snapshot.currentUser?.sysId, simpleOneState.isAuthorized, simpleOneState.isInitializing, isOffline) {
+    val groupClosedRegion = ru.lumastack.lumawork.domain.coordination.coordinationRegionForProfileCity(session.user.profile?.city)
+    androidx.compose.runtime.LaunchedEffect(session.user.id, simpleOneState.snapshot.currentUser?.sysId, simpleOneState.isAuthorized, simpleOneState.isInitializing, isOffline, groupClosedRegion) {
         if (!simpleOneState.isInitializing && groupClosed != null) {
-            if (!simpleOneState.isAuthorized || simpleOneState.snapshot.currentUser?.sysId == null) groupClosed.deactivate()
+            if (!simpleOneState.isAuthorized || simpleOneState.snapshot.currentUser?.sysId == null || groupClosedRegion == null) groupClosed.deactivate()
             else if (groupClosed.state.value.didLoadCache) groupClosed.activate(session.user.id,
-                simpleOneState.snapshot.currentUser!!.sysId, true, isOffline)
+                simpleOneState.snapshot.currentUser!!.sysId, true, groupClosedRegion, isOffline)
         }
     }
     val shellLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    androidx.compose.runtime.LaunchedEffect(groupClosed, shellLifecycle, isOffline, simpleOneState.isAuthorized) {
+    androidx.compose.runtime.LaunchedEffect(groupClosed, shellLifecycle, isOffline, simpleOneState.isAuthorized, groupClosedRegion) {
         shellLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
             if (!isOffline && simpleOneState.isAuthorized && groupClosed?.state?.value?.didLoadCache == true) groupClosed.refresh()
             kotlinx.coroutines.awaitCancellation()

@@ -23,6 +23,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import ru.lumastack.lumawork.data.coordination.GroupClosedRequestsState
+import ru.lumastack.lumawork.domain.coordination.CoordinationRegion
 import ru.lumastack.lumawork.domain.coordination.queryGroupClosedRequests
 import ru.lumastack.lumawork.domain.requests.*
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
@@ -36,7 +37,7 @@ import ru.lumastack.lumawork.ui.theme.AppCard
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun CoordinationGroupClosedContent(scopeKey: String, state: GroupClosedRequestsState, authorized: Boolean,
-    offline: Boolean, onRefresh: () -> Unit, onOpen: (SimpleOneRequest) -> Unit, copy: (String) -> Unit,
+    offline: Boolean, region: CoordinationRegion?, onRefresh: () -> Unit, onOpen: (SimpleOneRequest) -> Unit, copy: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val preferences = remember(context) { context.getSharedPreferences("coordination-group-closed-filters", Context.MODE_PRIVATE) }
@@ -61,7 +62,7 @@ internal fun CoordinationGroupClosedContent(scopeKey: String, state: GroupClosed
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Закрытые заявки группы", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             Box {
-                TextButton(onClick = { showTypes = true }, enabled = authorized) { Text("Типы") }
+                TextButton(onClick = { showTypes = true }, enabled = authorized && region != null) { Text("Типы") }
                 DropdownMenu(showTypes, { showTypes = false }) {
                     DropdownMenuItem({ Text("Показать все") }, { setExcluded(emptySet()) })
                     state.availableTypes.forEach { (key, title) -> DropdownMenuItem({ Text(title) }, {
@@ -71,6 +72,11 @@ internal fun CoordinationGroupClosedContent(scopeKey: String, state: GroupClosed
             }
         }
         if (!authorized) { CoordinationMessage("SimpleOne не подключён", "Войдите в SimpleOne на экране «Заявки».", Modifier.padding(16.dp)); return }
+        if (region == null) {
+            CoordinationMessage("Укажите город в профиле", "Для закрытых заявок группы нужен город инженера из списка поддерживаемых городов.", Modifier.padding(16.dp))
+            return
+        }
+        Text(region.title, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.titleSmall)
         AppTextField(query, { query = it }, "Поиск по всему архиву", search = true, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("${filtered.size} из ${state.totalCount ?: state.records.size}", style = MaterialTheme.typography.bodySmall)

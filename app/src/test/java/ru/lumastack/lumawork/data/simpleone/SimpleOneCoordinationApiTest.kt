@@ -51,8 +51,8 @@ class SimpleOneCoordinationApiTest {
                 .body("""{"status":"OK","data":{"items":[{"sys_id":"1","number":"REQ1","sys_updated_at":"2026-10-17 10:00:00"}],"total_count":101}}""".toResponseBody()).build()
         }.build()
         val api = OkHttpSimpleOneApi("https://sd.test/v1", client)
-        val first = api.groupClosedRequestsPage(1, "auth", perPage = 100)
-        val second = api.groupClosedRequestsPage(2, "auth", perPage = 100, newestFirst = true)
+        val first = api.groupClosedRequestsPage(CoordinationRegion.Alushta, 1, "auth", perPage = 100)
+        val second = api.groupClosedRequestsPage(CoordinationRegion.Alushta, 2, "auth", perPage = 100, newestFirst = true)
         val condition = "(company_location=171878330004108924^resolved_atNOTONopt:167653141215593053" +
             "^stateNOT INon_hold@assigned@in_progress@escalated@returned_to_work@3@6@update_received)"
         assertEquals(condition, requests[0].url.queryParameter("condition"))
@@ -67,6 +67,21 @@ class SimpleOneCoordinationApiTest {
         assertEquals(ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource.Closed, first.records.single().source)
     }
 
+    @Test fun `group closed location follows region while other criteria stay unchanged`() = runBlocking {
+        val requests = mutableListOf<okhttp3.Request>()
+        val api = OkHttpSimpleOneApi("https://sd.test/v1", OkHttpClient.Builder().addInterceptor { chain ->
+            requests += chain.request()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"status":"OK","data":{"items":[]}}""".toResponseBody()).build()
+        }.build())
+        for (region in CoordinationRegion.entries) api.groupClosedRequestsPage(region, 1, "auth")
+        assertEquals(CoordinationRegion.entries.size, requests.size)
+        for ((region, request) in CoordinationRegion.entries.zip(requests)) {
+            assertEquals("(company_location=${region.companyLocationId}^resolved_atNOTONopt:167653141215593053" +
+                "^stateNOT INon_hold@assigned@in_progress@escalated@returned_to_work@3@6@update_received)", request.url.queryParameter("condition"))
+        }
+    }
+
     @Test
     fun `group archive without total continues until short page`() = runBlocking {
         val client = OkHttpClient.Builder().addInterceptor { chain ->
@@ -75,8 +90,8 @@ class SimpleOneCoordinationApiTest {
                 .body("""{"status":"OK","data":{"items":[{"sys_id":"1","number":"REQ1"}]}}""".toResponseBody()).build()
         }.build()
         val api = OkHttpSimpleOneApi("https://sd.test/v1", client)
-        assertTrue(api.groupClosedRequestsPage(1, "auth", perPage = 1).hasMore)
-        assertTrue(!api.groupClosedRequestsPage(1, "auth", perPage = 2).hasMore)
+        assertTrue(api.groupClosedRequestsPage(CoordinationRegion.Alushta, 1, "auth", perPage = 1).hasMore)
+        assertTrue(!api.groupClosedRequestsPage(CoordinationRegion.Alushta, 1, "auth", perPage = 2).hasMore)
     }
 
 }

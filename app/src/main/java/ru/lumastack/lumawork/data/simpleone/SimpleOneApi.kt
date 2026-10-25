@@ -78,7 +78,7 @@ interface SimpleOneApi {
     suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest
     suspend fun coordinationRequests(region: CoordinationRegion, authKey: String): List<SimpleOneRequest>
     suspend fun returnEquipmentRequests(userId: String, authKey: String): List<SimpleOneRequest>
-    suspend fun groupClosedRequestsPage(page: Int, authKey: String, perPage: Int = 100, newestFirst: Boolean = false): GroupClosedRequestsPage = throw SimpleOneFailure.InvalidResponse
+    suspend fun groupClosedRequestsPage(region: CoordinationRegion, page: Int, authKey: String, perPage: Int = 100, newestFirst: Boolean = false): GroupClosedRequestsPage = throw SimpleOneFailure.InvalidResponse
     suspend fun employeeAddresses(query: String, authKey: String): List<EmployeeAddress> = emptyList()
     suspend fun employees(
         address: EmployeeAddress,
@@ -307,6 +307,7 @@ class OkHttpSimpleOneApi(
     ).filter { isReturnEquipmentRequest(it.requestType) }
 
     override suspend fun groupClosedRequestsPage(
+        region: CoordinationRegion,
         page: Int,
         authKey: String,
         perPage: Int,
@@ -314,7 +315,7 @@ class OkHttpSimpleOneApi(
     ): GroupClosedRequestsPage {
         require(page > 0 && perPage > 0)
         val order = if (newestFirst) "^ORDERBYDESCsys_updated_at^ORDERBYDESCsys_id" else ""
-        val condition = "(company_location=171878330004108924^resolved_atNOTONopt:167653141215593053" +
+        val condition = "(company_location=${region.companyLocationId}^resolved_atNOTONopt:167653141215593053" +
             "^stateNOT INon_hold@assigned@in_progress@escalated@returned_to_work@3@6@update_received)" + order
         val url = "$origin/list/itsm_request".toHttpUrl().newBuilder()
             .addQueryParameter("condition", condition)

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.domain.coordination
 
+import java.util.Locale
 import kotlinx.serialization.Serializable
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 
@@ -23,6 +24,13 @@ enum class CoordinationRegion(
     Feodosia("Феодосия", "171872374107775143", "171878285308384162"),
     Kerch("Керчь", "171872325607628769", "171878277802582935"),
     Sevastopol("Севастополь", "171872303308964248", "171878265201212075"),
+}
+
+fun coordinationRegionForProfileCity(profileCity: String?): CoordinationRegion? {
+    var city = profileCity.orEmpty().trim().lowercase(Locale.ROOT)
+    val prefix = listOf("город ", "г. ", "г.", "г ").firstOrNull { city.startsWith(it) }
+    if (prefix != null) city = city.removePrefix(prefix).trim()
+    return CoordinationRegion.entries.firstOrNull { it.title.lowercase(Locale.ROOT) == city }
 }
 
 @Serializable
