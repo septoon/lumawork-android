@@ -264,6 +264,7 @@ private class FakeSimpleOneApi(
     private val exportedXlsx: ByteArray? = null,
     private val beforeExport: suspend () -> Unit = {},
     private val beforeLogin: suspend () -> Unit = {},
+    private val beforeHistory: suspend () -> Unit = {},
 ) : SimpleOneApi {
     var detailCalls = 0
     var currentUserCalls = 0
@@ -304,6 +305,12 @@ private class FakeSimpleOneApi(
         throw SimpleOneFailure.Http(501, "XLSX недоступен")
 
     override suspend fun backpackItems(authKey: String): List<BackpackItem> = emptyList()
+
+    override suspend fun terminalHistory(terminalId: String, authKey: String): List<SimpleOneRequest> {
+        beforeHistory()
+        error?.let { throw it }
+        return closed
+    }
 
     override suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest {
         detailCalls += 1
@@ -664,5 +671,50 @@ class RequestsBootstrapTest {
         assertTrue(repo.cleanupClosedArchive("owner") { true }.isReady)
         assertEquals(0, api.activeCalls + api.exportCalls + api.currentUserCalls + api.archiveCalls)
         assertNull(repo.readClosedArchive("other-owner"))
+    }
+}
+
+
+class TerminalHistoryRepositoryTest {
+    @Test fun `history persists per owner session and terminal and a failure preserves cache`() = runBlocking {
+        val directory = java.nio.file.Files.createTempDirectory("terminal-history-tests").toFile()
+        try {
+            val session = StoredSimpleOneSession("owner", "auth", "engineer")
+            val sessions = FakeSimpleOneSessionStore().apply { save(session) }
+            val cachedFile = FileSimpleOneSupplementalCache(directory, kotlinx.serialization.json.Json)
+            val history = listOf(request().copy(terminalId = "00123"))
+            val repository = SimpleOneRepository(FakeSimpleOneApi(closed = history), sessions, FakeSimpleOneCache(), cachedFile)
+            assertEquals(history, repository.terminalHistory("owner", "00123"))
+            val restored = SimpleOneRepository(FakeSimpleOneApi(error = SimpleOneFailure.InvalidResponse), sessions, FakeSimpleOneCache(),
+                FileSimpleOneSupplementalCache(directory, kotlinx.serialization.json.Json))
+            assertEquals(history, restored.cachedTerminalHistory("owner", "00123"))
+            assertTrue(runCatching { restored.terminalHistory("owner", "00123") }.isFailure)
+            assertEquals(history, restored.cachedTerminalHistory("owner", "00123"))
+            assertNull(restored.cachedTerminalHistory("owner", "DIFFERENT"))
+            assertNull(restored.cachedTerminalHistory("other-owner", "00123"))
+            assertNull(restored.readClosedArchive("owner"))
+            sessions.save(session.copy(authKey = "new-session"))
+            assertNull(restored.cachedTerminalHistory("owner", "00123"))
+        } finally { directory.deleteRecursively() }
+    }
+
+    @Test fun `late history response after session replacement is not saved`() = runBlocking {
+        val session = StoredSimpleOneSession("owner", "auth", "engineer")
+        val sessions = FakeSimpleOneSessionStore().apply { save(session) }
+        val supplemental = FakeSimpleOneSupplementalCache()
+        val api = FakeSimpleOneApi(closed = listOf(request().copy(terminalId = "00123")),
+            beforeHistory = { sessions.save(session.copy(authKey = "new-auth")) })
+        val repository = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), supplemental)
+        val error = runCatching { repository.terminalHistory("owner", "00123") }.exceptionOrNull()
+        assertTrue(error is kotlinx.coroutines.CancellationException)
+        sessions.save(session)
+        assertNull(repository.cachedTerminalHistory("owner", "00123"))
+    }
+
+    @Test fun `unauthorized history clears only its still current session`() = runBlocking {
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val repository = SimpleOneRepository(FakeSimpleOneApi(error = SimpleOneFailure.Unauthorized), sessions, FakeSimpleOneCache())
+        assertTrue(runCatching { repository.terminalHistory("owner", "00123") }.exceptionOrNull() is SimpleOneFailure.Unauthorized)
+        assertNull(sessions.read("owner"))
     }
 }

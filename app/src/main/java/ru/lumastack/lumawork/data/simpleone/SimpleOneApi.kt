@@ -46,6 +46,11 @@ import ru.lumastack.lumawork.domain.employees.EmployeeField
 import ru.lumastack.lumawork.domain.employees.EmployeeSection
 import ru.lumastack.lumawork.domain.employees.sanitizeEmployeeConditionValue
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
+import ru.lumastack.lumawork.domain.requests.normalizeHistoryTerminalId
+import ru.lumastack.lumawork.domain.requests.terminalHistoryCondition
+import ru.lumastack.lumawork.domain.requests.terminalRequestHistory
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneUser
 import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
@@ -55,6 +60,7 @@ import ru.lumastack.lumawork.data.workschedule.WorkScheduleParser
 
 interface SimpleOneApi {
     suspend fun login(username: String, password: String): String
+    suspend fun terminalHistory(terminalId: String, authKey: String): List<SimpleOneRequest> = throw SimpleOneFailure.InvalidResponse
     suspend fun warehouseRequests(terminalId: String, authKey: String): List<SimpleOneRequest> = emptyList()
     suspend fun currentUser(authKey: String): SimpleOneUser
     suspend fun activeRequests(userId: String, authKey: String): List<SimpleOneRequest>
@@ -325,6 +331,42 @@ class OkHttpSimpleOneApi(
             totalCount = total,
             hasMore = total?.let { page.toLong() * perPage < it } ?: (items.size == perPage),
         )
+    }
+
+    override suspend fun terminalHistory(terminalId: String, authKey: String): List<SimpleOneRequest> {
+        val terminal = normalizeHistoryTerminalId(terminalId)
+        if (terminal.isEmpty()) return emptyList()
+        val records = linkedMapOf<String, SimpleOneRequest>()
+        var page = 1
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val url = "$origin/list/itsm_request".toHttpUrl().newBuilder()
+                .addQueryParameter("condition", terminalHistoryCondition(terminal))
+                .addQueryParameter("view", "Default")
+                .addQueryParameter("page", page.toString())
+                .addQueryParameter("per_page", PAGE_SIZE.toString())
+                .addQueryParameter("columns", (ACTIVE_COLUMNS + CLOSED_COLUMNS).distinct().joinToString(","))
+                .build()
+            val response = request(authenticatedRequest(url.toString(), authKey))
+            val items = simpleOneListItems(response) ?: throw SimpleOneFailure.InvalidResponse
+            val previousCount = records.size
+            items.forEach { item ->
+                val record = parseSimpleOneRequest(item, SimpleOneRequestSource.Closed)
+                if (record.number.isBlank()) throw SimpleOneFailure.InvalidResponse
+                records.putIfAbsent(record.id, record)
+            }
+            val total = simpleOneTotalCount(response)
+            val hasMore = total?.let { page.toLong() * PAGE_SIZE < it } ?: (items.size == PAGE_SIZE)
+            if (items.isNotEmpty() && records.size == previousCount) throw SimpleOneFailure.InvalidResponse
+            if (!hasMore) {
+                if (total != null && records.size < total) throw SimpleOneFailure.InvalidResponse
+                break
+            }
+            if (records.size == previousCount) throw SimpleOneFailure.InvalidResponse
+            page++
+        }
+        currentCoroutineContext().ensureActive()
+        return terminalRequestHistory(records.values.toList(), terminal)
     }
 
     override suspend fun warehouseRequests(terminalId: String, authKey: String): List<SimpleOneRequest> {
@@ -711,8 +753,7 @@ internal fun parseSimpleOneRequest(
             "client_service_parent",
         ),
         clientService = item.fieldDisplay("client_service_id", "client_service"),
-        requestType = item.field(
-            "multicard_request_type",
+        requestType = if ("multicard_request_type" in item) item.field("multicard_request_type") else item.field(
             "request_type",
             "itsm_request_type",
             "service_request_type",

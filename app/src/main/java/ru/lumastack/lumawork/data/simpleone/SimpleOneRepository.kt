@@ -14,6 +14,8 @@ import ru.lumastack.lumawork.domain.simpleone.ClosedArchiveSource
 import ru.lumastack.lumawork.domain.simpleone.ClosedSimpleOneArchive
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneSnapshot
+import ru.lumastack.lumawork.domain.requests.normalizeHistoryTerminalId
+import ru.lumastack.lumawork.domain.requests.terminalRequestHistory
 
 class SimpleOneRepository(
     private val api: SimpleOneApi,
@@ -182,6 +184,36 @@ class SimpleOneRepository(
             isWarehouse && target == normalize(terminal)
         }.distinctBy { it.id }.sortedByDescending { it.registeredAt }
     }
+
+    suspend fun cachedTerminalHistory(ownerUserId: String, terminalId: String): List<SimpleOneRequest>? {
+        val terminal = normalizeHistoryTerminalId(terminalId).takeIf(String::isNotEmpty) ?: return null
+        val session = storedSession(ownerUserId) ?: return null
+        return withCurrentSession(ownerUserId, session) {
+            supplementalCache.readClosedArchive(historyCacheScope(session, terminal))?.requests
+                ?.let { terminalRequestHistory(it, terminal) }
+        }
+    }
+
+    suspend fun terminalHistory(ownerUserId: String, terminalId: String): List<SimpleOneRequest> {
+        val terminal = normalizeHistoryTerminalId(terminalId)
+        require(terminal.isNotEmpty()) { "Некорректный ID терминала." }
+        val session = storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials
+        try {
+            val records = terminalRequestHistory(api.terminalHistory(terminal, session.authKey), terminal)
+            return withCurrentSession(ownerUserId, session) {
+                supplementalCache.saveClosedArchive(historyCacheScope(session, terminal), ClosedSimpleOneArchive(
+                    requests = records, updatedAtEpochMillis = nowEpochMillis(), isComplete = true, queryRevision = 2,
+                ))
+                records
+            }
+        } catch (error: SimpleOneFailure.Unauthorized) {
+            sessionMutex.withLock { if (storedSession(ownerUserId) == session) withContext(Dispatchers.IO) { sessionStore.clear(ownerUserId) } }
+            throw error
+        }
+    }
+
+    private fun historyCacheScope(session: StoredSimpleOneSession, terminalId: String): String =
+        "${session.ownerUserId}|terminal-history-v2|${simpleOneSessionFingerprint(session)}|$terminalId"
 
     suspend fun requestDetails(ownerUserId: String, request: SimpleOneRequest, force: Boolean = false, requiresCurrentVersion: Boolean = false): SimpleOneRequest {
         val requiredSession = if (requiresCurrentVersion) storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials else null

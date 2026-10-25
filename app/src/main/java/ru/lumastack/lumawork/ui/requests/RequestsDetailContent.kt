@@ -75,6 +75,8 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
     var notice by remember(request.id) { mutableStateOf<String?>(null) }
     var map by rememberSaveable(request.id) { mutableStateOf<String?>(null) }
     var companyTIN by rememberSaveable(request.id) { mutableStateOf<String?>(null) }
+    var historyPresented by rememberSaveable(request.id) { mutableStateOf(false) }
+    val historyTerminal = request.terminalId.ifBlank { data.value("ID терминал", "ID терминала") }
     var browser by remember(request.id) { mutableStateOf<Pair<String, String>?>(null) }
     val copy: (String) -> Unit = { text ->
         (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Заявка", text))
@@ -99,6 +101,10 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
     }
     AppHeaderActions(title = { Text("Детали") }) {
         if (state.isDetailLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        IconButton(onClick = { historyPresented = true },
+            enabled = state.isAuthorized && normalizeHistoryTerminalId(historyTerminal).isNotEmpty()) {
+            Icon(RequestDetailIcons.History, "История терминала")
+        }
     }
     val personalComment = comments.commentFor(request)
     val commentContent: (@Composable () -> Unit)? = if (personalComment == null) null else {
@@ -165,6 +171,11 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
             }
         }
     }
+    if (historyPresented) TerminalRequestHistoryDialog(
+        terminalId = historyTerminal, currentRequestId = request.id, ownerUserId = session.user.id,
+        sessionFingerprint = state.snapshot.sessionFingerprint, repository = repository,
+        offline = state.isOffline, authorized = state.isAuthorized, onDismiss = { historyPresented = false },
+    )
     map?.let { HomeRouteBrowser(it) { map = null } }
     browser?.let { (url, auth) -> RequestsBrowser(url, auth) { browser = null; actions.onOpenRequest(request) } }
     companyTIN?.let { CompanyLookupDialog(it, session, reference, state.isOffline) { companyTIN = null } }
@@ -409,7 +420,9 @@ private const val AISINO_DEFAULT = "https://market.evotor.ru/store/apps/43419d26
 private const val PAX_DEFAULT = "https://market.evotor.ru/store/apps/834b8dbb-2680-40cd-b1ff-98351f5f32e5#discussion-anchor"
 
 /** Small outline symbols matching the iOS detail controls without an icons dependency. */
-private object RequestDetailIcons {
+internal object RequestDetailIcons {
+    val History = outline("History", "M3 11A9 9 0 1 1 5 18 M3 4V11H10 M12 7V12L15 14")
+    val Filter = outline("Filter", "M3 6H21 M6 12H18 M9 18H15")
     val Copy = outline("Copy", "M8 5V2H21V17H18 M3 7H16V22H3Z")
     val Alarm = outline("Alarm", "M5 3L2 6 M19 3L22 6 M6 20L4 22 M18 20L20 22 M12 7V12L15 14 M21 12A9 9 0 1 1 3 12A9 9 0 1 1 21 12")
     val Sync = outline("Sync", "M20 8A8 8 0 0 0 6 5L3 8 M3 3V8H8 M4 16A8 8 0 0 0 18 19L21 16 M16 16H21V21")
