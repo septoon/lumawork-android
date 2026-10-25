@@ -33,7 +33,6 @@ fun terminalHistoryType(request: SimpleOneRequest): String = when (request.reque
 fun terminalRequestHistory(
     records: List<SimpleOneRequest>,
     terminalId: String,
-    excludingRequestId: String = "",
     showsReturnEquipment: Boolean = true,
     showsExpertise: Boolean = true,
 ): List<SimpleOneRequest> {
@@ -41,8 +40,7 @@ fun terminalRequestHistory(
     if (target.isEmpty()) return emptyList()
     return records.asSequence().filter { record ->
         val type = record.requestType.trim().lowercase(Locale.ROOT)
-        record.id != excludingRequestId && record.number != excludingRequestId &&
-            (showsReturnEquipment || !isClosedReturnEquipment(type)) &&
+        (showsReturnEquipment || !isClosedReturnEquipment(type)) &&
             (showsExpertise || !(type.contains("expert") || type.contains("экспертиз"))) &&
             (listOf(record.terminalId) + record.tableFields.filterKeys { it.trim().lowercase(Locale.ROOT) in listOf("id терминал", "id терминала") }.values)
                 .any { value -> normalizeHistoryTerminalId(value) == target || value.split(HISTORY_ID_SEPARATORS).any { normalizeHistoryTerminalId(it) == target } }

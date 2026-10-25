@@ -209,7 +209,7 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
         }
     }
     if (historyPresented) TerminalRequestHistoryDialog(
-        terminalId = historyTerminal, currentRequestId = request.id, ownerUserId = session.user.id,
+        terminalId = historyTerminal, ownerUserId = session.user.id,
         sessionFingerprint = state.snapshot.sessionFingerprint, repository = repository,
         offline = state.isOffline, authorized = state.isAuthorized, onDismiss = { historyPresented = false },
     )

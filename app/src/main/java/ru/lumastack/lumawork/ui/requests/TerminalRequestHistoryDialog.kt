@@ -32,7 +32,6 @@ import ru.lumastack.lumawork.ui.theme.AppSurfaces
 @Composable
 internal fun TerminalRequestHistoryDialog(
     terminalId: String,
-    currentRequestId: String,
     ownerUserId: String,
     sessionFingerprint: String,
     repository: SimpleOneRepository,
@@ -50,8 +49,8 @@ internal fun TerminalRequestHistoryDialog(
     var hasSnapshot by remember(scope) { mutableStateOf(false) }
     var loading by remember(scope) { mutableStateOf(true) }
     var error by remember(scope) { mutableStateOf<String?>(null) }
-    val visible = remember(records, terminalId, currentRequestId, showsReturns, showsExpertise) {
-        terminalRequestHistory(records, terminalId, currentRequestId, showsReturns, showsExpertise)
+    val visible = remember(records, terminalId, showsReturns, showsExpertise) {
+        terminalRequestHistory(records, terminalId, showsReturns, showsExpertise)
     }
     fun saveFilters(returns: Boolean, expertise: Boolean) {
         showsReturns = returns
@@ -110,7 +109,7 @@ internal fun TerminalRequestHistoryDialog(
                     }
                 } }
                 if (hasSnapshot && visible.isEmpty() && !loading) item("empty") {
-                    Text(if (showsReturns && showsExpertise) "Предыдущих закрытых заявок с этим ID терминала нет."
+                    Text(if (showsReturns && showsExpertise) "Закрытых заявок с этим ID терминала нет."
                         else "С выбранными фильтрами заявок нет.")
                 }
                 items(visible, key = { it.id }) { request ->

@@ -5,7 +5,7 @@ import org.junit.Test
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 
 class TerminalRequestHistoryTest {
-    @Test fun `history matches whole terminal preserves zeros excludes current and sorts parsed dates`() {
+    @Test fun `history includes current request matches whole terminal preserves zeros and sorts parsed dates`() {
         val records = listOf(
             request("current", "00123", "2026-10-25 10:00:00"),
             request("older", "00123", "30.09.2026 12:00"),
@@ -16,7 +16,7 @@ class TerminalRequestHistoryTest {
             request("multiple", "RR009; 00123", "2026-10-02 10:00:00"),
             request("undated", "00123", "1970-01-01 00:00:00"),
         )
-        assertEquals(listOf("multiple", "newer", "older", "undated"), terminalRequestHistory(records, "00123", "current").map { it.id })
+        assertEquals(listOf("current", "multiple", "newer", "older", "undated"), terminalRequestHistory(records, "00123").map { it.id })
         assertEquals("RR009", normalizeHistoryTerminalId(" rr 009\n"))
         assertEquals("", normalizeHistoryTerminalId("00123^ORsys_idISNOTEMPTY"))
         assertTrue(terminalRequestHistory(records, "").isEmpty())
