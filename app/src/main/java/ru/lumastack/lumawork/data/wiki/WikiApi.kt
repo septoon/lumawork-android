@@ -17,6 +17,7 @@ import ru.lumastack.lumawork.domain.wiki.WikiArticle
 import ru.lumastack.lumawork.domain.wiki.WikiSearchResult
 
 interface WikiApi {
+    suspend fun catalogVersion(): String?
     suspend fun search(query: String, limit: Int = 10): List<WikiSearchResult>
     suspend fun article(id: String, maxChars: Int = 90_000): WikiArticle
     suspend fun isPdfAvailable(id: String): Boolean
@@ -39,6 +40,11 @@ class OkHttpWikiApi(
         .retryOnConnectionFailure(true).build(),
 ) : WikiApi {
     private val base = origin.trimEnd('/').toHttpUrl()
+
+    override suspend fun catalogVersion(): String? {
+        val response = executeSuspend<WikiHealthResponse>(request(base.newBuilder().addPathSegment("health").build().toString()))
+        return response.snapshotId?.takeIf(String::isNotBlank) ?: response.contentVersion?.takeIf(String::isNotBlank)
+    }
 
     override suspend fun search(query: String, limit: Int): List<WikiSearchResult> {
         requireToken()
@@ -87,6 +93,9 @@ class OkHttpWikiApi(
     private fun requireToken() { if (token.isBlank()) throw WikiFailure.NotConfigured }
 
 }
+
+@Serializable
+private data class WikiHealthResponse(val snapshotId: String? = null, val contentVersion: String? = null)
 
 @Serializable
 private data class WikiSearchResponse(val query: String = "", val results: List<WikiSearchResult> = emptyList())

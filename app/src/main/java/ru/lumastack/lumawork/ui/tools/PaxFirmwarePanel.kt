@@ -68,8 +68,8 @@ internal fun PaxFirmwarePanel(
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         ToolsStepCard(1, "Модель PAX", colors.orange, artwork = when (state.paxModel) {
-            PaxModel.D230 -> R.drawable.tools_pax_d230
-            PaxModel.D270 -> R.drawable.tools_pax_d270
+            PaxModel.D230 -> R.drawable.tools_pax_d270
+            PaxModel.D270 -> R.drawable.tools_pax_d230
             PaxModel.Q25 -> R.drawable.tools_pax_q25
             PaxModel.S210 -> R.drawable.tools_pax_s210
         }) {

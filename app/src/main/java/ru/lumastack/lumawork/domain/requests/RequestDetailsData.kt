@@ -54,6 +54,7 @@ class RequestDetailsData(val request: SimpleOneRequest) {
         if (request.source == SimpleOneRequestSource.Closed) request.resolvedAt else "")
     val deadlineText = parseSimpleOneDate(deadline)?.format(DateTimeFormatter.ofPattern("d MMM, HH:mm", Locale.forLanguageTag("ru"))) ?: deadline
     fun sla(now: LocalDateTime = LocalDateTime.now()): RequestDetailSLA? {
+        if (request.source == SimpleOneRequestSource.Closed) return null
         val start = parseSimpleOneDate(first(value("Время создания в МК"), request.registeredAt)) ?: return null
         val end = parseSimpleOneDate(first(value("Предельный срок СУТС"), request.deadline)) ?: return null
         if (!end.isAfter(start)) return null

@@ -5,7 +5,6 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.toggleable
@@ -138,16 +137,27 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                                             onDelete = { avatar { auth.deleteAvatar() } },
                                             onError = { scope.launch { snackbars.showSnackbar(it) } }, size = 60.dp, showEmail = false) }
                                         item { SettingsSectionLabel("Профиль") }
-                                        item { SettingsLink("Профиль", SettingsIcon.Profile, !busy, onOpenProfile) }
-                                        item { SettingsLink("ГСМ профиль", SettingsIcon.Fuel, !busy) { page = SettingsPage.Gsm } }
+                                        item { SettingsGroup {
+                                            SettingsLink("Профиль", SettingsIcon.Profile, !busy, onOpenProfile)
+                                            SettingsGroupDivider()
+                                            SettingsLink("ГСМ профиль", SettingsIcon.Fuel, !busy) { page = SettingsPage.Gsm }
+                                        } }
                                         item { SettingsSectionLabel("Маршрут") }
-                                        item { SettingsLink("Старт и финиш", SettingsIcon.Route, !busy) { page = SettingsPage.Route } }
-                                        item { SettingsLink("Отправка ГСМ отчета", SettingsIcon.Notifications, !busy) { page = SettingsPage.GsmDelivery } }
+                                        item { SettingsGroup {
+                                            SettingsLink("Старт и финиш", SettingsIcon.Route, !busy) { page = SettingsPage.Route }
+                                            SettingsGroupDivider()
+                                            SettingsLink("Отправка ГСМ отчета", SettingsIcon.Notifications, !busy) { page = SettingsPage.GsmDelivery }
+                                        } }
                                         item { SettingsSectionLabel("Приложение") }
-                                        item { SettingsLink("Уведомления", SettingsIcon.Notifications, !busy) { page = SettingsPage.Notifications } }
-                                        item { SettingsLink("Экраны", SettingsIcon.Screens, !busy) { page = SettingsPage.Screens } }
-                                        item { SettingsLink("Оформление", SettingsIcon.Appearance, !busy) { page = SettingsPage.Appearance } }
-                                        item { SettingsLink("Проверить обновления", SettingsIcon.Updates, !busy, checkUpdates) }
+                                        item { SettingsGroup {
+                                            SettingsLink("Уведомления", SettingsIcon.Notifications, !busy) { page = SettingsPage.Notifications }
+                                            SettingsGroupDivider()
+                                            SettingsLink("Экраны", SettingsIcon.Screens, !busy) { page = SettingsPage.Screens }
+                                            SettingsGroupDivider()
+                                            SettingsLink("Оформление", SettingsIcon.Appearance, !busy) { page = SettingsPage.Appearance }
+                                            SettingsGroupDivider()
+                                            SettingsLink("Проверить обновления", SettingsIcon.Updates, !busy, checkUpdates)
+                                        } }
                                         item { SettingsSectionLabel("Безопасность") }
                                         item {
                                             var available by remember { mutableStateOf(salaryBiometricAvailable(context)) }
@@ -155,45 +165,56 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                                                 available = salaryBiometricAvailable(context)
                                                 onPauseOrDispose { }
                                             }
-                                            SettingsToggle("Использовать биометрию",
-                                                if (available) "Для входа в раздел «Зарплата»" else "Биометрия недоступна на этом устройстве",
-                                                settings.salaryBiometricEnabled, !busy && available, preferences::biometric)
+                                            SettingsGroup {
+                                                SettingsToggle("Использовать биометрию",
+                                                    if (available) "Для входа в раздел «Зарплата»" else "Биометрия недоступна на этом устройстве",
+                                                    settings.salaryBiometricEnabled, !busy && available, preferences::biometric)
+                                            }
                                         }
                                         item { SettingsSectionLabel("Аккаунт") }
-                                        item { AppPanel(shape = MaterialTheme.shapes.medium) {
+                                        item { SettingsGroup {
                                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                                 Text("Электронная почта", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                                 Text(session.user.email)
                                             }
-                                        } }
-                                        item { TextButton(onClick = { logoutRequested = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                                            Text("Выйти", color = MaterialTheme.colorScheme.error)
+                                            SettingsGroupDivider(start = 16.dp)
+                                            TextButton(onClick = { logoutRequested = true }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                                                Text("Выйти", color = MaterialTheme.colorScheme.error)
+                                            }
                                         } }
                                     }
                                     SettingsPage.Appearance -> {
                                         item { SettingsSectionLabel("Режим") }
-                                        items(AppAppearance.entries, key = { it.name }) { mode ->
-                                            AppPanel(onClick = { appearance.onChange(mode) }, shape = MaterialTheme.shapes.medium) {
-                                                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                    RadioButton(appearance.mode == mode, onClick = { appearance.onChange(mode) })
-                                                    Text(mode.title)
+                                        item { SettingsGroup {
+                                            AppAppearance.entries.forEachIndexed { index, mode ->
+                                                if (index > 0) SettingsGroupDivider()
+                                                Surface(onClick = { appearance.onChange(mode) }, color = Color.Transparent) {
+                                                    Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                        RadioButton(appearance.mode == mode, onClick = { appearance.onChange(mode) })
+                                                        Text(mode.title)
+                                                    }
                                                 }
                                             }
-                                        }
+                                        } }
                                         item { SettingsSectionLabel("Фон") }
-                                        item { SettingsToggle("Фоновый цвет", "Цветной фон экранов приложения", appearance.backgroundEnabled, true, appearance.onBackgroundChange) }
+                                        item { SettingsGroup {
+                                            SettingsToggle("Фоновый цвет", "Цветной фон экранов приложения", appearance.backgroundEnabled, true, appearance.onBackgroundChange)
+                                        } }
                                     }
                                     SettingsPage.Screens -> {
                                         item { Text("Выберите экраны, которые будут отображаться в меню. Должен остаться хотя бы один экран.",
                                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                                        items(destinations, key = { it.name }) { destination ->
+                                        item { SettingsGroup {
                                             val ids = destinations.map { it.name }
-                                            val checked = settings.navigation.enabled(destination.name, ids)
-                                            SettingsToggle(destination.title, null, checked,
-                                                !checked || settings.navigation.canDisable(destination.name, ids)) {
-                                                preferences.visibility(destination.name, it, ids)
+                                            destinations.forEachIndexed { index, destination ->
+                                                if (index > 0) SettingsGroupDivider(start = 16.dp)
+                                                val checked = settings.navigation.enabled(destination.name, ids)
+                                                SettingsToggle(destination.title, null, checked,
+                                                    !checked || settings.navigation.canDisable(destination.name, ids)) {
+                                                    preferences.visibility(destination.name, it, ids)
+                                                }
                                             }
-                                        }
+                                        } }
                                     }
                                     else -> Unit
                                 }
@@ -226,8 +247,21 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
 }
 
 @Composable
+private fun SettingsGroup(content: @Composable ColumnScope.() -> Unit) {
+    AppPanel(shape = MaterialTheme.shapes.large) {
+        Column(Modifier.fillMaxWidth(), content = content)
+    }
+}
+
+@Composable
+private fun SettingsGroupDivider(start: androidx.compose.ui.unit.Dp = 64.dp) {
+    HorizontalDivider(Modifier.padding(start = start, end = 16.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .16f))
+}
+
+@Composable
 private fun SettingsLink(title: String, icon: SettingsIcon, enabled: Boolean, onClick: () -> Unit) {
-    AppPanel(onClick = onClick, enabled = enabled, shape = MaterialTheme.shapes.medium) {
+    Surface(onClick = onClick, enabled = enabled, color = Color.Transparent) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(Modifier.size(36.dp).background(icon.color.copy(alpha = if (enabled) 1f else 0.38f), CircleShape),
@@ -242,16 +276,14 @@ private fun SettingsLink(title: String, icon: SettingsIcon, enabled: Boolean, on
 
 @Composable
 private fun SettingsToggle(title: String, subtitle: String?, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
-    AppPanel(shape = MaterialTheme.shapes.medium) {
-        Row(Modifier.fillMaxWidth().toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
-            .padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text(title)
-                if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Switch(checked, onCheckedChange = null, enabled = enabled)
+    Row(Modifier.fillMaxWidth().toggleable(checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
+        .padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(title)
+            if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Switch(checked, onCheckedChange = null, enabled = enabled)
     }
 }
 

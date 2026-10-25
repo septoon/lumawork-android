@@ -3,8 +3,18 @@ package ru.lumastack.lumawork.domain.requests
 import org.junit.Assert.*
 import org.junit.Test
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
+import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 
 class RequestDetailsDataTest {
+    @Test fun `closed request hides SLA even when archived deadlines are present`() {
+        val request = SimpleOneRequest("1", "REQ1", source = SimpleOneRequestSource.Closed,
+            registeredAt = "23.10.2026 10:00", deadline = "23.10.2026 14:00",
+            tableFields = mapOf("Время создания в МК" to "23.10.2026 10:00", "Предельный срок СУТС" to "23.10.2026 14:00"))
+        val now = java.time.LocalDateTime.of(2026, 10, 23, 15, 0)
+        assertNull(RequestDetailsData(request).sla(now))
+        assertNotNull(RequestDetailsData(request.copy(source = SimpleOneRequestSource.Active)).sla(now))
+    }
+
     @Test fun `installation keeps iOS missing model placeholder`() {
         val data = RequestDetailsData(SimpleOneRequest("1", "REQ1"))
         assertEquals("Информация отсутствует", data.sections.first { it.id == "install" }.fields.single().value)

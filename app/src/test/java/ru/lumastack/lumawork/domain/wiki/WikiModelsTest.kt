@@ -3,8 +3,29 @@ package ru.lumastack.lumawork.domain.wiki
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.ZoneId
+import kotlinx.serialization.json.Json
 
 class WikiModelsTest {
+    @Test
+    fun `legacy cached search time is not displayed as the catalog update date`() {
+        val snapshot = Json.decodeFromString<WikiSearchSnapshot>("""{"query":"VPN","results":[],"updatedAtEpochMillis":1792712930000}""")
+        assertEquals("Дата обновления каталога неизвестна.", wikiCatalogUpdateMessage(snapshot.snapshotId))
+    }
+
+    @Test
+    fun `catalog timestamp is interpreted as UTC and shown in the device zone`() {
+        assertEquals("Каталог обновлен 23.10.2026 в 02:48", wikiCatalogUpdateMessage("20261022T234850Z", ZoneId.of("Europe/Simferopol")))
+        assertEquals("Каталог обновлен 22.10.2026 в 23:48", wikiCatalogUpdateMessage("20261022T234850Z", ZoneId.of("UTC")))
+    }
+
+    @Test
+    fun `missing malformed and impossible catalog dates stay unknown`() {
+        listOf(null, "", "legacy", "2026-10-22T23:48:50Z", "20260230T120000Z", "20261022T250000Z").forEach {
+            assertEquals("Дата обновления каталога неизвестна.", wikiCatalogUpdateMessage(it, ZoneId.of("UTC")))
+        }
+    }
+
     @Test
     fun `parser extracts metadata headings bullets and important text`() {
         val document = WikiDocumentParser.parse(

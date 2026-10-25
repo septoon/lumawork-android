@@ -29,8 +29,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
@@ -45,19 +49,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.net.toUri
 import ru.lumastack.lumawork.R
-import ru.lumastack.lumawork.data.wiki.WikiRepository
 import ru.lumastack.lumawork.domain.wiki.WikiBlock
 import ru.lumastack.lumawork.domain.wiki.WikiSearchResult
 import ru.lumastack.lumawork.domain.wiki.cleanWikiText
+import ru.lumastack.lumawork.domain.wiki.wikiCatalogUpdateMessage
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.theme.appScreenBackground
 import ru.lumastack.lumawork.ui.theme.AppButton
@@ -67,17 +72,25 @@ import ru.lumastack.lumawork.ui.theme.AppPanel
 import ru.lumastack.lumawork.ui.theme.AppSurfaces
 
 @Composable
-fun WikiRoute(
-    ownerUserId: String,
-    startOffline: Boolean,
-    repository: WikiRepository,
-    widthClass: AppWidthClass,
-    modifier: Modifier = Modifier,
-) {
-    val wikiViewModel: WikiViewModel = viewModel(
-        key = "wiki-$ownerUserId-$startOffline",
-        factory = WikiViewModel.factory(repository, ownerUserId, startOffline),
-    )
+internal fun WikiCatalogInfoAction(model: WikiViewModel) {
+    val state by model.state.collectAsStateWithLifecycle()
+    var expanded by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    Box {
+        IconButton(onClick = {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            expanded = true
+            model.refreshCatalogVersion()
+        }) { Icon(Icons.Outlined.Info, contentDescription = "Информация о каталоге") }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            Text(wikiCatalogUpdateMessage(state.snapshotId), Modifier.widthIn(max = 280.dp).padding(16.dp),
+                style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+fun WikiRoute(wikiViewModel: WikiViewModel, widthClass: AppWidthClass, modifier: Modifier = Modifier) {
     val state by wikiViewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it); wikiViewModel.notice(null) } }

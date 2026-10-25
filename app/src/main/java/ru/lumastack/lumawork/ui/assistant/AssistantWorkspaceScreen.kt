@@ -46,6 +46,8 @@ import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import ru.lumastack.lumawork.ui.shell.AppHeaderSegments
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import ru.lumastack.lumawork.ui.wiki.WikiRoute
+import ru.lumastack.lumawork.ui.wiki.WikiViewModel
+import ru.lumastack.lumawork.ui.wiki.WikiCatalogInfoAction
 import java.io.File
 import ru.lumastack.lumawork.ui.theme.AppSurfaces
 import ru.lumastack.lumawork.ui.theme.appScreenBackground
@@ -60,6 +62,8 @@ fun AssistantWorkspaceRoute(session: AppSession, offline: Boolean, wiki: WikiRep
     val model: AssistantViewModel = viewModel(viewModelStoreOwner = models, key = "assistant",
         factory = AssistantViewModel.factory(context, session, offline, simpleOne, backpack))
     val state by model.state.collectAsStateWithLifecycle()
+    val wikiModel: WikiViewModel? = if (section == "wiki") viewModel(viewModelStoreOwner = models,
+        key = "wiki-${session.user.id}-$offline", factory = WikiViewModel.factory(wiki, session.user.id, offline)) else null
     val historyState = rememberSaveableStateHolder()
     val snackbar = remember { SnackbarHostState() }
     var history by rememberSaveable { mutableStateOf(false) }
@@ -70,7 +74,8 @@ fun AssistantWorkspaceRoute(session: AppSession, offline: Boolean, wiki: WikiRep
         if (result == SnackbarResult.ActionPerformed) model.retry()
     } }
     AppHeaderSegments(listOf("Чат", "Вики"), if (section == "wiki") 1 else 0,
-        { keyboard?.hide(); onSection(if (it == 0) "chat" else "wiki") })
+        { keyboard?.hide(); onSection(if (it == 0) "chat" else "wiki") },
+        actions = { wikiModel?.let { WikiCatalogInfoAction(it) } })
     Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             if (section != "wiki") Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
@@ -78,7 +83,7 @@ fun AssistantWorkspaceRoute(session: AppSession, offline: Boolean, wiki: WikiRep
                 TextButton(onClick = { keyboard?.hide(); history = true; model.history() }, enabled = !state.initializing) { Text("Предыдущие чаты") }
             }
             historyState.SaveableStateProvider(if (section == "wiki") "wiki" else "chat") {
-                if (section == "wiki") WikiRoute(session.user.id, offline, wiki, widthClass, Modifier.weight(1f))
+                if (wikiModel != null) WikiRoute(wikiModel, widthClass, Modifier.weight(1f))
                 else AssistantChat(model, state, offline, Modifier.weight(1f))
             }
         }

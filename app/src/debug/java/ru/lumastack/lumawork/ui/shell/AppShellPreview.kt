@@ -415,6 +415,7 @@ private val previewFuelRepository = FuelRepository(
 
 private val previewWikiRepository = WikiRepository(
     api = object : WikiApi {
+        override suspend fun catalogVersion(): String? = null
         override suspend fun search(query: String, limit: Int): List<WikiSearchResult> = emptyList<WikiSearchResult>().also { previewRefresh("wiki") }
         override suspend fun article(id: String, maxChars: Int): WikiArticle = error("unused")
         override suspend fun isPdfAvailable(id: String): Boolean = false

@@ -31,6 +31,7 @@ data class WikiUiState(
     val articleErrorMessage: String? = null,
     val notice: String? = null,
     val offline: Boolean = false,
+    val snapshotId: String? = null,
 )
 
 class WikiViewModel(
@@ -44,6 +45,7 @@ class WikiViewModel(
     val state = mutableState.asStateFlow()
     private var searchJob: Job? = null
     private var articleJob: Job? = null
+    private var catalogJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -51,11 +53,11 @@ class WikiViewModel(
                 val cached = repository.readSearch(ownerUserId)
                 if (cached != null) {
                     offlineResults = cached.results; offlineQuery = cached.query
-                    mutableState.update { it.copy(query = cached.query, results = cached.results) }
+                    mutableState.update { it.copy(query = cached.query, results = cached.results, snapshotId = cached.snapshotId) }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { notice("Не удалось прочитать сохранённый поиск Вики.") }
-            if (!startOffline) scheduleSearch(immediate = true)
+            if (!startOffline) { scheduleSearch(immediate = true); refreshCatalogVersion() }
         }
     }
 
@@ -64,7 +66,17 @@ class WikiViewModel(
         scheduleSearch(immediate = false)
     }
 
-    fun refresh() = scheduleSearch(immediate = true)
+    fun refresh() { scheduleSearch(immediate = true); refreshCatalogVersion() }
+    fun refreshCatalogVersion() {
+        if (startOffline) return
+        catalogJob?.cancel()
+        catalogJob = viewModelScope.launch {
+            try {
+                repository.refreshCatalogVersion(ownerUserId)?.let { version -> mutableState.update { it.copy(snapshotId = version) } }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Keep the last known catalog version, like iOS. */ }
+        }
+    }
     fun notice(value: String?) { mutableState.update { it.copy(notice = value) } }
 
     fun open(result: WikiSearchResult) {

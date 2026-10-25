@@ -1,6 +1,12 @@
 package ru.lumastack.lumawork.domain.wiki
 
 import kotlinx.serialization.Serializable
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.format.ResolverStyle
+import java.util.Locale
 
 @Serializable
 data class WikiSearchResult(
@@ -34,7 +40,19 @@ data class WikiSearchSnapshot(
     val query: String,
     val results: List<WikiSearchResult>,
     val updatedAtEpochMillis: Long? = null,
+    val snapshotId: String? = null,
 )
+
+fun wikiCatalogUpdateMessage(snapshotId: String?, zoneId: ZoneId = ZoneId.systemDefault()): String {
+    val unknown = "Дата обновления каталога неизвестна."
+    if (snapshotId == null || !snapshotId.matches(Regex("\\d{8}T\\d{6}Z"))) return unknown
+    val date = runCatching {
+        LocalDateTime.parse(snapshotId, DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss'Z'", Locale.ROOT)
+            .withResolverStyle(ResolverStyle.STRICT)).takeIf { it.year > 0 }
+            ?.atOffset(ZoneOffset.UTC)?.atZoneSameInstant(zoneId)
+    }.getOrNull() ?: return unknown
+    return "Каталог обновлен ${date.format(DateTimeFormatter.ofPattern("dd.MM.yyyy 'в' HH:mm", Locale.forLanguageTag("ru-RU")))}"
+}
 
 data class WikiDocument(
     val title: String,

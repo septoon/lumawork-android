@@ -543,7 +543,7 @@ private fun NavigationMenu(
     val ink = if (dark) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color(.08f, .10f, .11f)
     Column(modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
         Box(Modifier.fillMaxWidth().height(64.dp), contentAlignment = Alignment.CenterStart) {
-            Text("Инженер", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Medium,
+            Text("Инженер", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Normal,
                 color = ink)
         }
         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 44.dp) {
@@ -561,8 +561,8 @@ private fun NavigationMenu(
                             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             DestinationMark(destination)
                             Text(destination.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                                fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal)
+                                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 18.sp),
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal)
                         }
                     }
                 }
