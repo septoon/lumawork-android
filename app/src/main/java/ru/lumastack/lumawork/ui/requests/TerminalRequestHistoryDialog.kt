@@ -115,7 +115,7 @@ internal fun TerminalRequestHistoryDialog(
                 }
                 items(visible, key = { it.id }) { request ->
                     SelectionContainer {
-                        RequestStatusCard(terminalHistoryStatus(request), closed = true, compact = false) {
+                        RequestStatusCard(terminalHistoryStatus(request), closed = true, compact = false, compactStatus = true) {
                             val type = terminalHistoryType(request)
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text(request.displayNumber, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)

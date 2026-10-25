@@ -242,6 +242,7 @@ internal fun RequestStatusCard(
     compact: Boolean,
     modifier: Modifier = Modifier,
     border: BorderStroke? = null,
+    compactStatus: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(28.dp)
@@ -252,7 +253,8 @@ internal fun RequestStatusCard(
             Column(Modifier.fillMaxWidth().padding(if (compact) 14.dp else 18.dp),
                 verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp), content = content)
         }
-        Text(status, Modifier.fillMaxWidth().heightIn(min = 32.dp).padding(horizontal = 14.dp, vertical = 6.dp),
+        Text(status, Modifier.fillMaxWidth().heightIn(min = if (compactStatus) 24.dp else 32.dp)
+            .padding(horizontal = 14.dp, vertical = if (compactStatus) 2.dp else 6.dp),
             textAlign = TextAlign.Center, color = requestStatusTextColor(status),
             style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
     }
