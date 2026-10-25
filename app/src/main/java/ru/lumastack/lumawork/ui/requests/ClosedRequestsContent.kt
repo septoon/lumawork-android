@@ -238,16 +238,16 @@ private fun ClosedRequestCard(
 internal fun RequestStatusCard(
     status: String,
     closed: Boolean,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)? = null,
     compact: Boolean,
     modifier: Modifier = Modifier,
     border: BorderStroke? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(28.dp)
-    AppCard(onClick = onClick, modifier = modifier.fillMaxWidth(), shape = shape, border = border,
-        colors = CardDefaults.cardColors(containerColor = requestStatusColor(status, closed),
-            contentColor = MaterialTheme.colorScheme.onSurface)) {
+    val colors = CardDefaults.cardColors(containerColor = requestStatusColor(status, closed),
+        contentColor = MaterialTheme.colorScheme.onSurface)
+    val cardContent: @Composable ColumnScope.() -> Unit = {
         Surface(shape = shape, color = AppSurfaces.card.copy(alpha = 1f), border = BorderStroke(1.dp, AppSurfaces.border)) {
             Column(Modifier.fillMaxWidth().padding(if (compact) 14.dp else 18.dp),
                 verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp), content = content)
@@ -255,6 +255,11 @@ internal fun RequestStatusCard(
         Text(status, Modifier.fillMaxWidth().heightIn(min = 32.dp).padding(horizontal = 14.dp, vertical = 6.dp),
             textAlign = TextAlign.Center, color = requestStatusTextColor(status),
             style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+    }
+    if (onClick == null) {
+        AppCard(modifier = modifier.fillMaxWidth(), shape = shape, border = border, colors = colors, content = cardContent)
+    } else {
+        AppCard(onClick = onClick, modifier = modifier.fillMaxWidth(), shape = shape, border = border, colors = colors, content = cardContent)
     }
 }
 

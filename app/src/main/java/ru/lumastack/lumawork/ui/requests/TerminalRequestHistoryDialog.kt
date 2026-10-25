@@ -97,49 +97,35 @@ internal fun TerminalRequestHistoryDialog(
                             onClick = { saveFilters(showsReturns, !showsExpertise) })
                     }
                 }
-                Text("История выездов", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                RequestLoadingTitle(loading, Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold), text = "История выездов")
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Закрыть историю") }
             }
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item("terminal") { HistoryField("ID терминала", terminalId) }
-                if (loading) item("loading") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text(if (hasSnapshot) "Обновляю историю выездов" else "Загружаю историю выездов")
-                    }
-                }
                 error?.let { message -> item("error") {
                     Column {
                         Text(message, color = MaterialTheme.colorScheme.error)
                         if (!offline && authorized) TextButton(onClick = { revision++ }) { Text("Повторить") }
                     }
                 } }
-                if (hasSnapshot && visible.isEmpty()) item("empty") {
+                if (hasSnapshot && visible.isEmpty() && !loading) item("empty") {
                     Text(if (showsReturns && showsExpertise) "Предыдущих закрытых заявок с этим ID терминала нет."
                         else "С выбранными фильтрами заявок нет.")
                 }
                 items(visible, key = { it.id }) { request ->
-                    Card(shape = RoundedCornerShape(16.dp)) {
-                        SelectionContainer {
-                            Column(Modifier.fillMaxWidth()) {
-                                val status = terminalHistoryStatus(request)
-                                val type = terminalHistoryType(request)
-                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        Text(request.displayNumber, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                        Surface(color = closedTypeColor(type), shape = MaterialTheme.shapes.small) {
-                                            Text(type, Modifier.padding(8.dp), color = Color.White, style = MaterialTheme.typography.labelSmall)
-                                        }
-                                    }
-                                    HistoryField("Дата", terminalHistoryDate(request)?.format(HISTORY_DATE_FORMAT) ?: "Не указана")
-                                    HistoryField("Исполнитель", request.assignedUser.ifBlank { "Не указан" })
-                                }
-                                Surface(color = requestStatusColor(status, closed = true)) {
-                                    Text(status, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                                        color = requestStatusTextColor(status), style = MaterialTheme.typography.labelMedium)
+                    SelectionContainer {
+                        RequestStatusCard(terminalHistoryStatus(request), closed = true, compact = false) {
+                            val type = terminalHistoryType(request)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(request.displayNumber, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Surface(color = closedTypeColor(type), shape = RoundedCornerShape(12.dp)) {
+                                    Text(type, Modifier.widthIn(max = 150.dp).padding(horizontal = 10.dp, vertical = 6.dp),
+                                        color = Color.White, style = MaterialTheme.typography.labelMedium)
                                 }
                             }
+                            HistoryField("Дата", terminalHistoryDate(request)?.format(HISTORY_DATE_FORMAT) ?: "Не указана")
+                            HistoryField("Исполнитель", request.assignedUser.ifBlank { "Не указан" })
                         }
                     }
                 }
@@ -153,7 +139,8 @@ private fun HistoryField(title: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
         Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         SelectionContainer(Modifier.weight(1f)) {
-            Text(value, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End)
+            Text(value, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End,
+                fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
         }
     }
 }

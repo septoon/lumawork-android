@@ -76,13 +76,14 @@ import ru.lumastack.lumawork.ui.theme.LocalAppDarkTheme
 import ru.lumastack.lumawork.ui.shell.AppHeaderActions
 
 @Composable
-internal fun RequestDetailsTitle(
+internal fun RequestLoadingTitle(
     isLoading: Boolean,
     modifier: Modifier = Modifier,
     style: TextStyle = LocalTextStyle.current,
+    text: String = "Детали",
 ) {
     if (!isLoading) {
-        Text("Детали", modifier, style = style, textAlign = TextAlign.Center)
+        Text(text, modifier, style = style, textAlign = TextAlign.Center)
         return
     }
     val transition = rememberInfiniteTransition(label = "request-details-loading")
@@ -95,7 +96,7 @@ internal fun RequestDetailsTitle(
         start = Offset(textWidth * (phase - .5f), 0f),
         end = Offset(textWidth * (phase + .5f), 0f),
     )
-    Text("Детали", modifier.semantics { stateDescription = "Загрузка деталей заявки" },
+    Text(text, modifier.semantics { stateDescription = "Загрузка: $text" },
         style = style.copy(brush = brush), textAlign = TextAlign.Center,
         onTextLayout = { textWidth = it.size.width.coerceAtLeast(1).toFloat() })
 }
@@ -136,7 +137,7 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
             }
         }
     }
-    AppHeaderActions(title = { RequestDetailsTitle(state.isDetailLoading) }) {
+    AppHeaderActions(title = { RequestLoadingTitle(state.isDetailLoading) }) {
         IconButton(onClick = { historyPresented = true },
             enabled = state.isAuthorized && normalizeHistoryTerminalId(historyTerminal).isNotEmpty()) {
             Icon(RequestDetailIcons.History, "История выездов")
