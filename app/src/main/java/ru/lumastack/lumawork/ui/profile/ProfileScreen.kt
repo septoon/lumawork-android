@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.profile
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -144,7 +145,7 @@ fun ProfileRoute(
                     statisticsLoading = (readingArchive || isArchiveLoading) && archive?.requests.isNullOrEmpty(),
                     hasArchive = archive != null, documentCount = documentCount,
                     onOpenDocuments = { documentsOpen = true })
-                else LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                else LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     item(key = "avatar") {
                         ProfileAvatarEditor(session.user, images, enabled = !offline && !state.busy, busy = state.busy,
                             onUpload = vm::uploadAvatar, onDelete = vm::deleteAvatar, onError = vm::showError)

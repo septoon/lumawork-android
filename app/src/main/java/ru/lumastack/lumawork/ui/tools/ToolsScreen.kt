@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.tools
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
@@ -115,7 +116,7 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
     Scaffold(modifier = Modifier.background(toolsScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
             AppRefreshContainer(Modifier.widthIn(max = if (widthClass == AppWidthClass.Expanded) 1180.dp else 768.dp).fillMaxSize(), isRefreshing = state.loading, onRefresh = { model.usb.scan(); model.refresh() }) {
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (state.snapshot.operation.phase != UpdatePhase.Idle && section != ToolsSection.Pax) item {
                         Text(state.snapshot.operation.phase.title, style = MaterialTheme.typography.labelLarge)
                     }

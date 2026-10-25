@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.admin
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import android.content.Context
 import android.content.Intent
@@ -303,7 +304,7 @@ private fun AdminScreen(session: AppSession, state: AdminUiState, widthClass: Ap
         enabled = !state.saving, contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             Modifier.widthIn(max = 1100.dp).fillMaxSize(),
-            contentPadding = PaddingValues(20.dp),
+            contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {

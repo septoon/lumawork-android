@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.employees
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.compose.foundation.BorderStroke
@@ -135,7 +136,7 @@ private fun EmployeeScreen(
         onBack = onCloseEmployee,
     )
     if (!state.isAuthorized) {
-        Box(modifier.fillMaxSize().background(background).padding(20.dp), contentAlignment = Alignment.TopCenter) {
+        Box(modifier.fillMaxSize().background(background).padding(horizontal = AppContentHorizontalPadding, vertical = 20.dp), contentAlignment = Alignment.TopCenter) {
             MessagePanel("SimpleOne не подключён", "Войдите в SimpleOne на экране «Заявки», затем вернитесь к сотрудникам.")
         }
         return
@@ -164,7 +165,7 @@ private fun EmployeeScreen(
             }
         } else {
             Row(
-                modifier = Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp),
+                modifier = Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 AppPanel(
@@ -176,7 +177,7 @@ private fun EmployeeScreen(
                         onRefresh = onRefresh,
                         onOpenAddressPicker = onOpenAddressPicker,
                             onOpenEmployee = onOpenEmployee,
-                        contentPadding = PaddingValues(16.dp),
+                        contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp),
                         modifier = Modifier.fillMaxSize(),
                         listState = directoryState,
                     )
@@ -218,7 +219,7 @@ private fun EmployeeDirectoryContent(
     onOpenAddressPicker: () -> Unit,
     onOpenEmployee: (Employee) -> Unit,
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = PaddingValues(20.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
     listState: LazyListState = rememberLazyListState(),
 ) {
     val groups = remember(state.employees) {

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.requests
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -132,7 +133,7 @@ fun RequestsScreen(
     Column(modifier.fillMaxSize()) {
         if (selected == null || widthClass == AppWidthClass.Expanded) toolbar()
         if (showsDetailPane) {
-            Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 AppPanel(Modifier.weight(.43f).fillMaxHeight()) { list() }
                 AppPanel(Modifier.weight(.57f).fillMaxHeight()) {
                     detail(selected)
@@ -184,7 +185,7 @@ private fun RequestsListContent(
         modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize(),
     ) {
         if (state.mode == RequestsMode.Active && state.isAuthorized && !state.isLoading && visibleRequests.isEmpty()) {
-            Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 RequestsSearchAndFilters(state = state, count = 0, actions = actions)
                 ActiveRequestsEmptyState(Modifier.weight(1f).fillMaxWidth())
             }
@@ -193,7 +194,7 @@ private fun RequestsListContent(
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Fixed(columns),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.fillMaxSize(),

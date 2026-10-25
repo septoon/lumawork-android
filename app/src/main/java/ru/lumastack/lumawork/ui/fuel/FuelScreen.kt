@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.fuel
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -163,7 +164,7 @@ private fun FuelScreen(
         if (widthClass != AppWidthClass.Expanded) {
             LazyColumn(
                 Modifier.widthIn(max = 680.dp).fillMaxSize(),
-                contentPadding = PaddingValues(20.dp),
+                contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 fuelHeader(state, onAddFuel, onAddAdjustment, onSelectYear, onOpenImport, onOpenAnalytics)
@@ -173,7 +174,7 @@ private fun FuelScreen(
             }
         } else {
             Row(
-                Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp),
+                Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 LazyColumn(
@@ -188,7 +189,7 @@ private fun FuelScreen(
                     Modifier.weight(0.58f).fillMaxHeight(),
                 ) {
                     LazyColumn(
-                        contentPadding = PaddingValues(20.dp),
+                        contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         item(key = "months-title") {

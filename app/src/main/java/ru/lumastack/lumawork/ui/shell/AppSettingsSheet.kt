@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.shell
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
@@ -129,7 +130,7 @@ internal fun AppSettingsSheet(session: AppSession, offline: Boolean, auth: AuthR
                             })
                         }, snackbarHost = { SnackbarHost(snackbars) }) { padding ->
                             LazyColumn(Modifier.fillMaxSize().background(appScreenBackground()).padding(padding),
-                                contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 when (page) {
                                     SettingsPage.Root -> {
                                         item("avatar") { ProfileAvatarEditor(session.user, images, !offline && !busy, busy,
@@ -328,7 +329,7 @@ private fun RouteSettingsPage(session: AppSession, offline: Boolean, auth: AuthR
         })
     }, snackbarHost = { SnackbarHost(snackbars) }) { padding ->
         LazyColumn(Modifier.fillMaxSize().background(appScreenBackground()).padding(padding).imePadding(),
-            contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (offline) item { Text("Подключитесь к интернету, чтобы сохранить адреса.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             item { SettingsSectionLabel("Карты") }

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.ftp
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.*
 import android.os.Build
 import android.provider.DocumentsContract
@@ -192,7 +193,7 @@ private fun FtpRouteContent(session: AppSession, startOffline: Boolean, reposito
                 Text("Загрузки FTP", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 IconButton(onClick = model::hideQueue) { Icon(Icons.Default.Close, "Закрыть очередь") }
             }
-            LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (state.transfers.isEmpty()) item { FtpMessage("Загрузок пока нет", "Активные и завершённые передачи появятся здесь.") }
                 items(state.transfers, key = { it.id }) { record -> FtpTransferCard(record,
                     { openRecord(record, false) }, { openRecord(record, true) }, { showFiles(record) },
@@ -210,7 +211,7 @@ private fun FtpRouteContent(session: AppSession, startOffline: Boolean, reposito
 
 @Composable
 private fun FtpBreadcrumbBar(path: String, navigate: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = AppContentHorizontalPadding), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = { navigate("/") }) { Icon(Icons.Default.Home, "В начало FTP") }
         ftpBreadcrumbs(path).forEachIndexed { index, (name, target) ->
             if (index > 0) Text("›", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -222,7 +223,7 @@ private fun FtpBreadcrumbBar(path: String, navigate: (String) -> Unit) {
 @Composable
 private fun FtpCatalog(state: FtpUiState, model: FtpViewModel, copyPath: (String) -> Unit) {
     AppRefreshContainer(Modifier.fillMaxSize(), isRefreshing = state.isLoading, onRefresh = model::refresh, enabled = !state.offline) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { AppTextField(state.search, model::search, "Поиск в папке", search = true, singleLine = true, modifier = Modifier.fillMaxWidth()) }
             if (state.path == "/" && state.search.isBlank()) item {
                 AppCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -277,7 +278,7 @@ private fun FtpRemoteRow(item: FtpItem, favorite: Boolean, active: FtpTransfer?,
 @Composable
 private fun FtpSavedDownloads(state: FtpUiState, search: (String) -> Unit, openFtp: () -> Unit, open: (FtpTransfer) -> Unit,
     share: (FtpTransfer) -> Unit, files: (FtpTransfer) -> Unit, delete: (FtpTransfer) -> Unit, rootFiles: () -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { AppTextField(state.downloadedSearch, search, "Поиск в загрузках", search = true, singleLine = true, modifier = Modifier.fillMaxWidth()) }
         item { Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {

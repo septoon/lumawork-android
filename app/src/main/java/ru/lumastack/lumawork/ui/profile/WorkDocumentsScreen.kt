@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.profile
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
@@ -266,7 +267,7 @@ private fun WorkDocumentsContent(session: AppSession, offline: Boolean, canManag
         snackbarHost = { SnackbarHost(messages) },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
-            LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (offline) item { Text("Сохранённый список документов. Для открытия и изменений подключитесь к интернету.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 if (loading) item {
                     if (documents.isEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {

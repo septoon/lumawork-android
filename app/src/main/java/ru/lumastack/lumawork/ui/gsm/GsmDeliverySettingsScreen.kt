@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.gsm
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.app.TimePickerDialog
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -75,7 +76,7 @@ internal fun GsmDeliverySettingsScreen(session: AppSession, offline: Boolean, on
             }) { Text("Сохранить") }
         })
     }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp),
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (loading || saving) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             item {

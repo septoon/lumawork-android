@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.wiki
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -141,7 +142,7 @@ private fun WikiScreen(
             }
         } else {
             Row(
-                Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp),
+                Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 WikiSearchPanel(
@@ -177,7 +178,7 @@ private fun WikiSearchPanel(
         LazyColumn(
             Modifier.fillMaxSize(),
             state = listState,
-            contentPadding = PaddingValues(20.dp),
+            contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "search") {
@@ -273,7 +274,7 @@ private fun WikiArticlePanel(
     LazyColumn(
         modifier,
         state = listState,
-        contentPadding = PaddingValues(20.dp),
+        contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item(key = "article-header") {
@@ -399,7 +400,7 @@ private fun WikiMessage(message: String, error: Boolean = false) {
 @Composable
 private fun WikiEmpty(title: String, message: String) {
     Column(
-        Modifier.fillMaxSize().padding(32.dp),
+        Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {

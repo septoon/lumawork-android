@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.timereport
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -147,7 +148,7 @@ fun TimeReportRoute(
     }
     Box(modifier.fillMaxSize()) {
         if (state.snapshot == null) {
-            Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 24.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     AppButton(onClick = ::refresh, enabled = !state.isInitializing && !state.isLoading && !simpleOneState.isInitializing) {
                         if (state.isLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)

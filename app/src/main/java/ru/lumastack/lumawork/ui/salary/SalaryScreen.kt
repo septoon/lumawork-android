@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.salary
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -71,7 +72,7 @@ private fun SalaryScreen(session: AppSession, offline: Boolean, state: SalaryUiS
         (state.error ?: state.notice)?.let { snackbar.showSnackbar(it); model.clearMessage() }
     }
     Column(Modifier.fillMaxSize().background(appScreenBackground())) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding), verticalAlignment = Alignment.CenterVertically) {
             Text("Зарплата", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             TextButton(onClick = model::add, enabled = !offline && !state.saving) { Text("Добавить выплату") }
         }
@@ -85,7 +86,7 @@ private fun SalaryScreen(session: AppSession, offline: Boolean, state: SalaryUiS
                         if (!state.loading && !state.initializing) Text("Добавьте первую выплату, чтобы увидеть месячные сводки.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else if (width == AppWidthClass.Expanded) {
-                    Row(Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                    Row(Modifier.widthIn(max = 1180.dp).fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 20.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                         Column(Modifier.weight(.45f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             SalarySummary(state, model::hidden, model::summaryPeriod)
                             SalaryAnalytics(state, model::toggleKind)
@@ -93,7 +94,7 @@ private fun SalaryScreen(session: AppSession, offline: Boolean, state: SalaryUiS
                         SalaryPeriods(state, model::year, model::month, Modifier.weight(.55f).fillMaxHeight())
                     }
                 } else {
-                    LazyVerticalGrid(columns = GridCells.Adaptive(145.dp), contentPadding = PaddingValues(20.dp),
+                    LazyVerticalGrid(columns = GridCells.Adaptive(145.dp), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.widthIn(max = 760.dp).fillMaxSize()) {
                         item(key = "summary", span = { GridItemSpan(maxLineSpan) }) { SalarySummary(state, model::hidden, model::summaryPeriod) }
@@ -239,7 +240,7 @@ private fun SalaryMonthDialog(session: AppSession, offline: Boolean, month: Sala
                     Text(salaryMonthTitle(month.key), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                     TextButton(onClick = close) { Text("Закрыть") }
                 }
-                LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                LazyColumn(contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     item(key = "total") {
                         SalaryInset {
                             Text("Итог за месяц", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)

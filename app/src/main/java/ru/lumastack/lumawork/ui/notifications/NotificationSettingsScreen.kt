@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.notifications
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -101,7 +102,7 @@ fun NotificationSettingsScreen(session: AppSession, offline: Boolean, onBack: ()
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+            contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {

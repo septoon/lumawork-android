@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.requests
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.combinedClickable
@@ -100,7 +101,7 @@ fun ClosedRequestsContent(
     LaunchedEffect(query, startDay, endDay, prepared) { page = 1; listState.scrollToItem(0) }
     LaunchedEffect(safePage) { listState.scrollToItem(0) }
     LazyColumn(
-        state = listState, modifier = modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp),
+        state = listState, modifier = modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(key = "closed-search") {

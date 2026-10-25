@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.home
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -175,7 +176,7 @@ fun HomeScreen(
                 enabled = !state.isSending,
                 onRefresh = { model.refresh(); onRefreshRequests(); archiveRefreshRevision++ }) {
                 if (tablet) {
-                    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Column(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         dayCard()
                         androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                         val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
@@ -199,7 +200,7 @@ fun HomeScreen(
                     }
                 } else LazyColumn(
                     Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp),
+                    contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
                     state.notice?.let { item { Snackbar { Text(it) } } }
                     state.errorMessage?.let { item { Snackbar { Text(it) } } }
@@ -215,7 +216,7 @@ fun HomeScreen(
                 }
             }
             if (!tablet) Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = .96f)) {
-                Box(Modifier.widthIn(max = maxContentWidth).fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Box(Modifier.widthIn(max = maxContentWidth).fillMaxWidth().padding(horizontal = AppContentHorizontalPadding, vertical = 12.dp)) {
                     AppButton(onClick = { keyboard?.hide(); if (state.canSend) sendConfirmation = true else model.send() },
                         enabled = !state.isSending, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(50)) {
                         if (state.isSending) CircularProgressIndicator(Modifier.size(18.dp), color = androidx.compose.material3.LocalContentColor.current, strokeWidth = 2.dp)

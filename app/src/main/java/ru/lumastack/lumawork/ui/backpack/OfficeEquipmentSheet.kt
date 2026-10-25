@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.backpack
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -42,7 +43,7 @@ internal fun OfficeEquipmentSheet(
             if (selected == null) {
                 AppTextField(state.officeQuery, onQuery, "Название, модель, серийный номер", search = true, singleLine = true, modifier = Modifier.padding(16.dp).fillMaxWidth())
                 val items = remember(state.snapshot?.officeEquipment, state.officeQuery) { state.snapshot?.officeEquipment.orEmpty().filter { it.matches(state.officeQuery) } }
-                LazyVerticalGrid(columns = GridCells.Adaptive(154.dp), contentPadding = PaddingValues(16.dp),
+                LazyVerticalGrid(columns = GridCells.Adaptive(154.dp), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -64,7 +65,7 @@ internal fun OfficeEquipmentSheet(
                     }
                 }
             } else {
-                LazyVerticalGrid(columns = GridCells.Adaptive(260.dp), contentPadding = PaddingValues(20.dp),
+                LazyVerticalGrid(columns = GridCells.Adaptive(260.dp), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

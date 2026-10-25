@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.auth
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -145,7 +146,7 @@ fun AuthContent(
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .imePadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 24.dp),
+            .padding(horizontal = AppContentHorizontalPadding, vertical = 24.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(

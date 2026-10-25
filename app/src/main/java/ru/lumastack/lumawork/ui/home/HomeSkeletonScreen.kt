@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.home
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -37,7 +38,7 @@ fun HomeSkeletonScreen() {
         .clearAndSetSemantics { contentDescription = "Загружается главная" }, contentAlignment = Alignment.TopCenter) {
         val tablet = maxWidth >= 600.dp
         Column(Modifier.widthIn(max = 1200.dp).fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 20.dp),
+            Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = AppContentHorizontalPadding),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 SkeletonBlock(phase, Modifier.size(32.dp), round = true)
                 Spacer(Modifier.weight(1f))
@@ -45,7 +46,7 @@ fun HomeSkeletonScreen() {
                 Spacer(Modifier.weight(1f))
                 SkeletonBlock(phase, Modifier.size(40.dp), round = true)
             }
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(20.dp),
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)) {
                 if (tablet) SkeletonDay(phase)
                 SkeletonRequests(phase)
@@ -59,7 +60,7 @@ fun HomeSkeletonScreen() {
                     }
                 }
             }
-            if (!tablet) SkeletonBlock(phase, Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            if (!tablet) SkeletonBlock(phase, Modifier.padding(horizontal = AppContentHorizontalPadding, vertical = 12.dp)
                 .fillMaxWidth().height(50.dp), round = true)
         }
     }

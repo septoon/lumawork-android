@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.employees
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -37,7 +38,7 @@ internal fun EmployeeDetail(
     var sectionId by rememberSaveable(employee.sysId) { mutableStateOf<String?>(null) }
     employee.detailSections.firstOrNull { it.id == sectionId }?.let { section ->
         ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = { sectionId = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
-            LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            LazyColumn(contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 item {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -61,7 +62,7 @@ internal fun EmployeeDetail(
             }
         }
     }
-    LazyColumn(modifier, state = listState, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(modifier, state = listState, contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(key = "toolbar") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Spacer(Modifier.weight(1f))

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.requests
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -42,7 +43,7 @@ private fun RequestsRouteContent(session: AppSession, repository: SimpleOneRepos
     widthClass: AppWidthClass, actions: RequestsActions) {
     if (!state.initialArchiveReady) {
         val isBusy = state.isInitializing || state.isClosedLoading || state.isLoading
-        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 24.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (isBusy) {
                     CircularProgressIndicator(Modifier.size(36.dp), strokeWidth = 3.dp)
@@ -64,7 +65,7 @@ private fun RequestsRouteContent(session: AppSession, repository: SimpleOneRepos
         return
     }
     if (!state.isAuthorized && !state.isOffline) {
-        Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.TopCenter) {
+        Box(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 520.dp)) { SimpleOneConnectionCard(state, actions) }
         }
         return
@@ -182,12 +183,12 @@ private fun RequestsToolbar(state: SimpleOneUiState, actions: RequestsActions, c
         }
     }
     Column {
-        if (busy) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.End) {
+        if (busy) Row(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding), horizontalArrangement = Arrangement.End) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         }
-        state.archiveProgress?.let { Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall) }
-        state.errorMessage?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
-        message?.let { text -> Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        state.archiveProgress?.let { Text(it, Modifier.padding(horizontal = AppContentHorizontalPadding), style = MaterialTheme.typography.bodySmall) }
+        state.errorMessage?.let { Text(it, Modifier.padding(horizontal = AppContentHorizontalPadding), color = MaterialTheme.colorScheme.error) }
+        message?.let { text -> Row(Modifier.padding(horizontal = AppContentHorizontalPadding), verticalAlignment = Alignment.CenterVertically) {
             Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = { message = null }) { Text("Закрыть") }
         } }

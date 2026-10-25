@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.coordination
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
@@ -71,19 +72,19 @@ internal fun CoordinationGroupClosedContent(scopeKey: String, state: GroupClosed
                 }
             }
         }
-        if (!authorized) { CoordinationMessage("SimpleOne не подключён", "Войдите в SimpleOne на экране «Заявки».", Modifier.padding(16.dp)); return }
+        if (!authorized) { CoordinationMessage("SimpleOne не подключён", "Войдите в SimpleOne на экране «Заявки».", Modifier.padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp)); return }
         if (region == null) {
-            CoordinationMessage("Укажите город в профиле", "Для закрытых заявок группы нужен город инженера из списка поддерживаемых городов.", Modifier.padding(16.dp))
+            CoordinationMessage("Укажите город в профиле", "Для закрытых заявок группы нужен город инженера из списка поддерживаемых городов.", Modifier.padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp))
             return
         }
-        Text(region.title, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.titleSmall)
-        AppTextField(query, { query = it }, "Поиск по всему архиву", search = true, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(region.title, Modifier.padding(horizontal = AppContentHorizontalPadding), style = MaterialTheme.typography.titleSmall)
+        AppTextField(query, { query = it }, "Поиск по всему архиву", search = true, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding, vertical = 8.dp))
+        Row(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("${filtered.size} из ${state.totalCount ?: state.records.size}", style = MaterialTheme.typography.bodySmall)
             Text(if (query.isBlank()) "Сегодня и вчера" else "Весь архив", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
         }
         AppRefreshContainer(Modifier.weight(1f), state.isLoading, onRefresh, enabled = !offline) {
-            LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (offline) item("offline") { Text("Сохранённый архив. Обновление доступно при подключении к сети.", style = MaterialTheme.typography.bodySmall) }
                 state.errorMessage?.let { error -> item("error") { Text(error, color = MaterialTheme.colorScheme.error) } }
                 if (state.isLoading) item("progress") { Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {

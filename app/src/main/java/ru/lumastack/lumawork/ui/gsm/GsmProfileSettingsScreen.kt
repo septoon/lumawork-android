@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.gsm
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import ru.lumastack.lumawork.domain.model.UserProfile
 import ru.lumastack.lumawork.data.auth.AuthRepository
 import androidx.activity.compose.BackHandler
@@ -215,7 +216,7 @@ fun GsmProfileSettingsScreen(
     ) { padding ->
         LazyColumn(
             Modifier.fillMaxSize().padding(padding).imePadding(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+            contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             if (loading || importing) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.assistant
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -135,7 +136,7 @@ private fun AssistantChat(model: AssistantViewModel, state: AssistantState, offl
     }
     Column(modifier.fillMaxWidth().imePadding(), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.weight(1f).widthIn(max = 900.dp).fillMaxWidth()) {
-            LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (offline) item { Text("Без сети · сохранённые чаты доступны для чтения", style = MaterialTheme.typography.labelMedium) }
                 if (state.initializing || state.loadingMessages) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                 if (state.messageCursor != null) item { TextButton(onClick = model::moreMessages, enabled = !state.loadingMessages && !state.sending) { Text("Предыдущие сообщения") } }
@@ -158,7 +159,7 @@ private fun AssistantChat(model: AssistantViewModel, state: AssistantState, offl
                 modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)) { Text("К последнему сообщению ↓") }
         }
         HorizontalDivider()
-        Column(Modifier.widthIn(max = 900.dp).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.widthIn(max = 900.dp).fillMaxWidth().padding(horizontal = AppContentHorizontalPadding, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (state.preparingAttachment) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Подготовка вложения…", style = MaterialTheme.typography.bodySmall) }
             state.attachment?.let { attachment ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

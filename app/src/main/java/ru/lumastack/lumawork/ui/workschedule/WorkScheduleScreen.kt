@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.workschedule
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -85,7 +86,7 @@ internal fun WorkScheduleScreen(
             onRefresh = onRefresh,
             enabled = state.isAuthorized && !state.isOffline,
         ) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp)) {
                 item(key = "toolbar") {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Spacer(Modifier.weight(1f))

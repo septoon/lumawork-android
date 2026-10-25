@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.fuel
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -106,7 +107,7 @@ fun FuelImportScreen(
             }
         },
     ) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             model.error?.let { message -> item {
                 Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer) {
                     Text(message, Modifier.padding(12.dp), color = MaterialTheme.colorScheme.onErrorContainer)

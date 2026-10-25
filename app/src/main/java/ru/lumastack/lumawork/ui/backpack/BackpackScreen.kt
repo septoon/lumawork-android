@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.backpack
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
@@ -160,7 +161,7 @@ private fun BackpackScreen(
     AppRefreshContainer(modifier.fillMaxSize().background(background), isRefreshing = state.isLoading, onRefresh = onRefresh,
         enabled = state.isAuthorized, contentAlignment = Alignment.TopCenter) {
         if (widthClass == AppWidthClass.Expanded) {
-            Row(Modifier.widthIn(max = 1400.dp).fillMaxSize().padding(16.dp),
+            Row(Modifier.widthIn(max = 1400.dp).fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 AppPanel(Modifier.weight(.45f).fillMaxHeight()) {
                     BackpackOverview(state, groups, visibleGroups, AppWidthClass.Compact,
@@ -213,7 +214,7 @@ private fun BackpackOverview(
     LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize(),
@@ -385,7 +386,7 @@ private fun BackpackDetails(
     LazyVerticalGrid(
         state = gridState,
         columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(20.dp),
+        contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier.widthIn(max = 1050.dp).fillMaxSize(),

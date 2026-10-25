@@ -63,6 +63,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.graphics.Color
 
+/** Outer screen margin, aligned with the leading edge of the header menu button. */
+val AppContentHorizontalPadding = 8.dp
+
 /** The same compact label and rounded, lightly filled input used by the iOS forms. */
 @Composable
 fun AppTextField(

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.coordination
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -122,19 +123,19 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
             }
         } else {
             Column(Modifier.widthIn(max = 1100.dp).fillMaxSize()) {
-                if (state.selectedEngineerId != null) Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (state.selectedEngineerId != null) Row(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding), verticalAlignment = Alignment.CenterVertically) {
                     val engineer = coordinationEngineers(state.currentGroup?.requests.orEmpty()).firstOrNull { it.id == state.selectedEngineerId }
                     Text(engineer?.name ?: "Заявки", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 2)
                     IconButton(onClick = model::refresh, enabled = state.isAuthorized && !offline && !state.isLoading) { Icon(Icons.Default.Refresh, "Обновить заявки инженера") }
                 }
-                if (simpleOne.isAuthorized && user == null) Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (simpleOne.isAuthorized && user == null) Column(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     if (simpleOne.isResolvingUser || simpleOne.isLoading || simpleOne.isInitializing) { CircularProgressIndicator(); Text("Проверяю профиль SimpleOne…") }
                     else {
                         CoordinationMessage("Профиль SimpleOne недоступен", simpleOne.errorMessage ?: "Для открытия координации требуется подтверждённый профиль SimpleOne.")
                         TextButton(onClick = { requestsActions?.onResolveCurrentUser?.invoke() }, enabled = !offline) { Text("Повторить") }
                     }
                 }
-                else if (!state.isAuthorized) CoordinationMessage("SimpleOne не подключён", "Войдите в SimpleOne на экране «Заявки», затем вернитесь в координацию.", Modifier.padding(16.dp))
+                else if (!state.isAuthorized) CoordinationMessage("SimpleOne не подключён", "Войдите в SimpleOne на экране «Заявки», затем вернитесь в координацию.", Modifier.padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp))
                 else AppRefreshContainer(Modifier.weight(1f), state.isLoading, model::refresh, enabled = !offline) {
                     holder.SaveableStateProvider("active-${state.section}-${state.region}-${state.selectedEngineerId}") {
                         CoordinationActiveContent(state, user?.displayName?.ifBlank { user.username } ?: "Текущий пользователь", width,
@@ -168,13 +169,13 @@ private fun CoordinationActiveContent(state: CoordinationUiState, userName: Stri
         }
     }
     if (group != null && requests.isEmpty()) {
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             header()
             ActiveRequestsEmptyState(Modifier.weight(1f).fillMaxWidth())
         }
         return
     }
-    LazyVerticalGrid(GridCells.Fixed(if (width == AppWidthClass.Compact) 1 else 2), contentPadding = PaddingValues(16.dp),
+    LazyVerticalGrid(GridCells.Fixed(if (width == AppWidthClass.Compact) 1 else 2), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
         item("summary", span = { GridItemSpan(maxLineSpan) }) {
             header()

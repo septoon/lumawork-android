@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.requests
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -162,7 +163,7 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
                     } }, enabled = state.isAuthorized && !state.isOffline,
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = Color.White),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp).heightIn(min = 52.dp)) {
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding, vertical = 8.dp).heightIn(min = 52.dp)) {
                         Icon(RequestDetailIcons.Browser, null, Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
                         Text("Выдача оборудования", style = MaterialTheme.typography.titleMedium)
@@ -194,7 +195,7 @@ internal fun RequestDetailsBody(
     afterSections: LazyListScope.() -> Unit = {},
 ) {
     var barcode by rememberSaveable(request.id) { mutableStateOf<String?>(null) }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 14.dp, bottom = bottomPadding),
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = AppContentHorizontalPadding, end = AppContentHorizontalPadding, top = 14.dp, bottom = bottomPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item("header") { RequestDetailsHeader(data, onCopy, onOpenTerminal) }
         beforeSections()

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.fuel
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -25,7 +26,7 @@ internal fun FuelArchiveScreen(state: FuelUiState, onDismiss: () -> Unit, onEdit
     Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, topBar = { TopAppBar(colors = appTopBarColors(), title = { Text("Архив топлива") }, navigationIcon = {
         IconButton(onClick = onDismiss, enabled = !state.isSaving) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
     }) }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             state.errorMessage?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
             state.notice?.let { item { Text(it, color = MaterialTheme.colorScheme.primary) } }
             item {

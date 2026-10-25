@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.fuel
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -74,7 +75,7 @@ fun FuelAnalyticsScreen(records: List<FuelRecord>, onDismiss: () -> Unit) {
         Box(Modifier.fillMaxSize().padding(insets), contentAlignment = Alignment.TopCenter) {
             LazyColumn(
                 modifier = Modifier.widthIn(max = 780.dp).fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item {

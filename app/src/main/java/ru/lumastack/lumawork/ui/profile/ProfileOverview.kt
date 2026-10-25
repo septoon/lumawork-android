@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.profile
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -52,7 +53,7 @@ internal fun ProfileOverview(
         "Цвет" to profile?.vehicleColor, "Объем двигателя" to profile?.engineVolumeCm3.withUnit("см³"),
         "Мощность" to profile?.enginePowerHp.withUnit("л.с."), "Начальный пробег" to profile?.initialMileageKm.withUnit("км"),
     ).populated()
-    LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(Modifier.widthIn(max = 760.dp).fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item(key = "identity") {
             AppPanel {
                 Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {

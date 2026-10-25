@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.timereport
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -146,7 +147,7 @@ private fun TimeReportOverview(
     }
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(20.dp),
+        contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier.widthIn(max = 1100.dp).fillMaxSize(),
@@ -274,7 +275,7 @@ private fun TimeReportMonthDetails(
     val columns = if (widthClass == AppWidthClass.Compact) 1 else 2
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(20.dp),
+        contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier.widthIn(max = 1100.dp).fillMaxSize(),

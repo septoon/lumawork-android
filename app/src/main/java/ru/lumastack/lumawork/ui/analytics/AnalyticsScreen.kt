@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.analytics
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -64,7 +65,7 @@ fun AnalyticsScreen(state: SimpleOneUiState, widthClass: AppWidthClass, onRefres
             }
         } else {
             LazyColumn(Modifier.widthIn(max = 1120.dp).fillMaxSize(),
-                contentPadding = PaddingValues(if (widthClass == AppWidthClass.Compact) 16.dp else 20.dp)) {
+                contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = if (widthClass == AppWidthClass.Compact) 16.dp else 20.dp)) {
                 item(key = "summary") { AnalyticsSummary(analytics, Modifier.padding(bottom = 14.dp)) }
                 if (state.hasLoadedClosedArchive || state.closedArchive.requests.isNotEmpty()) {
                     item(key = "source") {

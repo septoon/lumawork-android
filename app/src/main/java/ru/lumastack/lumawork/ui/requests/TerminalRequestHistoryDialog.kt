@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.requests
 
+import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -99,7 +100,7 @@ internal fun TerminalRequestHistoryDialog(
                     fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Закрыть историю") }
             }
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item("terminal") { HistoryField("ID терминала", terminalId) }
                 if (loading) item("loading") {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
