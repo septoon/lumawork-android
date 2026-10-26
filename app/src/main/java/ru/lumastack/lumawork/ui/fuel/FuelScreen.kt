@@ -58,6 +58,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.NumberFormat
 import java.util.Locale
+import ru.lumastack.lumawork.data.fuel.FuelReceipt
 import ru.lumastack.lumawork.data.fuel.FuelRepository
 import ru.lumastack.lumawork.data.route.RouteRepository
 import ru.lumastack.lumawork.domain.fuel.FuelAdjustmentKind
@@ -95,35 +96,40 @@ fun FuelRoute(
     var analyticsOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
     var importOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
     val archiveAvailable = FuelArchivePolicy.isAvailable(session.user.email, BuildConfig.FUEL_ARCHIVE_OWNER_EMAIL)
-    FuelScreen(
-        state = state,
-        widthClass = widthClass,
-        onRefresh = fuelViewModel::refresh,
-        onSelectYear = fuelViewModel::selectYear,
-        onToggleMonth = fuelViewModel::toggleMonth,
-        onAddFuel = fuelViewModel::addFuel,
-        onAddAdjustment = fuelViewModel::addAdjustment,
-        onEdit = fuelViewModel::edit,
-        onUpdateDraft = fuelViewModel::updateDraft,
-        onCloseEditor = fuelViewModel::closeEditor,
-        onSave = fuelViewModel::save,
-        onRequestDelete = fuelViewModel::requestDelete,
-        onCancelDelete = fuelViewModel::cancelDelete,
-        onConfirmDelete = fuelViewModel::confirmDelete,
-        archiveAvailable = archiveAvailable,
-        onOpenArchive = { archiveOpen = true },
-        onOpenAnalytics = { analyticsOpen = true },
-        onOpenImport = { importOpen = true },
-        modifier = modifier,
-    )
-    if (analyticsOpen) Dialog(onDismissRequest = { analyticsOpen = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        FuelAnalyticsScreen(state.snapshot.records, onDismiss = { analyticsOpen = false })
-    }
-    if (archiveOpen && archiveAvailable) Dialog(onDismissRequest = { if (!state.isSaving) archiveOpen = false }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !state.isSaving)) {
-        FuelArchiveScreen(state, onDismiss = { archiveOpen = false }, onEdit = fuelViewModel::edit, onDelete = fuelViewModel::requestDelete)
-    }
-    if (importOpen) Dialog(onDismissRequest = {}, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = false, dismissOnClickOutside = false)) {
-        FuelImportScreen(session, startOffline, onDismiss = { importOpen = false }, onCommitted = { result -> importOpen = false; fuelViewModel.importsCommitted(result.notice) })
+    FuelReceiptsHost(session, startOffline) { receipts, receiptsLoading, onOpenReceipts ->
+        FuelScreen(
+            state = state,
+            receipts = receipts,
+            receiptsLoading = receiptsLoading,
+            onOpenReceipts = onOpenReceipts,
+            widthClass = widthClass,
+            onRefresh = fuelViewModel::refresh,
+            onSelectYear = fuelViewModel::selectYear,
+            onToggleMonth = fuelViewModel::toggleMonth,
+            onAddFuel = fuelViewModel::addFuel,
+            onAddAdjustment = fuelViewModel::addAdjustment,
+            onEdit = fuelViewModel::edit,
+            onUpdateDraft = fuelViewModel::updateDraft,
+            onCloseEditor = fuelViewModel::closeEditor,
+            onSave = fuelViewModel::save,
+            onRequestDelete = fuelViewModel::requestDelete,
+            onCancelDelete = fuelViewModel::cancelDelete,
+            onConfirmDelete = fuelViewModel::confirmDelete,
+            archiveAvailable = archiveAvailable,
+            onOpenArchive = { archiveOpen = true },
+            onOpenAnalytics = { analyticsOpen = true },
+            onOpenImport = { importOpen = true },
+            modifier = modifier,
+        )
+        if (analyticsOpen) Dialog(onDismissRequest = { analyticsOpen = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            FuelAnalyticsScreen(state.snapshot.records, onDismiss = { analyticsOpen = false })
+        }
+        if (archiveOpen && archiveAvailable) Dialog(onDismissRequest = { if (!state.isSaving) archiveOpen = false }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !state.isSaving)) {
+            FuelArchiveScreen(state, receipts, receiptsLoading, onOpenReceipts, onDismiss = { archiveOpen = false }, onEdit = fuelViewModel::edit, onDelete = fuelViewModel::requestDelete)
+        }
+        if (importOpen) Dialog(onDismissRequest = {}, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = false, dismissOnClickOutside = false)) {
+            FuelImportScreen(session, startOffline, onDismiss = { importOpen = false }, onCommitted = { result -> importOpen = false; fuelViewModel.importsCommitted(result.notice) })
+        }
     }
     state.editorDraft?.let { draft ->
         FuelEditorDialog(draft, state.editingRecord != null, state.isSaving, state.editorErrorMessage,
@@ -139,6 +145,9 @@ fun FuelRoute(
 @Composable
 private fun FuelScreen(
     state: FuelUiState,
+    receipts: List<FuelReceipt>,
+    receiptsLoading: Boolean,
+    onOpenReceipts: (String) -> Unit,
     widthClass: AppWidthClass,
     onRefresh: () -> Unit,
     onSelectYear: (String) -> Unit,
@@ -169,7 +178,8 @@ private fun FuelScreen(
             ) {
                 fuelHeader(state, onAddFuel, onAddAdjustment, onSelectYear, onOpenImport, onOpenAnalytics)
                 fuelMessages(state)
-                fuelMonths(state, onToggleMonth, onEdit, onRequestDelete)
+                fuelMonths(state, onToggleMonth, onEdit, onRequestDelete, receipts, receiptsLoading, onOpenReceipts)
+                fuelReceiptOnlyMonthPanels(state, receipts, receiptsLoading, onOpenReceipts)
                 if (archiveAvailable) item(key = "archive") { ArchivePanel(state.archivedCount, onOpenArchive) }
             }
         } else {
@@ -198,7 +208,8 @@ private fun FuelScreen(
                                 Text("Расчёт и записи", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        fuelMonths(state, onToggleMonth, onEdit, onRequestDelete)
+                        fuelMonths(state, onToggleMonth, onEdit, onRequestDelete, receipts, receiptsLoading, onOpenReceipts)
+                        fuelReceiptOnlyMonthPanels(state, receipts, receiptsLoading, onOpenReceipts)
                     }
                 }
             }
@@ -273,6 +284,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelMonths(
     onToggleMonth: (String) -> Unit,
     onEdit: (FuelRecord) -> Unit,
     onDelete: (FuelRecord) -> Unit,
+    receipts: List<FuelReceipt>,
+    receiptsLoading: Boolean,
+    onOpenReceipts: (String) -> Unit,
 ) {
     if (state.visibleMonths.isEmpty() && !state.isLoading) {
         item(key = "empty") { FuelMessage("Данных пока нет", "Добавьте пробег, заправку или корректировку.") }
@@ -280,6 +294,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelMonths(
     items(state.visibleMonths, key = FuelSummaryMonth::key) { month ->
         FuelMonthPanel(
             month = month,
+            receipts = receipts.filter { it.month == month.key },
+            receiptsLoading = receiptsLoading,
+            onOpenReceipts = { onOpenReceipts(month.key) },
             records = state.currentRecords.filter { it.recordType == FuelRecordType.Fuel && it.resolvedMonthKey == month.key },
             enabled = !state.isSaving && !state.isOffline,
             expanded = state.expandedMonthKey == month.key,
@@ -287,6 +304,27 @@ private fun androidx.compose.foundation.lazy.LazyListScope.fuelMonths(
             onEdit = onEdit,
             onDelete = onDelete,
         )
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.fuelReceiptOnlyMonthPanels(
+    state: FuelUiState,
+    receipts: List<FuelReceipt>,
+    loading: Boolean,
+    onOpen: (String) -> Unit,
+) {
+    val months = fuelReceiptOnlyMonths(receipts, state.snapshot.records)
+    if (months.isEmpty()) return
+    item(key = "receipt-only-title") {
+        Text("Чеки без записей", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    }
+    items(months, key = { "receipt-only-$it" }) { month ->
+        AppPanel {
+            Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(fuelReceiptMonthLabel(month), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                FuelReceiptsButton(receipts.filter { it.month == month }, loading) { onOpen(month) }
+            }
+        }
     }
 }
 
@@ -325,6 +363,9 @@ private fun FuelBalancePanel(state: FuelUiState) {
 @Composable
 private fun FuelMonthPanel(
     month: FuelSummaryMonth,
+    receipts: List<FuelReceipt>,
+    receiptsLoading: Boolean,
+    onOpenReceipts: () -> Unit,
     records: List<FuelRecord>,
     enabled: Boolean,
     expanded: Boolean,
@@ -352,6 +393,7 @@ private fun FuelMonthPanel(
                 Icon(if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = if (expanded) "Свернуть месяц" else "Раскрыть месяц", modifier = Modifier.padding(start = 8.dp))
             }
+            FuelReceiptsButton(receipts, receiptsLoading, onOpenReceipts)
             if (expanded) {
                 HorizontalDivider()
                 FuelLine("Пройдено км", "${number(month.totalMileage)} км")

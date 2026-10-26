@@ -11,6 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import ru.lumastack.lumawork.data.fuel.FuelReceipt
 import ru.lumastack.lumawork.domain.fuel.*
 import ru.lumastack.lumawork.ui.theme.appScreenBackground
 import ru.lumastack.lumawork.ui.theme.appTopBarColors
@@ -19,7 +20,7 @@ import ru.lumastack.lumawork.ui.theme.AppPanel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun FuelArchiveScreen(state: FuelUiState, onDismiss: () -> Unit, onEdit: (FuelRecord) -> Unit, onDelete: (FuelRecord) -> Unit) {
+internal fun FuelArchiveScreen(state: FuelUiState, receipts: List<FuelReceipt>, receiptsLoading: Boolean, onOpenReceipts: (String) -> Unit, onDismiss: () -> Unit, onEdit: (FuelRecord) -> Unit, onDelete: (FuelRecord) -> Unit) {
     val records = remember(state.snapshot.records) { state.snapshot.records.filter(FuelArchivePolicy::isArchived).sortedWith(compareByDescending(FuelRecord::date).thenByDescending(FuelRecord::stableId)) }
     val summary = remember(records) { FuelSummaryCalculator.build(records) }
     val groups = remember(records) { records.groupBy(FuelRecord::resolvedMonthKey).toSortedMap(reverseOrder()) }
@@ -46,6 +47,7 @@ internal fun FuelArchiveScreen(state: FuelUiState, onDismiss: () -> Unit, onEdit
                 AppPanel {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(summary.monthly.firstOrNull { it.key == month }?.label ?: month, style = MaterialTheme.typography.titleMedium)
+                        FuelReceiptsButton(receipts.filter { it.month == month }, receiptsLoading) { onOpenReceipts(month) }
                         entries.forEachIndexed { index, record ->
                             if (index > 0) HorizontalDivider()
                             FuelRecordRow(record, enabled = !state.isSaving && !state.isOffline, onEdit = { onEdit(record) }, onDelete = { onDelete(record) })
