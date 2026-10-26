@@ -11,11 +11,16 @@ import android.os.Build
 import android.os.CancellationSignal
 import androidx.activity.compose.BackHandler
 import androidx.annotation.RequiresApi
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,6 +35,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +60,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -75,6 +83,8 @@ import ru.lumastack.lumawork.data.salary.SalaryPasscodeStore
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.ui.theme.appScreenBackground
 import ru.lumastack.lumawork.ui.theme.AppButton
+import ru.lumastack.lumawork.ui.theme.appTopBarColors
+import ru.lumastack.lumawork.ui.shell.AppHeaderActions
 
 val LocalSalaryBiometricEnabled = androidx.compose.runtime.staticCompositionLocalOf { true }
 
@@ -223,6 +233,11 @@ fun SalaryAccessGate(
     ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler(
         enabled = !hasUnlockedOnce && state.phase == SalaryAccessPhase.RecoveryCode,
     ) { cancelPending(); state = state.returnToPin() }
+    if (!hasUnlockedOnce) AppHeaderActions {
+        SalaryPinIconButton(onClick = ::leave) {
+            Icon(Icons.Default.Close, contentDescription = "Закрыть ввод PIN")
+        }
+    }
 
     val lockContent: @Composable () -> Unit = { SalaryAccessScreen(
         state = state,
@@ -230,7 +245,7 @@ fun SalaryAccessGate(
         offline = startOffline,
         biometricAvailable = biometricAvailable && state.savedPin != null,
         biometricBusy = activeBiometric != null,
-        showBackButton = hasUnlockedOnce,
+        showHeader = hasUnlockedOnce,
         onCancel = ::leave,
         onBack = { cancelPending(); state = state.returnToPin() },
         onDigit = { digit ->
@@ -250,7 +265,7 @@ fun SalaryAccessGate(
         onRequestRecovery = ::requestRecovery,
         onRecoveryCode = { state = state.recoveryInput(it) },
         onVerifyRecovery = ::verifyRecovery,
-        modifier = modifier,
+        modifier = if (hasUnlockedOnce) Modifier else modifier,
     ) }
     if (hasUnlockedOnce) Dialog(onDismissRequest = {
         if (state.phase == SalaryAccessPhase.RecoveryCode) { cancelPending(); state = state.returnToPin() } else leave()
@@ -259,6 +274,7 @@ fun SalaryAccessGate(
     )) { lockContent() } else lockContent()
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SalaryAccessScreen(
     state: SalaryAccessState,
@@ -266,7 +282,7 @@ private fun SalaryAccessScreen(
     offline: Boolean,
     biometricAvailable: Boolean,
     biometricBusy: Boolean,
-    showBackButton: Boolean,
+    showHeader: Boolean,
     onCancel: () -> Unit,
     onBack: () -> Unit,
     onDigit: (Int) -> Unit,
@@ -279,26 +295,38 @@ private fun SalaryAccessScreen(
     modifier: Modifier,
 ) {
     val title = when (state.phase) {
-        SalaryAccessPhase.EnterPin -> "Сведения о ЗП"
+        SalaryAccessPhase.EnterPin -> null
         SalaryAccessPhase.CreatePin -> if (state.savedPin == null) "Придумайте PIN" else "Придумайте новый PIN"
         SalaryAccessPhase.ConfirmPin -> "Повторите PIN"
         SalaryAccessPhase.RecoveryCode -> "Восстановление PIN"
     }
-    Box(
+    Column(
         modifier.fillMaxSize().background(appScreenBackground()).safeDrawingPadding(),
-        contentAlignment = Alignment.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(
-            Modifier.widthIn(max = 420.dp).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (showBackButton && state.phase == SalaryAccessPhase.RecoveryCode) IconButton(onClick = onBack) {
+        if (showHeader) CenterAlignedTopAppBar(
+            title = { Text("Зарплата") },
+            navigationIcon = {
+                if (state.phase == SalaryAccessPhase.RecoveryCode) SalaryPinIconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад к вводу PIN")
                 }
-                Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                IconButton(onClick = onCancel) { Icon(Icons.Default.Close, contentDescription = "Закрыть ввод PIN") }
+            },
+            actions = {
+                SalaryPinIconButton(onClick = onCancel) {
+                    Icon(Icons.Default.Close, contentDescription = "Закрыть ввод PIN")
+                }
+            },
+            colors = appTopBarColors(),
+            windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+        )
+        Column(
+            Modifier.weight(1f).widthIn(max = 420.dp).fillMaxWidth()
+                .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically),
+        ) {
+            if (title != null) {
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             }
             if (state.phase == SalaryAccessPhase.RecoveryCode) {
                 Text("Введите 6 цифр из письма", style = MaterialTheme.typography.titleMedium)
@@ -314,7 +342,7 @@ private fun SalaryAccessScreen(
                     isError = state.error != null,
                 )
                 AppButton(onClick = onVerifyRecovery, enabled = !state.isBusy && state.recoveryCode.length == 6 && !offline) { Text("Подтвердить код") }
-                TextButton(onClick = onRequestRecovery, enabled = !state.isBusy && !offline) { Text("Отправить код повторно") }
+                SalaryPinTextButton(onClick = onRequestRecovery, enabled = !state.isBusy && !offline) { Text("Отправить код повторно") }
             } else {
                 Row(
                     Modifier.padding(vertical = 12.dp).semantics { contentDescription = "Введено ${state.input.length} из 4 цифр PIN" },
@@ -339,14 +367,14 @@ private fun SalaryAccessScreen(
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         val creating = state.phase != SalaryAccessPhase.EnterPin
-                        TextButton(
+                        SalaryPinTextButton(
                             onClick = if (creating) onRestartSetup else onRequestRecovery,
                             modifier = Modifier.weight(1f),
                             enabled = !state.isBusy && !biometricBusy && (creating || !offline),
                         ) { Text(if (creating) "Сбросить ввод" else "Забыли PIN?", textAlign = TextAlign.Center) }
                         Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { SalaryPinDigit(0, !state.isBusy && !biometricBusy, onDigit) }
                         val showBiometric = state.phase == SalaryAccessPhase.EnterPin && state.input.isEmpty() && biometricAvailable
-                        TextButton(onClick = if (showBiometric) onBiometric else onDelete, modifier = Modifier.weight(1f), enabled = !state.isBusy && !biometricBusy) {
+                        SalaryPinTextButton(onClick = if (showBiometric) onBiometric else onDelete, modifier = Modifier.weight(1f), enabled = !state.isBusy && !biometricBusy) {
                             Text(if (showBiometric) "Биометрия" else "Удалить", textAlign = TextAlign.Center)
                         }
                     }
@@ -362,9 +390,36 @@ private fun SalaryAccessScreen(
 
 @Composable
 private fun SalaryPinDigit(digit: Int, enabled: Boolean, onDigit: (Int) -> Unit) {
-    TextButton(onClick = { onDigit(digit) }, enabled = enabled, modifier = Modifier.size(68.dp)) {
+    SalaryPinTextButton(onClick = { onDigit(digit) }, enabled = enabled, modifier = Modifier.size(68.dp)) {
         Text(digit.toString(), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
     }
+}
+
+@Composable
+private fun SalaryPinTextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    TextButton(onClick = onClick, enabled = enabled, interactionSource = interaction,
+        modifier = modifier.then(salaryPinPressAnimation(interaction)), content = content)
+}
+
+@Composable
+private fun SalaryPinIconButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    IconButton(onClick = onClick, interactionSource = interaction,
+        modifier = salaryPinPressAnimation(interaction), content = content)
+}
+
+@Composable
+private fun salaryPinPressAnimation(interaction: MutableInteractionSource): Modifier {
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) .92f else 1f,
+        animationSpec = spring(dampingRatio = .7f, stiffness = 700f), label = "PIN button press")
+    return Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
 }
 
 private tailrec fun Context.salaryActivity(): Activity? = when (this) {
