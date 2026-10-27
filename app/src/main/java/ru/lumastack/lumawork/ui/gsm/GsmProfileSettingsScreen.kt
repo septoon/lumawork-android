@@ -81,6 +81,7 @@ fun GsmProfileSettingsScreen(
     var imported by rememberSaveable(owner, stateSaver = importSaver) { mutableStateOf(restored?.imported ?: GsmProfileImport(GsmProfile(), emptyMap(), emptyList())) }
     var importing by remember(owner) { mutableStateOf(false) }
     var importError by rememberSaveable(owner) { mutableStateOf<String?>(null) }
+    var importWarning by rememberSaveable(owner) { mutableStateOf<String?>(null) }
     var importStarted by rememberSaveable(owner) { mutableStateOf(false) }
     var confirmReplace by remember { mutableStateOf(false) }
     var sourcesOpen by rememberSaveable(owner) { mutableStateOf(false) }
@@ -90,8 +91,8 @@ fun GsmProfileSettingsScreen(
     var serverConfirmedEmpty by remember(owner, session.token) { mutableStateOf(false) }
     var profileReady by rememberSaveable(owner) { mutableStateOf(false) }
     var pendingVehicleId by rememberSaveable(owner) { mutableStateOf<String?>(null) }
-    var normInput by rememberSaveable(owner) { mutableStateOf("") }
-    var odometerInput by rememberSaveable(owner) { mutableStateOf(restored?.editor?.draft?.defaultStartOdometer?.toString().orEmpty()) }
+    var normInput by rememberSaveable(owner) { mutableStateOf(restored?.normInput.orEmpty()) }
+    var odometerInput by rememberSaveable(owner) { mutableStateOf(restored?.odometerInput ?: restored?.editor?.draft?.defaultStartOdometer?.toString().orEmpty()) }
     val snackbars = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val currentOnBack by rememberUpdatedState(onBack)
@@ -100,13 +101,14 @@ fun GsmProfileSettingsScreen(
     fun edit(transform: (GsmProfile) -> GsmProfile) { editor = editor.edit(transform) }
     // Device-only draft, scoped by account. This never calls PUT /gsm/profile.
     SideEffect {
-        if (editor.isEdited) drafts.edit().putString(owner, json.encodeToString(GsmLocalDraft(editor, imported))).apply()
+        if (editor.isEdited) drafts.edit().putString(owner, json.encodeToString(GsmLocalDraft(editor, imported, normInput, odometerInput))).apply()
         else drafts.edit().remove(owner).apply()
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             importing = true
             importError = null
+            importWarning = null
             try {
                 val projects = editor.snapshot.projects
                 val result = withContext(Dispatchers.IO) {
@@ -116,9 +118,12 @@ fun GsmProfileSettingsScreen(
                 }
                 imported = result
                 edit { result.profile }
-                normInput = result.profile.fuelNorm.toString()
-                odometerInput = result.profile.defaultStartOdometer.toString()
-                snackbars.showSnackbar("Данные прочитаны. Проверьте все поля и нажмите «Сохранить».")
+                normInput = result.profile.fuelNorm.takeIf { "fuelNorm" in result.sources }?.toString().orEmpty()
+                odometerInput = result.profile.defaultStartOdometer.takeIf { "defaultStartOdometer" in result.sources }?.toString().orEmpty()
+                if (result.warnings.isNotEmpty()) {
+                    importWarning = "Распознанные данные уже перенесены в черновик. Заполните или проверьте вручную:\n\n" +
+                        result.warnings.joinToString("\n\n") { "• $it" }
+                } else snackbars.showSnackbar("Данные прочитаны. Проверьте все поля и нажмите «Сохранить».")
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { importError = error.message ?: "Не удалось прочитать XLSX." }
             finally { importing = false }
@@ -233,7 +238,7 @@ fun GsmProfileSettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Можно загрузить XLSX отчёт за предыдущий месяц или заполнить поля вручную.", style = MaterialTheme.typography.bodyMedium)
                     OutlinedButton(enabled = enabled && serverConfirmedEmpty, onClick = { if (editor.isEdited) confirmReplace = true else openPicker() }) { Text("Загрузить XLSX за предыдущий месяц") }
-                    if (imported.sources.isNotEmpty()) {
+                    if (imported.sources.isNotEmpty() || imported.warnings.isNotEmpty()) {
                         Text("Проверьте все поля. Данные сохранятся в аккаунте только после нажатия «Сохранить».", style = MaterialTheme.typography.bodyMedium)
                         Text("При сохранении ФИО и должность дополнят пустые поля профиля LumaWork. Город переносится только при явном указании в адресе; заполненные поля сохранятся.", style = MaterialTheme.typography.bodySmall)
                         val city = draft.fillingUserProfile(UserProfile()).city
@@ -293,16 +298,16 @@ fun GsmProfileSettingsScreen(
         }
     }
 
-    importError?.let { message ->
+    (importError ?: importWarning)?.let { message ->
         AlertDialog(
-            onDismissRequest = { importError = null },
-            title = { Text("Не удалось загрузить отчёт ГСМ") },
+            onDismissRequest = { importError = null; importWarning = null },
+            title = { Text(if (importError != null) "Не удалось загрузить отчёт ГСМ" else "Проверьте данные после импорта") },
             text = {
                 Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
                     SelectionContainer { Text(message) }
                 }
             },
-            confirmButton = { TextButton(onClick = { importError = null }) { Text("Понятно") } },
+            confirmButton = { TextButton(onClick = { importError = null; importWarning = null }) { Text(if (importError != null) "Понятно" else "Дозаполнить профиль") } },
         )
     }
     if (confirmReplace) AlertDialog(onDismissRequest = { confirmReplace = false }, title = { Text("Заменить черновик данными XLSX?") },
@@ -443,4 +448,4 @@ private fun Throwable.gsmMessage(fallback: String = "Не удалось вып�
     (this as? GsmProfileFailure)?.message ?: fallback
 
 @kotlinx.serialization.Serializable
-private data class GsmLocalDraft(val editor: GsmProfileEditor, val imported: GsmProfileImport)
+private data class GsmLocalDraft(val editor: GsmProfileEditor, val imported: GsmProfileImport, val normInput: String? = null, val odometerInput: String? = null)

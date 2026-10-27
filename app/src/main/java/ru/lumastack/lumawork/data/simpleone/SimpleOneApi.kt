@@ -1088,7 +1088,7 @@ private fun simpleOneTotalCount(response: JsonObject): Int? {
     }
 }
 
-private fun SimpleOneRequest.mergeMissing(fallback: SimpleOneRequest): SimpleOneRequest = copy(
+internal fun SimpleOneRequest.mergeMissing(fallback: SimpleOneRequest): SimpleOneRequest = copy(
     sysId = sysId.ifBlank { fallback.sysId },
     number = number.ifBlank { fallback.number },
     incomingNumber = incomingNumber.ifBlank { fallback.incomingNumber },

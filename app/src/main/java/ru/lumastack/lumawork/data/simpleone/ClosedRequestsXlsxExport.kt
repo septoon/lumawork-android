@@ -105,7 +105,7 @@ internal object ClosedRequestsXlsxExport {
         "Использованная SIM карта" to request.usedSimCard,
     ).apply {
         request.tableFields.forEach { (key, value) ->
-            if (value.isNotBlank() || get(key).isNullOrBlank()) put(key, value)
+            if (get(key).isNullOrBlank()) put(key, value)
         }
     }
 

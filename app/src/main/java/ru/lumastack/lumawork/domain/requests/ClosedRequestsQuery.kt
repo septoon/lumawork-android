@@ -61,17 +61,22 @@ fun SimpleOneRequest.closedRequestType(): String = requestType.ifBlank { closedT
 fun SimpleOneRequest.closedTerminalId(): String = terminalId.ifBlank { closedTableValue("ID терминал", "ID терминала") }
 fun SimpleOneRequest.closedCustomer(): String = customer.ifBlank { closedTableValue("Заказчик") }
 fun SimpleOneRequest.closedAddress(): String = address.ifBlank { closedTableValue("Адрес установки терминала", "Адрес") }
+fun SimpleOneRequest.closedClosureCode(): String = closureCode.ifBlank { closedTableValue("Код закрытия") }
 
 fun SimpleOneRequest.closedStatusTitle(): String {
-    if (isClosedReturnEquipment(closedRequestType())) {
-        return when (val status = displayState.trim().ifBlank { closedTableValue("МК Статус", "Статус") }) {
-            "completed" -> "Выполнена"
-            "closed", "" -> "Закрыта"
-            else -> status
-        }
+    val code = closedClosureCode()
+    if (!isClosedReturnEquipment(closedRequestType()) && code.isNotBlank()) {
+        return if (normalizedClosedRequestsText(code).startsWith("решено с выездом")) "Выполнена" else "Отказ"
     }
-    val code = closureCode.ifBlank { closedTableValue("Код закрытия") }
-    return if (normalizedClosedRequestsText(code).startsWith("решено с выездом")) "Выполнена" else "Отказ"
+    val status = displayState.trim().ifBlank { closedTableValue("МК Статус", "Статус") }.ifBlank { stateRaw.trim() }
+    return when (normalizedClosedRequestsText(status)) {
+        "completed", "done" -> "Выполнена"
+        "closed" -> "Закрыта"
+        "rejected" -> "Отклонена"
+        "cancelled", "canceled" -> "Отменена"
+        "" -> "Нет данных"
+        else -> status
+    }
 }
 
 /** UTC API timestamps use the shared parser; XLSX display dates are already local. */
@@ -92,14 +97,17 @@ fun parseClosedRequestsDate(raw: String): LocalDateTime? {
     }?.takeIf { it.year > 1970 }
 }
 
-fun SimpleOneRequest.closedEffectiveTime(): String {
-    val registered = registeredAt.ifBlank { closedTableValue("Время создания в МК", "Время регистрации", "Регистрация") }
-    if (isClosedReturnEquipment(closedRequestType()) && parseClosedRequestsDate(registered) != null) return registered
-    // Android's archive maps the iOS ClosedRequestRecord.closedAt to resolvedAt.
-    return resolvedAt.ifBlank { completedAt }.ifBlank { closedAt }.ifBlank {
-        closedTableValue("Время решения", "Время выполнения", "Дата закрытия в МК")
-    }
-}
+fun SimpleOneRequest.closedRegistrationTime(): String = (listOf(registeredAt) +
+    listOf("Время создания в МК", "Время регистрации", "Регистрация").map { closedTableValue(it) })
+    .firstOrNull { parseClosedRequestsDate(it) != null }.orEmpty()
+
+fun SimpleOneRequest.closedCompletionTime(): String = (listOf(resolvedAt, completedAt, closedAt) +
+    listOf("Время решения", "Время выполнения", "Время \"Выполнена\"", "Выполнена", "Дата выполнения", "Дата закрытия в МК").map { closedTableValue(it) })
+    .firstOrNull { parseClosedRequestsDate(it) != null }.orEmpty()
+
+fun SimpleOneRequest.closedEffectiveTime(): String =
+    if (isClosedReturnEquipment(closedRequestType())) closedRegistrationTime().ifBlank { closedCompletionTime() }
+    else closedCompletionTime().ifBlank { closedRegistrationTime() }
 
 fun prepareClosedRequests(records: List<SimpleOneRequest>): List<ClosedRequestsItem> = records
     .distinctBy { it.id }
@@ -111,7 +119,7 @@ fun prepareClosedRequests(records: List<SimpleOneRequest>): List<ClosedRequestsI
         val status = request.closedStatusTitle()
         val formattedDates = date?.let { parsed -> CLOSED_SEARCH_FORMATS.map { parsed.format(it) } }.orEmpty()
         ClosedRequestsItem(request, date, timeText,
-            if (isClosedReturnEquipment(request.closedRequestType())) "Время регистрации" else "Выполнена",
+            if (isClosedReturnEquipment(request.closedRequestType()) && request.closedRegistrationTime().isNotBlank() || request.closedCompletionTime().isBlank()) "Время регистрации" else "Выполнена",
             type, status, normalizedClosedRequestsText(
                 listOf(request.searchText, type, status, rawTime, timeText).plus(formattedDates).joinToString("\n"),
             ))

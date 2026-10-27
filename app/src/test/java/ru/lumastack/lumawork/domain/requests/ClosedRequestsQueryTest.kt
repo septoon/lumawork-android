@@ -31,4 +31,29 @@ class ClosedRequestsQueryTest {
         val recent = old + prepareClosedRequests(listOf(SimpleOneRequest("2", "S", resolvedAt = "16.10.2026 12:00")))
         assertEquals(ClosedRequestsPeriod(today.minusDays(1), today), defaultClosedRequestsPeriod(recent, today))
     }
+
+    @Test fun `missing closure code preserves source status instead of inventing refusal`() {
+        for ((raw, expected) in listOf("closed" to "Закрыта", "completed" to "Выполнена", "rejected" to "Отклонена",
+            "Закрыта" to "Закрыта", "Выполнена" to "Выполнена", "Отклонена" to "Отклонена", "" to "Нет данных")) {
+            assertEquals(expected, SimpleOneRequest("id", "REQ", state = raw).closedStatusTitle())
+        }
+        assertEquals("Выполнена", SimpleOneRequest("id", "REQ", state = "closed", closureCode = "Решено с выездом").closedStatusTitle())
+        assertEquals("Отказ", SimpleOneRequest("id", "REQ", closureCode = "Отказ ТСП").closedStatusTitle())
+    }
+
+    @Test fun `missing completion uses registration with honest date label and no visit analytics`() {
+        val prepared = prepareClosedRequests(listOf(SimpleOneRequest("id", "REQ", state = "completed",
+            registeredAt = "2026-10-27 09:39:06")))
+        assertEquals(LocalDate.of(2026, 10, 27), prepared.single().day)
+        assertEquals("Время регистрации", prepared.single().timeTitle)
+        assertEquals("Выполнена", prepared.single().statusText)
+        assertEquals(0, buildClosedRequestsAnalytics(prepared).completedCount)
+    }
+
+    @Test fun `invalid completion does not hide valid alternative dates`() {
+        val item = prepareClosedRequests(listOf(SimpleOneRequest("id", "REQ", requestType = "install",
+            resolvedAt = "invalid", completedAt = "2026-10-25 10:00:00", registeredAt = "2026-10-20 10:00:00"))).single()
+        assertEquals(LocalDate.of(2026, 10, 25), item.day)
+        assertEquals("Выполнена", item.timeTitle)
+    }
 }

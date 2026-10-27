@@ -18,7 +18,7 @@ import org.junit.Test
 
 class SimpleOneExportClientTest {
     @Test
-    fun `export captures old ids creates 25-column export and downloads only new id`() = runBlocking {
+    fun `export captures old ids includes record identity and downloads only new id`() = runBlocking {
         val requests = CopyOnWriteArrayList<String>()
         val bodies = CopyOnWriteArrayList<String>()
         val xlsx = byteArrayOf(0x50, 0x4b, 0x03, 0x04)
@@ -71,7 +71,8 @@ class SimpleOneExportClientTest {
         )
         val createPayload = Json.parseToJsonElement(bodies[0]).jsonObject
         val columns = createPayload["export"]!!.jsonObject["columns"]!!.jsonArray
-        assertEquals(25, columns.size)
+        assertEquals(26, columns.size)
+        assertTrue(columns.any { it.toString() == "\"sys_id\"" })
         assertTrue(bodies[1].contains("new-id"))
         assertFalse(bodies[1].contains("old-id"))
     }

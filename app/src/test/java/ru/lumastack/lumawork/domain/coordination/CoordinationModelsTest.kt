@@ -23,6 +23,14 @@ class CoordinationModelsTest {
         assertEquals(2, engineers.first { it.name == "Иван Инженеров" }.requestCount)
     }
 
+    @Test fun `engineer identity is unchanged when details append SimpleOne login`() {
+        val listed = request("1", "Иван Инженеров")
+        val detailed = listed.copy(assignedUser = "Иван Инженеров (Ivanov.II)", assignedUserId = "123")
+        assertEquals(listed.coordinationEngineerKey(), detailed.coordinationEngineerKey())
+        assertEquals(1, coordinationEngineers(listOf(listed, detailed.copy(sysId = "2"))).size)
+        assertTrue(request("3", "Пётр Петров (Petrov.PP)").coordinationEngineerKey() != listed.coordinationEngineerKey())
+    }
+
     @Test
     fun `return equipment accepts system and Russian values`() {
         assertTrue(isReturnEquipmentRequest("returnEquip"))

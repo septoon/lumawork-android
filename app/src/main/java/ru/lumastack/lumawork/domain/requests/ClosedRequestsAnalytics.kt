@@ -42,7 +42,7 @@ fun buildClosedRequestsAnalytics(items: List<ClosedRequestsItem>): ClosedRequest
             returns++
             continue
         }
-        if (item.statusText != "Выполнена") continue
+        if (!normalizedClosedRequestsText(item.request.closedClosureCode()).startsWith("решено с выездом")) continue
         completed++
         val type = item.typeText.ifBlank { "Не указан" }
         typeCounts[type] = (typeCounts[type] ?: 0) + 1

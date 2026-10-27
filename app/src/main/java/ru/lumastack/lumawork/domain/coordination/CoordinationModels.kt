@@ -85,7 +85,10 @@ fun coordinationEngineers(requests: List<SimpleOneRequest>): List<CoordinationEn
     )
 
 fun SimpleOneRequest.coordinationEngineerKey(): String {
-    val name = ru.lumastack.lumawork.domain.requests.normalizedClosedRequestsText(assignedUser)
+    // List and record responses differ by the optional login suffix; it is presentation, not a new engineer.
+    val name = ru.lumastack.lumawork.domain.requests.normalizedClosedRequestsText(
+        assignedUser.replace(Regex("\\s*\\([A-Za-z0-9._@-]+\\)\\s*$"), ""),
+    )
     if (name.isNotEmpty()) return "name:$name"
     val userId = assignedUserId.trim()
     if (userId.isNotEmpty()) return "id:$userId"

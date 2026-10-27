@@ -287,6 +287,7 @@ internal class SimpleOneExportClient(
             "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val CLOSED_EXPORT_COLUMNS = listOf(
+            "sys_id",
             "number",
             "short_description",
             "state",

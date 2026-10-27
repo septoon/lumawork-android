@@ -23,6 +23,31 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.backpack.BackpackItem
 
 class CoordinationRepositoryTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun `selected engineer retains request after detail load changes display label`() = runBlocking {
+        Dispatchers.setMain(Dispatchers.Unconfined)
+        val sessions = FakeSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "user")) }
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        val api = FakeCoordinationApi(onDetail = { started.complete(Unit); release.await()
+            it.copy(assignedUser = "Иван Инженеров (Ivanov.II)", assignedUserId = "123") })
+        val simple = ru.lumastack.lumawork.data.simpleone.SimpleOneRepository(api, sessions, object : ru.lumastack.lumawork.data.simpleone.SimpleOneCache {
+            override suspend fun read(ownerUserId: String): ru.lumastack.lumawork.domain.simpleone.SimpleOneSnapshot? = null
+            override suspend fun save(ownerUserId: String, snapshot: ru.lumastack.lumawork.domain.simpleone.SimpleOneSnapshot) = Unit
+        })
+        val model = CoordinationViewModel(CoordinationRepository(api, sessions, FakeCoordinationCache()), simple, "owner", false)
+        try {
+            model.activate("user", true)
+            withTimeout(10_000) { model.state.first { it.currentGroup?.requests?.size == 1 && !it.isLoading } }
+            val key = ru.lumastack.lumawork.domain.coordination.coordinationEngineers(model.state.value.currentGroup!!.requests).single().id
+            model.openEngineer(key); started.await()
+            assertEquals(1, model.state.value.engineerRequests.size)
+            release.complete(Unit)
+            withTimeout(10_000) { model.state.first { it.loadingStatusIds.isEmpty() && it.currentGroup?.requests?.firstOrNull()?.assignedUserId == "123" } }
+            assertEquals(1, model.state.value.engineerRequests.size)
+            assertEquals("REQ1", model.state.value.engineerRequests.single().number)
+            assertEquals(key, model.state.value.selectedEngineerId)
+        } finally { model.viewModelScope.cancel(); Dispatchers.resetMain() }
+    }
     @Test
     fun `region refresh is scoped by LumaWork and SimpleOne users`() = runBlocking {
         val session = FakeSessionStore().apply {
@@ -151,6 +176,7 @@ class CoordinationRepositoryTest {
 private class FakeCoordinationApi(
     private val error: SimpleOneFailure? = null,
     private val onRegion: (suspend (CoordinationRegion) -> List<SimpleOneRequest>)? = null,
+    private val onDetail: suspend (SimpleOneRequest) -> SimpleOneRequest = { it },
 ) : SimpleOneApi {
     var detailCalls = 0
     override suspend fun login(username: String, password: String): String = "auth"
@@ -161,7 +187,7 @@ private class FakeCoordinationApi(
     override suspend fun timeReportEntries(authKey: String): List<TimeReportEntry> = emptyList()
     override suspend fun exportTimeReport(userId: String, authKey: String): ByteArray = byteArrayOf()
     override suspend fun backpackItems(authKey: String): List<BackpackItem> = emptyList()
-    override suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest { detailCalls++; return request }
+    override suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest { detailCalls++; return onDetail(request) }
     override suspend fun coordinationRequests(
         region: CoordinationRegion,
         authKey: String,

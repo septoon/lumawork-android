@@ -32,6 +32,66 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.backpack.BackpackItem
 
 class SimpleOneRepositoryTest {
+    @Test fun `list fallback hydrates all incomplete records and preserves distinct external duplicates`() = runBlocking {
+        val listed = listOf(
+            request().copy(sysId = "one", number = "REQ1", incomingNumber = "SUTS-SAME", state = "Отклонена"),
+            request().copy(sysId = "two", number = "REQ2", incomingNumber = "SUTS-SAME", state = "Выполнена"),
+        )
+        val api = FakeSimpleOneApi(closed = listed, closedDetail = { it.copy(requestType = "returnEquip", registeredAt = "2026-10-27 09:48:00") })
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val cache = FakeSimpleOneSupplementalCache()
+        val result = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache).refreshClosedArchive("owner")
+        assertEquals(2, api.detailCalls)
+        assertEquals(setOf("one", "two"), result.requests.map { it.id }.toSet())
+        assertTrue(result.requests.all { it.requestType == "returnEquip" })
+        assertEquals(setOf("Отклонена", "Выполнена"), result.requests.map { it.state }.toSet())
+        assertEquals(result, cache.archives["owner"])
+    }
+
+    @Test fun `incomplete XLSX is enriched from details and retains extra columns in exports`() = runBlocking {
+        val bytes = makeSimpleOneXlsx(listOf("sys_id", "Номер заявки", "Статус", "Тип заявки", "Служебная колонка"),
+            listOf(listOf("one", "REQ1", "Закрыта", "", "сохранить")))
+        val api = FakeSimpleOneApi(exportedXlsx = bytes, closedDetail = { it.copy(
+            requestType = "returnEquip", state = "Выполнена", registeredAt = "2026-10-27 09:48:00") })
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val repo = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), FakeSimpleOneSupplementalCache())
+        val result = repo.refreshClosedArchive("owner")
+        assertEquals(ClosedArchiveSource.Xlsx, result.source)
+        assertEquals("returnEquip", result.requests.single().requestType)
+        assertEquals(1, api.detailCalls)
+        assertEquals(0, api.archiveCalls)
+        val exported = SimpleOneXlsxParser.parse(repo.exportClosedArchive("owner")).single()
+        assertEquals("returnEquip", exported.requestType)
+        assertEquals("Выполнена", exported.state)
+        assertEquals("сохранить", exported.tableFields["Служебная колонка"])
+    }
+
+    @Test fun `incomplete XLSX without sys id resolves canonical request number without adding other records`() = runBlocking {
+        val bytes = makeSimpleOneXlsx(listOf("Номер заявки", "Статус"), listOf(listOf("REQ1", "Закрыта")))
+        val api = FakeSimpleOneApi(exportedXlsx = bytes, closed = listOf(request(), request().copy(sysId = "other", number = "REQ2")))
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val result = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), FakeSimpleOneSupplementalCache()).refreshClosedArchive("owner")
+        assertEquals(listOf("REQ1"), result.requests.map { it.number })
+        assertEquals("request-1", result.requests.single().sysId)
+        assertEquals(1, api.archiveCalls)
+        assertEquals(1, api.detailCalls)
+    }
+
+    @Test fun `failed or still incomplete details preserve previous archive`() = runBlocking {
+        for (fails in listOf(true, false)) {
+            val old = ClosedSimpleOneArchive(listOf(request().copy(number = "OLD")), isComplete = true, queryRevision = 2)
+            val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = old }
+            val api = FakeSimpleOneApi(closed = listOf(request()), closedDetail = {
+                if (fails) throw SimpleOneFailure.Http(500, "Unavailable") else it
+            })
+            val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+            val result = runCatching { SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache).refreshClosedArchive("owner") }
+            assertTrue(result.isFailure)
+            assertEquals(old, cache.archives["owner"])
+            assertEquals(1, api.archiveCalls)
+        }
+    }
+
     @Test
     fun `refresh keeps cache scoped to LumaWork user`() = runBlocking {
         val sessionStore = FakeSimpleOneSessionStore().apply {
@@ -207,8 +267,8 @@ class SimpleOneRepositoryTest {
             save(StoredSimpleOneSession("owner-1", "auth", "engineer"))
         }
         val xlsx = makeSimpleOneXlsx(
-            headers = listOf("Номер заявки", "Статус", "Комментарий инженера"),
-            rows = listOf(listOf("XLSX-1", "Закрыта", "Полные данные")),
+            headers = listOf("Номер заявки", "Статус", "Комментарий инженера", "Тип заявки", "Дата выполнения", "Код закрытия"),
+            rows = listOf(listOf("XLSX-1", "Закрыта", "Полные данные", "install", "2026-10-27 10:00:00", "Решено с выездом")),
         )
         val repository = SimpleOneRepository(
             api = FakeSimpleOneApi(
@@ -265,6 +325,10 @@ private class FakeSimpleOneApi(
     private val beforeExport: suspend () -> Unit = {},
     private val beforeLogin: suspend () -> Unit = {},
     private val beforeHistory: suspend () -> Unit = {},
+    private val closedDetail: suspend (SimpleOneRequest) -> SimpleOneRequest = { it.copy(
+        requestType = it.requestType.ifBlank { "install" }, resolvedAt = it.resolvedAt.ifBlank { "2026-10-27 10:00:00" },
+        closureCode = it.closureCode.ifBlank { "Решено с выездом" },
+    ) },
 ) : SimpleOneApi {
     var detailCalls = 0
     var currentUserCalls = 0
@@ -315,7 +379,7 @@ private class FakeSimpleOneApi(
     override suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest {
         detailCalls += 1
         error?.let { throw it }
-        return request
+        return if (request.source == ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource.Closed) closedDetail(request) else request
     }
 
     override suspend fun coordinationRequests(

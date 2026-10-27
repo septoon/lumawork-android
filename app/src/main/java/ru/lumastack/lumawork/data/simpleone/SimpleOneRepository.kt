@@ -16,6 +16,12 @@ import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneSnapshot
 import ru.lumastack.lumawork.domain.requests.normalizeHistoryTerminalId
 import ru.lumastack.lumawork.domain.requests.terminalRequestHistory
+import ru.lumastack.lumawork.domain.requests.closedRequestType
+import ru.lumastack.lumawork.domain.requests.closedCompletionTime
+import ru.lumastack.lumawork.domain.requests.closedRegistrationTime
+import ru.lumastack.lumawork.domain.requests.closedClosureCode
+import ru.lumastack.lumawork.domain.requests.isClosedReturnEquipment
+import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 
 class SimpleOneRepository(
     private val api: SimpleOneApi,
@@ -124,18 +130,19 @@ class SimpleOneRepository(
         try {
             val currentUser = cachedSnapshot?.takeIf { it.sessionFingerprint == simpleOneSessionFingerprint(session) }?.currentUser ?: api.currentUser(session.authKey)
             onProgress("Подготовка полного архива SimpleOne…")
-            val archive = try {
+            val (listed, source) = try {
                 val xlsx = api.exportClosedRequests(currentUser.sysId, session.authKey)
                 onProgress("Обработка закрытых заявок…")
                 val records = withContext(Dispatchers.Default) { SimpleOneXlsxParser.parse(xlsx) }
-                ClosedSimpleOneArchive(records, nowEpochMillis(), true, ClosedArchiveSource.Xlsx, 2)
+                records to ClosedArchiveSource.Xlsx
             } catch (error: CancellationException) { throw error }
             catch (error: SimpleOneFailure.Unauthorized) { throw error }
             catch (_: Exception) {
                 onProgress("Загрузка всех страниц закрытых заявок…")
-                ClosedSimpleOneArchive(api.closedRequests(currentUser.sysId, session.authKey),
-                    nowEpochMillis(), true, ClosedArchiveSource.ListApi, 2)
+                api.closedRequests(currentUser.sysId, session.authKey) to ClosedArchiveSource.ListApi
             }
+            val records = completeClosedArchive(ownerUserId, session, currentUser.sysId, listed, onProgress)
+            val archive = ClosedSimpleOneArchive(records, nowEpochMillis(), true, source, 2)
             withCurrentSession(ownerUserId, session) { supplementalCache.saveClosedArchive(ownerUserId, archive) }
             archive
         } catch (error: SimpleOneFailure.Unauthorized) {
@@ -144,6 +151,53 @@ class SimpleOneRepository(
             }
             throw error
         }
+    }
+
+    private fun SimpleOneRequest.needsClosedDetails(): Boolean = closedRequestType().isBlank() ||
+        (if (isClosedReturnEquipment(closedRequestType())) closedRegistrationTime().isBlank()
+        else closedCompletionTime().isBlank() || closedClosureCode().isBlank())
+
+    private suspend fun completeClosedArchive(
+        owner: String,
+        session: StoredSimpleOneSession,
+        userId: String,
+        listed: List<SimpleOneRequest>,
+        onProgress: (String) -> Unit,
+    ): List<SimpleOneRequest> {
+        // Exports from older server presets may omit sys_id; resolve only their canonical REQ numbers.
+        val identities = if (listed.any { it.needsClosedDetails() && it.sysId.isBlank() }) {
+            onProgress("Поиск карточек неполных заявок…")
+            api.closedRequests(userId, session.authKey).groupBy { it.number }
+        } else emptyMap()
+        val records = listed.map { record ->
+            if (record.needsClosedDetails() && record.sysId.isBlank()) {
+                val identity = identities[record.number]?.singleOrNull()?.takeIf { it.sysId.isNotBlank() }
+                    ?: throw SimpleOneFailure.Http(409, "Не удалось найти карточку ${record.number}. Повторите обновление архива.")
+                record.mergeMissing(identity).copy(source = SimpleOneRequestSource.Closed)
+            } else record.copy(source = SimpleOneRequestSource.Closed)
+        }
+        val incomplete = records.filter { it.needsClosedDetails() }
+        if (incomplete.isEmpty()) return records
+        val completed = mutableMapOf<String, SimpleOneRequest>()
+        onProgress("Дополнение полей архива: 0 из ${incomplete.size}")
+        for (batch in incomplete.chunked(4)) {
+            currentCoroutineContext().ensureActive()
+            if (storedSession(owner) != session) throw CancellationException("SimpleOne session changed")
+            val details = coroutineScope {
+                batch.map { record -> async {
+                    val detailed = api.requestDetails(record, session.authKey).mergeMissing(record)
+                    if (detailed.id != record.id || detailed.number != record.number) throw SimpleOneFailure.InvalidResponse
+                    if (detailed.closedRequestType().isBlank() ||
+                        detailed.closedCompletionTime().isBlank() && detailed.closedRegistrationTime().isBlank()) {
+                        throw SimpleOneFailure.Http(422, "SimpleOne не вернул тип или дату заявки ${record.number}. Архив не обновлён; сохранённые данные остаются на устройстве.")
+                    }
+                    detailed.copy(source = SimpleOneRequestSource.Closed)
+                } }.awaitAll()
+            }
+            details.forEach { completed[it.id] = it }
+            onProgress("Дополнение полей архива: ${completed.size} из ${incomplete.size}")
+        }
+        return records.map { completed[it.id] ?: it }
     }
 
     suspend fun importClosedArchive(ownerUserId: String, bytes: ByteArray): ClosedSimpleOneArchive = archiveMutex.withLock {

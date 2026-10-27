@@ -69,68 +69,154 @@ class GsmProfileXlsxTest {
         assertNull(p.armProjectId)
         assertEquals("ПЛ-ТК!AE8", result.sources["defaultStartOdometer"])
         assertTrue(result.notes.any { it.contains("остат") })
+        assertTrue(result.warnings.isEmpty())
     }
 
-    @Test fun `rejects another month without modifying draft`() {
-        assertThrows(GsmXlsxFailure::class.java) { GsmProfileXlsx.parse(workbook(), YearMonth.of(2026, 8), projects) }
+    @Test fun `another month imports recognized fields with period warning`() {
+        val result = GsmProfileXlsx.parse(workbook(), YearMonth.of(2026, 8), projects)
+        assertEquals("Тестов Иван Иванович", result.profile.employeeFullName)
+        assertEquals("2026-10", result.profile.reportStartMonth)
+        assertTrue(result.notes.any { it.contains("2026-08") && it.contains("2026-09") })
     }
 
-    @Test fun `reports shifted header and all missing fields in one failure`() {
+    @Test fun `shifted header and missing norm still import other fields and name fallback`() {
         val bytes = workbook(overrides = mapOf("Отчет по ТК " to mapOf(
-            "A3" to "", "C3" to "", "A4" to "", "A5" to "Вид топлива",
+            "A3" to "", "C3" to "", "A4" to "", "A5" to "Вид топлива", "A6" to "АИ-95", "A7" to "Итого по:",
         )))
-        val failure = assertThrows(GsmXlsxFailure::class.java) {
-            GsmProfileXlsx.parse(bytes, YearMonth.of(2026, 9), projects)
-        }
-        val message = failure.message.orEmpty()
-        listOf("Отчет по ТК!A4", "Отчет по ТК!A5", "Отчет по ТК!C3", "Отчет по ТК!A3", "Норма топлива", "ФИО сотрудника")
-            .forEach { assertTrue("Missing diagnostic: $it in $message", message.contains(it)) }
-        assertFalse(message.contains("employeeFullName"))
+        val result = GsmProfileXlsx.parse(bytes, YearMonth.of(2026, 9), projects)
+        assertEquals("Тестов Иван Иванович", result.profile.employeeFullName)
+        assertEquals("Инженер", result.profile.employeeJobTitle)
+        assertEquals("ООО Тест", result.profile.employeeCompany)
+        assertEquals(10330, result.profile.defaultStartOdometer)
+        assertEquals(listOf("АИ-95"), result.profile.fuelTypes)
+        assertEquals(0.0, result.profile.fuelNorm, 0.0)
+        assertFalse(result.sources.containsKey("fuelNorm"))
+        assertTrue(result.sources.getValue("employeeFullName").contains("ПЛ-ТК!E5"))
+        assertTrue(result.notes.any { it.contains("Отчет по ТК!C3") && it.contains("вручную") })
+        assertTrue(result.warnings.any { it.contains("Отчет по ТК!C3") })
     }
 
-    @Test fun `reports invalid month year odometer and norm together`() {
+    @Test fun `shifted fuel table with complete data needs no manual repair`() {
+        val result = GsmProfileXlsx.parse(workbook(overrides = mapOf("Отчет по ТК " to mapOf(
+            "A4" to "", "A5" to "Вид топлива", "A6" to "АИ-95", "A7" to "Итого по:",
+        ))), YearMonth.of(2026, 9), projects)
+        assertEquals(listOf("АИ-95"), result.profile.fuelTypes)
+        assertEquals("Отчет по ТК!A6", result.sources["fuelTypes"])
+        assertTrue(result.warnings.isEmpty())
+    }
+
+    @Test fun `missing company does not prevent recovering name and job title`() {
+        val result = GsmProfileXlsx.parse(workbook(overrides = mapOf(
+            "Отчет по ТК " to mapOf("A3" to ""),
+            "ПЛ-ТК" to mapOf("E5" to "Тестов Иван Иванович, Инженер"),
+        )), YearMonth.of(2026, 9), projects)
+        assertEquals("Тестов Иван Иванович", result.profile.employeeFullName)
+        assertEquals("Инженер", result.profile.employeeJobTitle)
+        assertEquals("", result.profile.employeeCompany)
+        assertTrue(result.sources.containsKey("employeeJobTitle"))
+        assertFalse(result.sources.containsKey("employeeCompany"))
+        assertTrue(result.warnings.any { it.contains("Компания") && it.contains("ПЛ-ТК!E5") })
+    }
+
+    @Test fun `missing job title does not shift company into job title`() {
+        val result = GsmProfileXlsx.parse(workbook(overrides = mapOf(
+            "Отчет по ТК " to mapOf("A3" to ""),
+            "ПЛ-ТК" to mapOf("E5" to "Тестов Иван Иванович, , ООО Тест"),
+        )), YearMonth.of(2026, 9), projects)
+        assertEquals("Тестов Иван Иванович", result.profile.employeeFullName)
+        assertEquals("", result.profile.employeeJobTitle)
+        assertEquals("ООО Тест", result.profile.employeeCompany)
+        assertFalse(result.sources.containsKey("employeeJobTitle"))
+        assertTrue(result.sources.containsKey("employeeCompany"))
+        assertTrue(result.warnings.any { it.contains("Должность") && it.contains("ПЛ-ТК!E5") })
+    }
+
+    @Test fun `ambiguous fuel headers leave fuel types for manual selection`() {
+        val result = GsmProfileXlsx.parse(workbook(overrides = mapOf("Отчет по ТК " to mapOf("A5" to "Вид топлива"))), YearMonth.of(2026, 9), projects)
+        assertTrue(result.profile.fuelTypes.isEmpty())
+        assertFalse(result.sources.containsKey("fuelTypes"))
+        assertTrue(result.warnings.any { it.contains("Виды топлива") && it.contains("вручную") })
+        assertEquals(7.5, result.profile.fuelNorm, 0.0)
+    }
+
+    @Test fun `unrecognized odometer label does not import a number from an uncertain cell`() {
+        val result = GsmProfileXlsx.parse(workbook(overrides = mapOf("ПЛ-ТК" to mapOf("Q8" to "Другое поле"))), YearMonth.of(2026, 9), projects)
+        assertFalse(result.sources.containsKey("defaultStartOdometer"))
+        assertTrue(result.warnings.any { it.contains("ПЛ-ТК!Q8") })
+        assertEquals("Тестов Иван Иванович", result.profile.employeeFullName)
+    }
+
+    @Test fun `missing or invalid norm remains unknown and warns while keeping odometer`() {
+        for (value in listOf("", "-1", "0", "NaN", "Infinity", "текст", "=SUM(A1:A3)")) {
+            val result = GsmProfileXlsx.parse(workbook(overrides = mapOf("Отчет по ТК " to mapOf("C3" to value))), YearMonth.of(2026, 9), projects)
+            assertFalse(result.sources.containsKey("fuelNorm"))
+            assertEquals(0.0, result.profile.fuelNorm, 0.0)
+            assertEquals(10330, result.profile.defaultStartOdometer)
+            assertTrue(result.warnings.any { it.contains("Отчет по ТК!C3") && it.contains("вручную") })
+        }
+    }
+
+    @Test fun `readable workbook without report sheets returns manual completion warnings`() {
+        val result = GsmProfileXlsx.parse(workbook(missingSheets = setOf("ПЛ-ТК", "СЗ-ТК", "Отчет по ТК ")), YearMonth.of(2026, 9), projects)
+        assertTrue(result.sources.isEmpty())
+        assertEquals("", result.profile.employeeFullName)
+        assertEquals("2026-10", result.profile.reportStartMonth)
+        assertTrue(result.warnings.any { it.contains("Нет листа «ПЛ-ТК»") })
+        assertTrue(result.warnings.any { it.contains("Нет листа «Отчет по ТК»") })
+    }
+
+    @Test fun `invalid month year odometer and norm are omitted without losing other fields`() {
         val bytes = workbook(end = "-1", month = "не месяц", year = "не год", overrides = mapOf(
             "Отчет по ТК " to mapOf("C3" to "NaN"),
         ))
-        val message = assertThrows(GsmXlsxFailure::class.java) {
-            GsmProfileXlsx.parse(bytes, YearMonth.of(2026, 9), projects)
-        }.message.orEmpty()
+        val result = GsmProfileXlsx.parse(bytes, YearMonth.of(2026, 9), projects)
+        val message = result.notes.joinToString("\n")
         listOf("ПЛ-ТК!M3", "ПЛ-ТК!Q3", "ПЛ-ТК!AE8", "Отчет по ТК!C3")
             .forEach { assertTrue("Missing diagnostic: $it in $message", message.contains(it)) }
+        assertEquals("Тестов Иван Иванович", result.profile.employeeFullName)
+        assertEquals(0, result.profile.defaultStartOdometer)
+        assertEquals(0.0, result.profile.fuelNorm, 0.0)
+        listOf("defaultStartOdometer", "fuelNorm", "reportStartMonth").forEach { assertFalse(result.sources.containsKey(it)) }
     }
 
-    @Test fun `reports all missing sheets without invented cell failures`() {
-        val message = assertThrows(GsmXlsxFailure::class.java) {
-            GsmProfileXlsx.parse(workbook(missingSheets = setOf("ПЛ-ТК", "СЗ-ТК")), YearMonth.of(2026, 9), projects)
-        }.message.orEmpty()
+    @Test fun `missing sheets do not prevent importing available report cells`() {
+        val result = GsmProfileXlsx.parse(workbook(missingSheets = setOf("ПЛ-ТК", "СЗ-ТК")), YearMonth.of(2026, 9), projects)
+        val message = result.notes.joinToString("\n")
         assertTrue(message.contains("ПЛ-ТК"))
         assertTrue(message.contains("СЗ-ТК"))
-        assertFalse(message.contains("!AE8"))
+        assertEquals("Тестов Иван Иванович", result.profile.employeeFullName)
+        assertEquals("Тест Авто", result.profile.carModel)
+        assertEquals("00001234", result.profile.fuelCardNumber)
+        assertEquals(7.5, result.profile.fuelNorm, 0.0)
+        assertFalse(result.sources.containsKey("defaultStartOdometer"))
     }
 
     @Test fun `month mismatch does not hide missing norm`() {
-        val message = assertThrows(GsmXlsxFailure::class.java) {
-            GsmProfileXlsx.parse(workbook(overrides = mapOf("Отчет по ТК " to mapOf("C3" to ""))), YearMonth.of(2026, 8), projects)
-        }.message.orEmpty()
+        val message = GsmProfileXlsx.parse(workbook(overrides = mapOf("Отчет по ТК " to mapOf("C3" to ""))), YearMonth.of(2026, 8), projects).notes.joinToString("\n")
         assertTrue(message.contains("2026-08"))
         assertTrue(message.contains("2026-09"))
         assertTrue(message.contains("Отчет по ТК!C3"))
     }
 
     @Test fun `missing optional fields still import with readable cell notes`() {
-        val result = GsmProfileXlsx.parse(workbook(overrides = mapOf("Отчет по ТК " to mapOf("A3" to ""))), YearMonth.of(2026, 9), projects)
+        val result = GsmProfileXlsx.parse(workbook(overrides = mapOf(
+            "Отчет по ТК " to mapOf("A3" to ""), "ПЛ-ТК" to mapOf("E5" to ""),
+        )), YearMonth.of(2026, 9), projects)
         assertEquals("", result.profile.employeeFullName)
         assertTrue(result.notes.any { it.contains("ФИО сотрудника") && it.contains("Отчет по ТК!A3") })
         assertFalse(result.notes.any { it.contains("employeeFullName") })
     }
 
-    @Test fun `local incomplete workbook lists header norm and name when supplied outside repository`() {
+    @Test fun `local incomplete workbook imports available fields when supplied outside repository`() {
         val path = System.getenv("GSM_DIAGNOSTIC_XLSX") ?: return
-        val message = assertThrows(GsmXlsxFailure::class.java) {
-            GsmProfileXlsx.parse(java.io.File(path).readBytes(), YearMonth.of(2026, 9), emptyList())
-        }.message.orEmpty()
-        listOf("Отчет по ТК!A4", "Отчет по ТК!A5", "Отчет по ТК!C3", "Отчет по ТК!A3")
-            .forEach { assertTrue("Missing diagnostic: $it in $message", message.contains(it)) }
+        val result = GsmProfileXlsx.parse(java.io.File(path).readBytes(), YearMonth.of(2026, 9), emptyList())
+        assertEquals(3, result.profile.employeeFullName.split(' ').size)
+        assertTrue(result.profile.carModel.isNotBlank())
+        assertTrue(result.profile.defaultStartOdometer > 0)
+        assertTrue(GsmPhoneFormatter.isComplete(result.profile.employeePhone))
+        assertEquals(listOf("АИ-95"), result.profile.fuelTypes)
+        assertFalse(result.sources.containsKey("fuelNorm"))
+        assertTrue(result.notes.any { it.contains("Отчет по ТК!C3") })
     }
 
     @Test fun `does not invent project ID if directory is missing or ambiguous`() {
@@ -138,14 +224,20 @@ class GsmProfileXlsxTest {
         assertNull(GsmProfileXlsx.parse(workbook(), YearMonth.of(2026, 9), projects + projects[0].copy(id = "other")).profile.posProjectId)
     }
 
-    @Test fun `rejects missing cached final odometer and negative or fractional mileage`() {
-        for (value in listOf("", "-1", "10330.5")) {
-            assertThrows(GsmXlsxFailure::class.java) { GsmProfileXlsx.parse(workbook(end = value), YearMonth.of(2026, 9), projects) }
+    @Test fun `missing or invalid odometer remains unknown rather than imported as zero`() {
+        for (value in listOf("", "-1", "10330.5", "NaN", "Infinity", "2147483648")) {
+            val result = GsmProfileXlsx.parse(workbook(end = value), YearMonth.of(2026, 9), projects)
+            assertFalse(result.sources.containsKey("defaultStartOdometer"))
+            assertTrue(result.notes.any { it.contains("ПЛ-ТК!AE8") })
+            assertEquals(7.5, result.profile.fuelNorm, 0.0)
         }
+        assertTrue(GsmProfileXlsx.parse(workbook(end = "0"), YearMonth.of(2026, 9), projects).sources.containsKey("defaultStartOdometer"))
     }
 
     @Test fun `resolves simple reference formulas but never evaluates arbitrary formulas`() {
-        assertThrows(GsmXlsxFailure::class.java) { GsmProfileXlsx.parse(workbook(end = "=SUM(A1:A3)"), YearMonth.of(2026, 9), projects) }
+        val result = GsmProfileXlsx.parse(workbook(end = "=SUM(A1:A3)"), YearMonth.of(2026, 9), projects)
+        assertFalse(result.sources.containsKey("defaultStartOdometer"))
+        assertTrue(result.notes.any { it.contains("ПЛ-ТК!AE8") })
         assertEquals("Тест Авто", GsmProfileXlsx.parse(workbook(), YearMonth.of(2026, 9), projects).profile.carModel)
     }
 
