@@ -29,53 +29,79 @@ object GsmProfileXlsx {
 
     private fun import(bytes: ByteArray, expectedMonth: YearMonth, projects: List<GsmProjectOption>): GsmProfileImport {
         val book = Workbook(bytes)
+        val missingSheets = listOf("ПЛ-ТК", "СЗ-ТК", "Отчет по ТК").filterNot(book::hasSheet)
+        if (missingSheets.isNotEmpty()) throw GsmXlsxFailure(
+            "Не удалось импортировать отчёт ГСМ.\n\n" + missingSheets.joinToString("\n") { "• Нет листа «$it»." },
+        )
         val pl = book.sheet("ПЛ-ТК")
         val sz = book.sheet("СЗ-ТК")
         val fuel = book.sheet("Отчет по ТК")
         val projectCatalog = book.optionalSheet("Список проектов")
-        fun required(sheet: String, ref: String): String = book.value(sheet, ref).takeIf(String::isNotBlank)
-            ?: throw GsmXlsxFailure("В $sheet!$ref нет значения. Пересчитайте и сохраните XLSX в Excel.")
-        if (!pl["B5"].orEmpty().contains("ФИО сотрудника") || !pl["Q8"].orEmpty().contains("конец периода") ||
-            fuel["A4"] != "Вид топлива") throw GsmXlsxFailure("Не распознан шаблон отчёта ГСМ.")
-        val months = listOf("январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь")
-        val month = months.indexOf(required("ПЛ-ТК", "M3").lowercase(java.util.Locale.ROOT)) + 1
-        val year = required("ПЛ-ТК", "Q3").toDoubleOrNull()?.toInt() ?: 0
-        if (month == 0 || year !in 2000..2100) throw GsmXlsxFailure("Не удалось определить месяц отчёта.")
-        val sourceMonth = YearMonth.of(year, month)
-        if (sourceMonth != expectedMonth) throw GsmXlsxFailure("Выберите отчёт за $expectedMonth. В файле указан $sourceMonth.")
-        val end = required("ПЛ-ТК", "AE8").replace(',', '.').toDoubleOrNull()
-        if (end == null || !end.isFinite() || end < 0 || end > Int.MAX_VALUE || end % 1.0 != 0.0)
-            throw GsmXlsxFailure("ПЛ-ТК!AE8 (R8C31): некорректный конечный одометр.")
-        val norm = required("Отчет по ТК", "C3").replace(',', '.').toDoubleOrNull()
-        if (norm == null || !norm.isFinite() || norm <= 0) throw GsmXlsxFailure("Не удалось прочитать норму топлива из Отчет по ТК!C3.")
-        val sources = linkedMapOf<String, String>()
-        val notes = mutableListOf("В отчёте нет остатка топлива, а в ГСМ-профиле нет такого поля. Остаток не вычисляется и не принимается за ноль. История маршрутов и заправок не импортируется.")
-        fun field(key: String, sheet: String, ref: String): String {
+        val problems = mutableListOf<String>()
+        fun required(sheet: String, ref: String, label: String): String {
             val value = book.value(sheet, ref)
-            if (value.isNotBlank()) sources[key] = "$sheet!$ref" else notes += "Поле $key отсутствует в $sheet!$ref — заполните вручную."
+            if (value.isBlank()) problems += "$label — $sheet!$ref: нет значения. Заполните ячейку; если в ней формула — пересчитайте и сохраните файл в Excel."
             return value
         }
-        val fullName = field("employeeFullName", "Отчет по ТК", "A3")
-        val title = field("employeeTitleCompany", "ПЛ-ТК", "E5")
+        fun marker(sheet: String, cells: Map<String, String>, ref: String, text: String, exact: Boolean = false) {
+            fun matches(value: String) = if (exact) value == text else value.contains(text)
+            if (matches(cells[ref].orEmpty())) return
+            val found = cells.entries.filter { matches(it.value) }.take(3).joinToString(", ") { "$sheet!${it.key}" }
+            problems += "$sheet!$ref: ожидается заголовок «$text». " +
+                if (found.isNotEmpty()) "Найден в $found — расположение отличается от поддерживаемого шаблона."
+                else "Заголовок не найден на листе."
+        }
+        marker("ПЛ-ТК", pl, "B5", "ФИО сотрудника")
+        marker("ПЛ-ТК", pl, "Q8", "конец периода")
+        marker("Отчет по ТК", fuel, "A4", "Вид топлива", exact = true)
+        val months = listOf("январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь")
+        val monthText = required("ПЛ-ТК", "M3", "Месяц отчёта")
+        val yearText = required("ПЛ-ТК", "Q3", "Год отчёта")
+        val month = months.indexOf(monthText.lowercase(java.util.Locale.ROOT)) + 1
+        val year = yearText.toDoubleOrNull()?.toInt() ?: 0
+        if (monthText.isNotBlank() && month == 0) problems += "Месяц отчёта — ПЛ-ТК!M3: укажите название месяца, например «сентябрь»."
+        if (yearText.isNotBlank() && year !in 2000..2100) problems += "Год отчёта — ПЛ-ТК!Q3: укажите год от 2000 до 2100."
+        val sourceMonth = if (month != 0 && year in 2000..2100) YearMonth.of(year, month) else null
+        if (sourceMonth != null && sourceMonth != expectedMonth)
+            problems += "Период отчёта — ПЛ-ТК!M3,Q3: выберите отчёт за $expectedMonth. В файле указан $sourceMonth."
+        val endText = required("ПЛ-ТК", "AE8", "Конечный одометр")
+        val end = endText.replace(',', '.').toDoubleOrNull()
+        if (endText.isNotBlank() && (end == null || !end.isFinite() || end < 0 || end > Int.MAX_VALUE || end % 1.0 != 0.0))
+            problems += "Конечный одометр — ПЛ-ТК!AE8 (R8C31): укажите целое число от 0 до ${Int.MAX_VALUE}."
+        val normText = required("Отчет по ТК", "C3", "Норма топлива")
+        val norm = normText.replace(',', '.').toDoubleOrNull()
+        if (normText.isNotBlank() && (norm == null || !norm.isFinite() || norm <= 0))
+            problems += "Норма топлива — Отчет по ТК!C3: укажите число больше нуля."
+        val sources = linkedMapOf<String, String>()
+        val notes = mutableListOf("В отчёте нет остатка топлива, а в ГСМ-профиле нет такого поля. Остаток не вычисляется и не принимается за ноль. История маршрутов и заправок не импортируется.")
+        fun field(key: String, sheet: String, ref: String, label: String): String {
+            val value = book.value(sheet, ref)
+            if (value.isNotBlank()) sources[key] = "$sheet!$ref" else {
+                notes += "$label — $sheet!$ref: нет значения; заполните вручную."
+            }
+            return value
+        }
+        val fullName = field("employeeFullName", "Отчет по ТК", "A3", "ФИО сотрудника")
+        val title = field("employeeTitleCompany", "ПЛ-ТК", "E5", "ФИО, должность и компания")
         val parts = if (fullName.isNotBlank() && title.startsWith("$fullName,")) title.removePrefix(fullName).trimStart(',', ' ').split(',', limit = 2) else emptyList()
         if (parts.size != 2) notes += "Проверьте должность и компанию: не удалось разделить ПЛ-ТК!E5."
         sources["employeeJobTitle"] = "ПЛ-ТК!E5 (после ФИО, до первой запятой)"
         sources["employeeCompany"] = "ПЛ-ТК!E5 (после должности)"
-        val contact = field("employeeAddressPhone", "ПЛ-ТК", "E6")
+        val contact = field("employeeAddressPhone", "ПЛ-ТК", "E6", "Адрес и телефон сотрудника")
         val phoneMatch = Regex("(?:\\+?7|8)[\\s(]*[0-9]{3}[\\s)]*[0-9]{3}[-\\s]*[0-9]{2}[-\\s]*[0-9]{2}\\s*$").find(contact)
         val phone = phoneMatch?.value?.let(GsmPhoneFormatter::format).orEmpty()
         val address = if (phoneMatch != null) contact.take(phoneMatch.range.first).trimEnd(',', ';', ' ') else contact
         sources["employeeAddress"] = "ПЛ-ТК!E6 (до телефона)"
         sources["employeePhone"] = "ПЛ-ТК!E6 (телефон в конце строки)"
-        if (phone.isBlank()) notes += "Телефон не распознан — заполните вручную."
+        if (phone.isBlank()) notes += "Телефон сотрудника — ПЛ-ТК!E6: не распознан; заполните вручную."
         fun rowOf(cells: Map<String, String>, column: String, predicate: (String) -> Boolean) = cells.entries
             .filter { it.key.matches(Regex("$column[0-9]+")) && predicate(it.value) }.singleOrNull()?.key?.drop(column.length)?.toIntOrNull()
         val shortRow = rowOf(sz, "C") { it.trim() == "Сотрудник" }
-        val short = shortRow?.let { field("employeeShortName", "СЗ-ТК", "Q$it") }.orEmpty()
+        val short = shortRow?.let { field("employeeShortName", "СЗ-ТК", "Q$it", "Фамилия и инициалы сотрудника") }.orEmpty()
         val signRef = fuel.entries.singleOrNull { it.key.matches(Regex("A[0-9]+")) && it.value.startsWith("ФИО ") }?.key
-        val sign = signRef?.let { field("employeeReportSignName", "Отчет по ТК", it).removePrefix("ФИО ").trim() }.orEmpty()
+        val sign = signRef?.let { field("employeeReportSignName", "Отчет по ТК", it, "Подпись сотрудника в отчёте").removePrefix("ФИО ").trim() }.orEmpty()
         val authorizedRow = rowOf(pl, "C") { it.contains("ФИО уполномоченного сотрудника") }
-        val authorized = authorizedRow?.let { field("authorizedFullName", "ПЛ-ТК", "C${it - 1}") }.orEmpty()
+        val authorized = authorizedRow?.let { field("authorizedFullName", "ПЛ-ТК", "C${it - 1}", "ФИО уполномоченного сотрудника") }.orEmpty()
         val authorizedParts = authorized.split(Regex("\\s+")).filter(String::isNotBlank)
         val authorizedShort = if (authorizedParts.size == 3) "${authorizedParts[0]} ${authorizedParts[1].first()}. ${authorizedParts[2].first()}." else ""
         if (authorizedShort.isNotBlank()) sources["authorizedShortName"] = "${sources["authorizedFullName"]} (фамилия и инициалы)"
@@ -108,16 +134,28 @@ object GsmProfileXlsx {
             return found
         }
         val pos = project("POS"); val arm = project("ARM")
+        val driverLicense = field("driverLicenseNumber", "ПЛ-ТК", "AC5", "Номер водительского удостоверения")
+        val fuelCard = field("fuelCardNumber", "ПЛ-ТК", "AC6", "Номер топливной карты")
+        val carModel = field("carModel", "ПЛ-ТК", "J7", "Марка автомобиля")
+        val licensePlate = field("licensePlate", "ПЛ-ТК", "AE7", "Государственный номер ТС")
+        if (problems.isNotEmpty()) throw GsmXlsxFailure(buildString {
+            append("Не удалось импортировать отчёт ГСМ.\n\nИсправьте следующие поля или шаблон:\n")
+            append(problems.joinToString("\n") { "• $it" })
+            if (notes.size > 1) {
+                append("\n\nТакже проверьте поля профиля:\n")
+                append(notes.drop(1).joinToString("\n") { "• $it" })
+            }
+        })
         return GsmProfileImport(GsmProfile(
             posProjectId = pos?.id, armProjectId = arm?.id, budgetCode = pos?.budgetCode.orEmpty(), projectName = pos?.name.orEmpty(),
             employeeFullName = fullName, employeeShortName = short, employeeReportSignName = sign,
             authorizedFullName = authorized, authorizedShortName = authorizedShort,
             employeeJobTitle = parts.getOrNull(0)?.trim().orEmpty(), employeeCompany = parts.getOrNull(1)?.trim().orEmpty(),
             employeeAddress = address, employeePhone = phone, employeeTitleCompany = title, employeeAddressPhone = contact,
-            driverLicenseNumber = field("driverLicenseNumber", "ПЛ-ТК", "AC5"), fuelCardNumber = field("fuelCardNumber", "ПЛ-ТК", "AC6"),
-            carModel = field("carModel", "ПЛ-ТК", "J7"), licensePlate = field("licensePlate", "ПЛ-ТК", "AE7"),
-            fuelNorm = norm, fuelTypes = types, fuelType = types.firstOrNull().orEmpty(),
-            defaultStartOdometer = end.toInt(), reportStartMonth = sourceMonth.plusMonths(1).toString(),
+            driverLicenseNumber = driverLicense, fuelCardNumber = fuelCard,
+            carModel = carModel, licensePlate = licensePlate,
+            fuelNorm = requireNotNull(norm), fuelTypes = types, fuelType = types.firstOrNull().orEmpty(),
+            defaultStartOdometer = requireNotNull(end).toInt(), reportStartMonth = requireNotNull(sourceMonth).plusMonths(1).toString(),
         ), sources, notes)
     }
 
@@ -180,6 +218,7 @@ object GsmProfileXlsx {
                 cells[name] = sheet
             }
         }
+        fun hasSheet(name: String): Boolean = name in cells
         fun sheet(name: String): Map<String, String> {
             if (name !in cells) throw GsmXlsxFailure("Нет листа «$name».")
             return optionalSheet(name)

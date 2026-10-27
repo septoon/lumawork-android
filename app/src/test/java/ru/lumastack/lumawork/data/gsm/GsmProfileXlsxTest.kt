@@ -75,6 +75,64 @@ class GsmProfileXlsxTest {
         assertThrows(GsmXlsxFailure::class.java) { GsmProfileXlsx.parse(workbook(), YearMonth.of(2026, 8), projects) }
     }
 
+    @Test fun `reports shifted header and all missing fields in one failure`() {
+        val bytes = workbook(overrides = mapOf("Отчет по ТК " to mapOf(
+            "A3" to "", "C3" to "", "A4" to "", "A5" to "Вид топлива",
+        )))
+        val failure = assertThrows(GsmXlsxFailure::class.java) {
+            GsmProfileXlsx.parse(bytes, YearMonth.of(2026, 9), projects)
+        }
+        val message = failure.message.orEmpty()
+        listOf("Отчет по ТК!A4", "Отчет по ТК!A5", "Отчет по ТК!C3", "Отчет по ТК!A3", "Норма топлива", "ФИО сотрудника")
+            .forEach { assertTrue("Missing diagnostic: $it in $message", message.contains(it)) }
+        assertFalse(message.contains("employeeFullName"))
+    }
+
+    @Test fun `reports invalid month year odometer and norm together`() {
+        val bytes = workbook(end = "-1", month = "не месяц", year = "не год", overrides = mapOf(
+            "Отчет по ТК " to mapOf("C3" to "NaN"),
+        ))
+        val message = assertThrows(GsmXlsxFailure::class.java) {
+            GsmProfileXlsx.parse(bytes, YearMonth.of(2026, 9), projects)
+        }.message.orEmpty()
+        listOf("ПЛ-ТК!M3", "ПЛ-ТК!Q3", "ПЛ-ТК!AE8", "Отчет по ТК!C3")
+            .forEach { assertTrue("Missing diagnostic: $it in $message", message.contains(it)) }
+    }
+
+    @Test fun `reports all missing sheets without invented cell failures`() {
+        val message = assertThrows(GsmXlsxFailure::class.java) {
+            GsmProfileXlsx.parse(workbook(missingSheets = setOf("ПЛ-ТК", "СЗ-ТК")), YearMonth.of(2026, 9), projects)
+        }.message.orEmpty()
+        assertTrue(message.contains("ПЛ-ТК"))
+        assertTrue(message.contains("СЗ-ТК"))
+        assertFalse(message.contains("!AE8"))
+    }
+
+    @Test fun `month mismatch does not hide missing norm`() {
+        val message = assertThrows(GsmXlsxFailure::class.java) {
+            GsmProfileXlsx.parse(workbook(overrides = mapOf("Отчет по ТК " to mapOf("C3" to ""))), YearMonth.of(2026, 8), projects)
+        }.message.orEmpty()
+        assertTrue(message.contains("2026-08"))
+        assertTrue(message.contains("2026-09"))
+        assertTrue(message.contains("Отчет по ТК!C3"))
+    }
+
+    @Test fun `missing optional fields still import with readable cell notes`() {
+        val result = GsmProfileXlsx.parse(workbook(overrides = mapOf("Отчет по ТК " to mapOf("A3" to ""))), YearMonth.of(2026, 9), projects)
+        assertEquals("", result.profile.employeeFullName)
+        assertTrue(result.notes.any { it.contains("ФИО сотрудника") && it.contains("Отчет по ТК!A3") })
+        assertFalse(result.notes.any { it.contains("employeeFullName") })
+    }
+
+    @Test fun `local incomplete workbook lists header norm and name when supplied outside repository`() {
+        val path = System.getenv("GSM_DIAGNOSTIC_XLSX") ?: return
+        val message = assertThrows(GsmXlsxFailure::class.java) {
+            GsmProfileXlsx.parse(java.io.File(path).readBytes(), YearMonth.of(2026, 9), emptyList())
+        }.message.orEmpty()
+        listOf("Отчет по ТК!A4", "Отчет по ТК!A5", "Отчет по ТК!C3", "Отчет по ТК!A3")
+            .forEach { assertTrue("Missing diagnostic: $it in $message", message.contains(it)) }
+    }
+
     @Test fun `does not invent project ID if directory is missing or ambiguous`() {
         assertNull(GsmProfileXlsx.parse(workbook(), YearMonth.of(2026, 9), emptyList()).profile.posProjectId)
         assertNull(GsmProfileXlsx.parse(workbook(), YearMonth.of(2026, 9), projects + projects[0].copy(id = "other")).profile.posProjectId)
@@ -133,7 +191,8 @@ class GsmProfileXlsxTest {
         assertEquals("ПЛ-ТК!AE8", r.sources["defaultStartOdometer"])
     }
 
-    private fun workbook(end: String = "10330", month: String = "сентябрь", year: String = "2026", ambiguousArm: Boolean = false, catalog: Boolean = false): ByteArray {
+    private fun workbook(end: String = "10330", month: String = "сентябрь", year: String = "2026", ambiguousArm: Boolean = false, catalog: Boolean = false,
+        overrides: Map<String, Map<String, String>> = emptyMap(), missingSheets: Set<String> = emptySet()): ByteArray {
         val sheets = linkedMapOf(
             "ПЛ-ТК" to mapOf("M3" to month, "Q3" to year, "B5" to "ФИО сотрудника,должность, компания",
                 "E5" to "Тестов Иван Иванович, Инженер, ООО Тест", "E6" to "Город, улица, 1, +7(900)000-00-00",
@@ -149,6 +208,8 @@ class GsmProfileXlsxTest {
                 "A6" to "Итого по:", "B6" to "АИ-95", "A8" to "ФИО Тестов И. И."),
         )
         if (catalog) sheets["Список проектов"] = mapOf("A7" to "POS тест", "B7" to "TEST-BUDGET")
+        overrides.forEach { (sheet, values) -> sheets[sheet] = sheets.getValue(sheet) + values }
+        missingSheets.forEach(sheets::remove)
         fun escape(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;")
         val out = ByteArrayOutputStream()
         ZipOutputStream(out).use { zip ->

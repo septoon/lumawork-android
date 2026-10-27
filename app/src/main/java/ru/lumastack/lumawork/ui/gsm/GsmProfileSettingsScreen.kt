@@ -8,8 +8,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
@@ -77,6 +80,7 @@ fun GsmProfileSettingsScreen(
     val importSaver = remember(json) { Saver<GsmProfileImport, String>(save = { json.encodeToString(it) }, restore = { json.decodeFromString<GsmProfileImport>(it) }) }
     var imported by rememberSaveable(owner, stateSaver = importSaver) { mutableStateOf(restored?.imported ?: GsmProfileImport(GsmProfile(), emptyMap(), emptyList())) }
     var importing by remember(owner) { mutableStateOf(false) }
+    var importError by rememberSaveable(owner) { mutableStateOf<String?>(null) }
     var importStarted by rememberSaveable(owner) { mutableStateOf(false) }
     var confirmReplace by remember { mutableStateOf(false) }
     var sourcesOpen by rememberSaveable(owner) { mutableStateOf(false) }
@@ -102,6 +106,7 @@ fun GsmProfileSettingsScreen(
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
             importing = true
+            importError = null
             try {
                 val projects = editor.snapshot.projects
                 val result = withContext(Dispatchers.IO) {
@@ -115,7 +120,7 @@ fun GsmProfileSettingsScreen(
                 odometerInput = result.profile.defaultStartOdometer.toString()
                 snackbars.showSnackbar("Данные прочитаны. Проверьте все поля и нажмите «Сохранить».")
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { snackbars.showSnackbar(error.message ?: "Не удалось прочитать XLSX.") }
+            catch (error: Exception) { importError = error.message ?: "Не удалось прочитать XLSX." }
             finally { importing = false }
         }
     }
@@ -288,6 +293,18 @@ fun GsmProfileSettingsScreen(
         }
     }
 
+    importError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { importError = null },
+            title = { Text("Не удалось загрузить отчёт ГСМ") },
+            text = {
+                Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
+                    SelectionContainer { Text(message) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { importError = null }) { Text("Понятно") } },
+        )
+    }
     if (confirmReplace) AlertDialog(onDismissRequest = { confirmReplace = false }, title = { Text("Заменить черновик данными XLSX?") },
         text = { Text("Текущие несохранённые поля будут заменены после успешного чтения файла.") },
         confirmButton = { TextButton(onClick = { confirmReplace = false; openPicker() }) { Text("Выбрать файл") } },
