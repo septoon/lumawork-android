@@ -46,6 +46,7 @@ class OkHttpAuthApi(
     baseOrigin: String,
     private val client: OkHttpClient = defaultClient(),
     private val json: Json = defaultJson,
+    private val deviceHeaders: Map<String, String> = emptyMap(),
 ) : AuthApi {
     private val origin = baseOrigin.trimEnd('/')
 
@@ -104,6 +105,7 @@ class OkHttpAuthApi(
         .header("Accept", "application/json")
         .header("Cache-Control", "no-cache")
         .apply {
+            deviceHeaders.forEach { (name, value) -> header(name, value) }
             if (token != null) header("Authorization", "Bearer $token")
         }
 

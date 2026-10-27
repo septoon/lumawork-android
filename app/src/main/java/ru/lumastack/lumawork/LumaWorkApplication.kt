@@ -76,7 +76,7 @@ class AppContainer(application: Application) {
     }
 
     val authRepository = AuthRepository(
-        api = OkHttpAuthApi(BuildConfig.API_ORIGIN),
+        api = OkHttpAuthApi(BuildConfig.API_ORIGIN, deviceHeaders = appDeviceHeaders(application)),
         sessionStore = EncryptedSessionStore(application, json),
         emailStore = SharedPreferencesEmailStore(application),
     )
@@ -178,5 +178,20 @@ class AppContainer(application: Application) {
         api = simpleOneApi,
         sessionStore = simpleOneSessionStore,
         cache = FileEmployeeCache(application, json),
+    )
+}
+
+private fun appDeviceHeaders(application: Application): Map<String, String> {
+    val preferences = application.getSharedPreferences("app-device-identity", android.content.Context.MODE_PRIVATE)
+    val deviceId = preferences.getString("id", null)?.takeIf { runCatching { java.util.UUID.fromString(it) }.isSuccess }
+        ?: java.util.UUID.randomUUID().toString().also { preferences.edit().putString("id", it).apply() }
+    fun ascii(value: String) = value.filter { it.code in 32..126 }.trim().take(120)
+    return mapOf(
+        "X-LumaWork-Device-ID" to deviceId,
+        "X-LumaWork-Device-Model" to ascii("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}").ifEmpty { "Android" },
+        "X-LumaWork-Device-OS" to ascii("Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT})"),
+        "X-LumaWork-Device-Platform" to "Android",
+        "X-LumaWork-Version" to BuildConfig.VERSION_NAME,
+        "X-LumaWork-Build" to BuildConfig.VERSION_CODE.toString(),
     )
 }
