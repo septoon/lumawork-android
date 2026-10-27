@@ -100,8 +100,8 @@ private fun RequestsLoginDialog(state: SimpleOneUiState, actions: RequestsAction
     AppFormDialog("Вход в SimpleOne", actions.onDismissConnection, "Войти и загрузить", actions.onSignIn,
         isBusy = state.isLoading, confirmEnabled = state.username.isNotBlank() && state.password.isNotBlank(),
         errorMessage = state.errorMessage, maxWidth = 520.dp) {
-        item { AppTextField(state.username, actions.onUsernameChange, "Логин", singleLine = true, enabled = !state.isLoading) }
-        item { AppTextField(state.password, actions.onPasswordChange, "Пароль", singleLine = true,
+        item(key = "simpleone:username") { AppTextField(state.username, actions.onUsernameChange, "Логин", singleLine = true, enabled = !state.isLoading) }
+        item(key = "simpleone:password") { AppTextField(state.password, actions.onPasswordChange, "Пароль", singleLine = true,
             visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), enabled = !state.isLoading) }
     }
 }

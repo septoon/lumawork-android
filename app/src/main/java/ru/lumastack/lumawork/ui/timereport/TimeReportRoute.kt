@@ -208,8 +208,8 @@ fun TimeReportRoute(
         isBusy = simpleOneState.isLoading || simpleOneState.isResolvingUser,
         confirmEnabled = simpleOneState.username.isNotBlank() && simpleOneState.password.isNotBlank(),
         errorMessage = simpleOneState.errorMessage, maxWidth = 520.dp) {
-        item { AppTextField(simpleOneState.username, requestsActions.onUsernameChange, "Логин", singleLine = true) }
-        item { AppTextField(simpleOneState.password, requestsActions.onPasswordChange, "Пароль", singleLine = true, visualTransformation = PasswordVisualTransformation()) }
+        item(key = "simpleone:username") { AppTextField(simpleOneState.username, requestsActions.onUsernameChange, "Логин", singleLine = true) }
+        item(key = "simpleone:password") { AppTextField(simpleOneState.password, requestsActions.onPasswordChange, "Пароль", singleLine = true, visualTransformation = PasswordVisualTransformation()) }
     }
     browser?.let { (url, auth) -> RequestsBrowser(url, auth) { browser = null } }
 }
