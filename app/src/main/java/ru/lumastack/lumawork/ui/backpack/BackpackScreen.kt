@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.backpack
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -29,8 +30,6 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
@@ -44,12 +43,13 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.ui.res.painterResource
 import ru.lumastack.lumawork.R
 import ru.lumastack.lumawork.domain.backpack.*
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -79,6 +79,7 @@ import ru.lumastack.lumawork.domain.backpack.NOT_SET
 import ru.lumastack.lumawork.domain.backpack.backpackGroups
 import ru.lumastack.lumawork.domain.backpack.photoFor
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
+import ru.lumastack.lumawork.ui.requests.RequestLoadingTitle
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.AppSurfaces
 import ru.lumastack.lumawork.ui.theme.appScreenBackground
@@ -187,7 +188,7 @@ private fun BackpackScreen(
                 onQueryChange, onOpenGroup, listState, onScan, onSelectLocation, onOpenOffice)
         }
         if (selected != null && widthClass != AppWidthClass.Expanded) {
-            ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onBack, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+            AppModalSheet(onDismiss = onBack, maxWidth = 800.dp) {
                 BackpackDetails(selected, state.photoCatalog, imageRepository, widthClass, onBack, detailState, state, onSetLocation, onSerial)
             }
         }
@@ -310,12 +311,10 @@ private fun BackpackHeader(
                 }
             }
             if (state.isLoading || state.loadingDetailIds.isNotEmpty() || state.isLoadingReturns) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text("Загрузка данных", style = MaterialTheme.typography.bodySmall)
+                CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
+                    RequestLoadingTitle(isLoading = true, text = "Обновляю данные", style = MaterialTheme.typography.bodySmall)
                 }
-            }
-            state.snapshot?.updatedAtEpochMillis?.let {
+            } else state.snapshot?.updatedAtEpochMillis?.let {
                 Text(
                     "Обновлено ${UPDATED_FORMATTER.format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))}",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -50,8 +50,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
+import ru.lumastack.lumawork.ui.theme.AppModalHeader
 import androidx.core.content.FileProvider
 import java.io.File
 import java.time.YearMonth
@@ -177,83 +177,76 @@ private fun FuelReceiptsSheet(
         picker.launch(FuelReceiptInput.MIME_TYPES.toTypedArray())
     }
     val title = remember(month) { fuelReceiptMonthLabel(month) }
-    Dialog(onDismissRequest = { if (!locked && pending == null) onClose() }, properties = DialogProperties(dismissOnBackPress = !locked && pending == null, dismissOnClickOutside = !locked && pending == null)) {
-        Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Чеки заправок", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    AppModalSheet(onDismiss = onClose, dismissEnabled = !locked && pending == null) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppModalHeader("Чеки заправок", onClose, closeEnabled = !locked && pending == null)
+            Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                item(key = "status") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (offline) Text("Офлайн · доступны ранее открытые чеки", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("PDF, JPEG, PNG, HEIC/HEIF · до 20 МБ", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else if (!offline) TextButton(onClick = onRefresh, enabled = !locked && pending == null) { Text("Обновить") }
+                        }
+                        progress?.let { amount ->
+                            LinearProgressIndicator(progress = { amount.toFloat() }, modifier = Modifier.fillMaxWidth())
+                            Text("Сохранение · ${(amount * 100).toInt()} %", style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (busy) TextButton(onClick = { operation?.cancel() }) { Text("Отменить действие") }
+                        (error ?: refreshError)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                        pending?.let { selected ->
+                            if (!busy) Column {
+                                Text(selected.input.fileName, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Row {
+                                    TextButton(onClick = { upload(selected) }, enabled = !offline && !authorizationRequired) { Text("Повторить") }
+                                    TextButton(onClick = { pending = null }) { Text("Убрать") }
+                                }
+                            }
+                        }
                     }
-                    TextButton(onClick = onClose, enabled = !locked && pending == null) { Text("Закрыть") }
                 }
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    item(key = "status") {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (offline) Text("Офлайн · доступны ранее открытые чеки", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text("PDF, JPEG, PNG, HEIC/HEIF · до 20 МБ", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                else if (!offline) TextButton(onClick = onRefresh, enabled = !locked && pending == null) { Text("Обновить") }
-                            }
-                            progress?.let { amount ->
-                                LinearProgressIndicator(progress = { amount.toFloat() }, modifier = Modifier.fillMaxWidth())
-                                Text("Сохранение · ${(amount * 100).toInt()} %", style = MaterialTheme.typography.labelSmall)
-                            }
-                            if (busy) TextButton(onClick = { operation?.cancel() }) { Text("Отменить действие") }
-                            (error ?: refreshError)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                            pending?.let { selected ->
-                                if (!busy) Column {
-                                    Text(selected.input.fileName, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Row {
-                                        TextButton(onClick = { upload(selected) }, enabled = !offline && !authorizationRequired) { Text("Повторить") }
-                                        TextButton(onClick = { pending = null }) { Text("Убрать") }
-                                    }
-                                }
-                            }
+                listOf("fiscal" to "Фискальные", "bank" to "Банковские").forEach { (kind, label) ->
+                    val group = receipts.filter { it.kind == kind }
+                    item(key = kind) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("$label · ${group.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            TextButton(onClick = { select(kind) }, enabled = !locked && !offline && !authorizationRequired && pending == null) { Text("Прикрепить") }
                         }
                     }
-                    listOf("fiscal" to "Фискальные", "bank" to "Банковские").forEach { (kind, label) ->
-                        val group = receipts.filter { it.kind == kind }
-                        item(key = kind) {
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text("$label · ${group.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                                TextButton(onClick = { select(kind) }, enabled = !locked && !offline && !authorizationRequired && pending == null) { Text("Прикрепить") }
+                    if (group.isEmpty()) item(key = "$kind-empty") { Text("Чеки не прикреплены", Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    items(group, key = FuelReceipt::id) { receipt ->
+                        FuelReceiptRow(receipt, !locked && !authorizationRequired && pending == null, !offline, onOpen = {
+                            busy = true
+                            error = null
+                            operation = scope.launch {
+                                try {
+                                    val file = repository.preview(session.token, receipt, offline)
+                                    openFuelReceipt(context, receipt, file)
+                                } catch (failure: Exception) { report(failure) }
+                                finally { busy = false }
                             }
-                        }
-                        if (group.isEmpty()) item(key = "$kind-empty") { Text("Чеки не прикреплены", Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        items(group, key = FuelReceipt::id) { receipt ->
-                            FuelReceiptRow(receipt, !locked && !authorizationRequired && pending == null, !offline, onOpen = {
-                                busy = true
-                                error = null
-                                operation = scope.launch {
-                                    try {
-                                        val file = repository.preview(session.token, receipt, offline)
-                                        openFuelReceipt(context, receipt, file)
-                                    } catch (failure: Exception) { report(failure) }
-                                    finally { busy = false }
-                                }
-                            }, onReplace = { select(kind, receipt) }, onDelete = { deleteReceipt = receipt })
-                        }
+                        }, onReplace = { select(kind, receipt) }, onDelete = { deleteReceipt = receipt })
                     }
                 }
             }
         }
-    }
-    deleteReceipt?.let { receipt ->
-        AlertDialog(onDismissRequest = { deleteReceipt = null }, title = { Text("Удалить чек?") },
-            text = { Text("«${receipt.fileName}» будет удалён с сервера.") },
-            dismissButton = { TextButton(onClick = { deleteReceipt = null }) { Text("Отмена") } },
-            confirmButton = { TextButton(onClick = {
-                deleteReceipt = null
-                busy = true
-                error = null
-                operation = scope.launch {
-                    try { repository.delete(session.token, receipt, offline) }
-                    catch (failure: Exception) { report(failure) }
-                    finally { busy = false }
-                }
-            }) { Text("Удалить", color = MaterialTheme.colorScheme.error) } })
+}
+deleteReceipt?.let { receipt ->
+    AlertDialog(onDismissRequest = { deleteReceipt = null }, title = { Text("Удалить чек?") },
+        text = { Text("«${receipt.fileName}» будет удалён с сервера.") },
+        dismissButton = { TextButton(onClick = { deleteReceipt = null }) { Text("Отмена") } },
+        confirmButton = { TextButton(onClick = {
+            deleteReceipt = null
+            busy = true
+            error = null
+            operation = scope.launch {
+                try { repository.delete(session.token, receipt, offline) }
+                catch (failure: Exception) { report(failure) }
+                finally { busy = false }
+            }
+        }) { Text("Удалить", color = MaterialTheme.colorScheme.error) } })
     }
 }
 

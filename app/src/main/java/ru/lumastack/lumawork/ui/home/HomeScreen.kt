@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.home
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,13 +32,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -263,8 +262,7 @@ fun HomeScreen(
     if (archiveOpen) RouteArchiveSheet(state, session, isOffline, routeRepository,
         onDismiss = { archiveOpen = false }, onOdometerChange = model::updateOdometer, onDeleteDay = model::deleteArchivedDay)
     if (fuelOpen) HomeFuelEntry(session, isOffline, fuelRepository, onDismiss = { fuelOpen = false })
-    if (detailOpen) ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = { detailOpen = false; requestsActions.onCloseRequest() },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 980.dp) {
+    if (detailOpen) AppModalSheet(onDismiss = { detailOpen = false; requestsActions.onCloseRequest() }, maxWidth = 980.dp) {
         simpleOneState.selectedRequest?.let { request ->
             SimpleOneRequestDetailContent(request, widthClass, simpleOneState.isDetailLoading, simpleOneState.detailErrorMessage,
                 onBack = { detailOpen = false; requestsActions.onCloseRequest() }, showBackButton = true)

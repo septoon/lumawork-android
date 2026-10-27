@@ -28,8 +28,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
+import ru.lumastack.lumawork.ui.theme.AppModalHeader
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.NumberFormat
@@ -233,51 +233,46 @@ private fun SalaryMonthButton(month: SalaryMonth, hidden: Boolean, onClick: () -
 @Composable
 private fun SalaryMonthDialog(session: AppSession, offline: Boolean, month: SalaryMonth, hidden: Boolean, close: () -> Unit,
     edit: (SalaryEntry) -> Unit, delete: (SalaryEntry) -> Unit, message: (String) -> Unit) {
-    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.widthIn(max = 760.dp).fillMaxWidth().fillMaxHeight(.94f), shape = RoundedCornerShape(24.dp)) {
-            Column {
-                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(salaryMonthTitle(month.key), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
-                    TextButton(onClick = close) { Text("Закрыть") }
+    AppModalSheet(onDismiss = close) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.94f)) {
+            AppModalHeader(salaryMonthTitle(month.key), close, Modifier.padding(horizontal = 12.dp))
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                item(key = "total") {
+                    SalaryInset {
+                        Text("Итог за месяц", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(salaryPaymentCount(month.entries.size), style = MaterialTheme.typography.bodySmall)
+                        val legacy = month.entries.filterNot { it.usesNetAmount }
+                        if (legacy.isNotEmpty()) {
+                            SalaryStat("Начислено", salaryAmount(legacy.sumOf { it.baseSalary + it.weekendPay }, hidden))
+                            SalaryStat("Удержано", salaryAmount(legacy.sumOf { kotlin.math.floor((it.baseSalary + it.weekendPay) * .13) }, hidden))
+                            HorizontalDivider()
+                        }
+                        SalaryStat("Перечислено", salaryAmount(month.total, hidden))
+                    }
                 }
-                LazyColumn(contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    item(key = "total") {
-                        SalaryInset {
-                            Text("Итог за месяц", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Text(salaryPaymentCount(month.entries.size), style = MaterialTheme.typography.bodySmall)
-                            val legacy = month.entries.filterNot { it.usesNetAmount }
-                            if (legacy.isNotEmpty()) {
-                                SalaryStat("Начислено", salaryAmount(legacy.sumOf { it.baseSalary + it.weekendPay }, hidden))
-                                SalaryStat("Удержано", salaryAmount(legacy.sumOf { kotlin.math.floor((it.baseSalary + it.weekendPay) * .13) }, hidden))
-                                HorizontalDivider()
+                itemsIndexed(month.entries.sortedBy { it.date }, key = { index, entry -> entry.id ?: "legacy-$index-${entry.date}" }) { _, entry ->
+                    SalaryInset {
+                        Text(entry.resolvedKind.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        Text("Получено ${salaryDate(entry.date)}", style = MaterialTheme.typography.bodySmall)
+                        if (!entry.usesNetAmount) {
+                            SalaryStat("Оклад", salaryAmount(entry.baseSalary, hidden))
+                            if (entry.weekendPay > 0) {
+                                SalaryStat("Оплата за выходной", salaryAmount(entry.weekendPay / 2, hidden))
+                                SalaryStat("Доплата за выходной", salaryAmount(entry.weekendPay / 2, hidden))
                             }
-                            SalaryStat("Перечислено", salaryAmount(month.total, hidden))
+                            SalaryStat("Налог", salaryAmount(kotlin.math.floor((entry.baseSalary + entry.weekendPay) * .13), hidden))
+                        }
+                        if (entry.resolvedKind == SalaryKind.Vacation && !entry.vacationStartDate.isNullOrBlank() && !entry.vacationEndDate.isNullOrBlank())
+                            SalaryStat("Период отпуска", "${salaryDate(entry.vacationStartDate)} — ${salaryDate(entry.vacationEndDate)}")
+                        entry.comment?.takeIf { it.isNotBlank() }?.let { SalaryStat("Комментарий", it) }
+                        SalaryStat("Выплата", salaryAmount(entry.payout, hidden))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { edit(entry) }, enabled = !offline && !entry.id.isNullOrBlank()) { Text("Изменить") }
+                            TextButton(onClick = { delete(entry) }, enabled = !offline && !entry.id.isNullOrBlank()) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
                         }
                     }
-                    itemsIndexed(month.entries.sortedBy { it.date }, key = { index, entry -> entry.id ?: "legacy-$index-${entry.date}" }) { _, entry ->
-                        SalaryInset {
-                            Text(entry.resolvedKind.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                            Text("Получено ${salaryDate(entry.date)}", style = MaterialTheme.typography.bodySmall)
-                            if (!entry.usesNetAmount) {
-                                SalaryStat("Оклад", salaryAmount(entry.baseSalary, hidden))
-                                if (entry.weekendPay > 0) {
-                                    SalaryStat("Оплата за выходной", salaryAmount(entry.weekendPay / 2, hidden))
-                                    SalaryStat("Доплата за выходной", salaryAmount(entry.weekendPay / 2, hidden))
-                                }
-                                SalaryStat("Налог", salaryAmount(kotlin.math.floor((entry.baseSalary + entry.weekendPay) * .13), hidden))
-                            }
-                            if (entry.resolvedKind == SalaryKind.Vacation && !entry.vacationStartDate.isNullOrBlank() && !entry.vacationEndDate.isNullOrBlank())
-                                SalaryStat("Период отпуска", "${salaryDate(entry.vacationStartDate)} — ${salaryDate(entry.vacationEndDate)}")
-                            entry.comment?.takeIf { it.isNotBlank() }?.let { SalaryStat("Комментарий", it) }
-                            SalaryStat("Выплата", salaryAmount(entry.payout, hidden))
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                TextButton(onClick = { edit(entry) }, enabled = !offline && !entry.id.isNullOrBlank()) { Text("Изменить") }
-                                TextButton(onClick = { delete(entry) }, enabled = !offline && !entry.id.isNullOrBlank()) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
-                            }
-                        }
-                    }
-                    item(key = "document") { SalaryDocumentsCard(session, offline, month.key, message) }
                 }
+                item(key = "document") { SalaryDocumentsCard(session, offline, month.key, message) }
             }
         }
     }

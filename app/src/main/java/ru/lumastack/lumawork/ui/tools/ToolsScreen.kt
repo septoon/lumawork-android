@@ -1,5 +1,9 @@
 package ru.lumastack.lumawork.ui.tools
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
+import ru.lumastack.lumawork.ui.theme.AppModalHeader
+import ru.lumastack.lumawork.ui.theme.AppFormDialog
+
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -187,8 +191,10 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
     state.inspected?.let { file ->
         val selected = state.snapshot.selection?.takeIf { it.file.id == file.id }
         val available = state.files.any { it.id == file.id && !it.downloading }
-        AlertDialog(onDismissRequest = model::closeFile, title = { Text(file.name) }, text = {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        AppFormDialog(title = file.name, onDismiss = model::closeFile,
+            confirmLabel = if (selected == null) "Выбрать и проверить" else "Проверить повторно",
+            onConfirm = { if (selected == null) model.choose(file.id) else model.check(file.id) },
+            isBusy = state.checking, confirmEnabled = !state.loading && available) {
                 item { FileDetails(file, selected?.sha256) }
                 if (!available) item {
                     Text("Файл отсутствует или недоступен. Выберите другой файл или загрузите его через FTP.", color = MaterialTheme.colorScheme.error)
@@ -201,27 +207,23 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
                     TextButton(onClick = { model.prepareFirmwareFromFtp(file.id) }, enabled = !state.firmwareBusy && !state.globalInstallBusy) { Text("Подготовить архив для ${state.paxModel.title}") }
                 }
                 if (selected != null) item { TextButton(onClick = { model.clearSelection() }, enabled = !state.checking) { Text("Сбросить сохранённый выбор") } }
-            }
-        }, confirmButton = {
-            TextButton(onClick = { if (selected == null) model.choose(file.id) else model.check(file.id) }, enabled = !state.checking && !state.loading && available) {
-                Text(if (selected == null) "Выбрать и проверить" else "Проверить повторно")
-            }
-        }, dismissButton = { TextButton(onClick = model::closeFile, enabled = !state.checking) { Text("Закрыть") } })
+        }
     }
     binding?.let { eventId ->
         val available = (requests.activeRequests + requests.closedArchive.requests).filter { it.sysId.isNotBlank() && it.number.isNotBlank() }.distinctBy { it.sysId }
-        AlertDialog(onDismissRequest = { binding = null }, title = { Text("Заявка SimpleOne") }, text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AppTextField(requestSearch, { requestSearch = it }, "Номер заявки", search = true, singleLine = true)
+        AppModalSheet(onDismiss = { binding = null }) {
+            Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AppModalHeader("Заявка SimpleOne", { binding = null })
                 if (available.isEmpty()) Text("Нет сохранённых заявок. Сначала загрузите заявки в разделе «Заявки».")
-                LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                     items(available.filter { it.number.contains(requestSearch.trim(), true) }, key = { it.sysId }) { request ->
                         TextButton(onClick = { if (model.bind(eventId, ToolRequestRef(request.sysId, request.number))) binding = null }) { Text(request.number) }
                     }
                 }
+                TextButton(onClick = { if (model.bind(eventId, null)) binding = null }) { Text("Убрать привязку") }
+                AppTextField(requestSearch, { requestSearch = it }, "Номер заявки", search = true, singleLine = true)
             }
-        }, confirmButton = { TextButton(onClick = { binding = null }) { Text("Закрыть") } },
-            dismissButton = { TextButton(onClick = { if (model.bind(eventId, null)) binding = null }) { Text("Убрать привязку") } })
+        }
     }
 }
 

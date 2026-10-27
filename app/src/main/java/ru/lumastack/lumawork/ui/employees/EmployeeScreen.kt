@@ -30,6 +30,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.LocationOn
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -48,8 +56,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.lumastack.lumawork.data.employees.EmployeeRepository
@@ -63,6 +69,8 @@ import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppCard
 import ru.lumastack.lumawork.ui.theme.AppPanel
 import ru.lumastack.lumawork.ui.theme.AppSurfaces
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
+import ru.lumastack.lumawork.ui.theme.AppModalHeader
 
 @Composable
 fun EmployeeRoute(
@@ -466,70 +474,56 @@ private fun EmployeeAddressDialog(
     onSelect: (EmployeeAddress) -> Unit,
     onRemove: (EmployeeAddress) -> Unit,
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
-            modifier = Modifier.widthIn(max = 720.dp).fillMaxWidth().fillMaxHeight(0.9f).padding(18.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-        ) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Адрес сотрудников", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text("ТГР Насел. пункт", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    TextButton(onClick = onDismiss) { Text("Закрыть") }
+    AppModalSheet(onDismiss = onDismiss, maxWidth = 720.dp) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.94f)) {
+            AppModalHeader("Адрес сотрудников", onDismiss, Modifier.padding(horizontal = 12.dp))
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                item(key = "saved-title") {
+                    AddressSectionTitle("Сохранённые адреса", "Переключайтесь между каталогами или удаляйте ненужные")
                 }
-                AppTextField(
-                    value = state.addressQuery,
-                    onValueChange = onQueryChange,
-                    label = "Например, Алушта", search = true,
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                )
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (state.snapshot.savedAddresses.isNotEmpty()) {
-                        item(key = "saved-title") { SectionTitle("Сохранённые") }
-                        items(state.snapshot.savedAddresses, key = { "saved-${it.sysId}" }) { address ->
-                            AddressRow(
-                                address = address,
-                                isSelected = address.sysId == state.snapshot.selectedAddress?.sysId,
-                                onSelect = { onSelect(address) },
-                                onRemove = { onRemove(address) },
-                            )
+                item(key = "saved-addresses") {
+                    if (state.snapshot.savedAddresses.isEmpty()) MessagePanel("Адресов пока нет", "Найдите населённый пункт через строку поиска.")
+                    else AddressList(state.snapshot.savedAddresses, state.snapshot.selectedAddress?.sysId, onSelect, onRemove)
+                }
+                item(key = "results-title") {
+                    AddressSectionTitle("Населённый пункт", "Найдите и добавьте ещё один адрес")
+                }
+                if (state.isSearchingAddresses) {
+                    item(key = "address-loading") {
+                        Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.Center) {
+                            CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                         }
                     }
-                    item(key = "results-title") { SectionTitle("Результаты поиска") }
-                    if (state.isSearchingAddresses) {
-                        item(key = "address-loading") {
-                            Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.Center) {
-                                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                            }
-                        }
-                    }
-                    state.addressErrorMessage?.let { error ->
-                        item(key = "address-error") { MessagePanel("Поиск не выполнен", error, isError = true) }
-                    }
-                    if (state.addressQuery.trim().length >= 2 && !state.isSearchingAddresses && state.addressResults.isEmpty() && state.addressErrorMessage == null) {
-                        item(key = "address-empty") { MessagePanel("Ничего не найдено", "Уточните название населённого пункта.") }
-                    }
-                    items(state.addressResults, key = { "result-${it.sysId}" }) { address ->
-                        AddressRow(address, address.sysId == state.snapshot.selectedAddress?.sysId, onSelect = { onSelect(address) }, onRemove = null)
-                    }
+                }
+                state.addressErrorMessage?.let { error ->
+                    item(key = "address-error") { MessagePanel("Поиск не выполнен", error, isError = true) }
+                }
+                if (state.addressQuery.trim().length >= 2 && !state.isSearchingAddresses && state.addressResults.isEmpty() && state.addressErrorMessage == null) {
+                    item(key = "address-empty") { MessagePanel("Ничего не найдено", "Уточните название населённого пункта.") }
+                }
+                if (state.addressResults.isNotEmpty()) item(key = "results") {
+                    AddressList(state.addressResults, state.snapshot.selectedAddress?.sysId, onSelect)
                 }
             }
+            AppTextField(
+                value = state.addressQuery, onValueChange = onQueryChange,
+                label = "Например, Алушта", search = true, singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 12.dp), shape = CircleShape,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AddressList(addresses: List<EmployeeAddress>, selectedId: String?, onSelect: (EmployeeAddress) -> Unit, onRemove: ((EmployeeAddress) -> Unit)? = null) {
+    AppCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
+        addresses.forEachIndexed { index, address ->
+            AddressRow(address, address.sysId == selectedId, { onSelect(address) }, onRemove?.let { remove -> { remove(address) } })
+            if (index < addresses.lastIndex) HorizontalDivider(Modifier.padding(start = 58.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .12f))
         }
     }
 }
@@ -541,30 +535,40 @@ private fun AddressRow(
     onSelect: () -> Unit,
     onRemove: (() -> Unit)?,
 ) {
-    AppPanel(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onSelect),
-        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-    ) {
+    val colors = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            Modifier.weight(1f).clickable(onClick = onSelect).padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(13.dp),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(address.title, fontWeight = FontWeight.SemiBold)
+            Box(Modifier.size(38.dp).background(if (isSelected) colors.secondary else colors.secondary.copy(alpha = .12f), CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.LocationOn, null, Modifier.size(22.dp), tint = if (isSelected) Color.White else colors.secondary)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(address.title, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 address.subtitle.takeIf(String::isNotBlank)?.let {
-                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text(it, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (isSelected) Text("Выбран", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
-            if (onRemove != null) TextButton(onClick = onRemove) { Text("Удалить") }
+            Icon(if (isSelected) Icons.Default.CheckCircle else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                if (isSelected) "Выбранный адрес" else null, Modifier.size(20.dp), tint = if (isSelected) colors.primary else colors.onSurfaceVariant)
+        }
+        if (onRemove != null) {
+            VerticalDivider(Modifier.height(32.dp), color = colors.onSurface.copy(alpha = .12f))
+            IconButton(onClick = onRemove, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Default.Delete, "Удалить ${address.title} из сохранённых", Modifier.size(20.dp), tint = colors.error)
+            }
         }
     }
 }
 
 @Composable
-private fun SectionTitle(title: String) {
-    Text(title, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+private fun AddressSectionTitle(title: String, caption: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(caption, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable

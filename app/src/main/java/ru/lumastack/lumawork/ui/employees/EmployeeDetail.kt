@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.employees
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.Intent
 import android.net.Uri
@@ -37,7 +38,7 @@ internal fun EmployeeDetail(
     val context = LocalContext.current
     var sectionId by rememberSaveable(employee.sysId) { mutableStateOf<String?>(null) }
     employee.detailSections.firstOrNull { it.id == sectionId }?.let { section ->
-        ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = { sectionId = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+        AppModalSheet(onDismiss = { sectionId = null }, maxWidth = 800.dp) {
             LazyColumn(contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 item {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

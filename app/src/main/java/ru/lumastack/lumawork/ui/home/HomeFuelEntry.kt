@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.home
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -65,7 +66,7 @@ internal fun HomeFuelEntry(session: AppSession, offline: Boolean, repository: Fu
             finally { saving = false }
         }
     }
-    ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = { if (!saving) onDismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 680.dp) {
+    AppModalSheet(onDismiss = onDismiss, dismissEnabled = !saving, maxWidth = 680.dp) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Новая заправка", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))

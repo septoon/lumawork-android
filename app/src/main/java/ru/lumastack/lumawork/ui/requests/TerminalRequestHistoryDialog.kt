@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.requests
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.Context
 import androidx.compose.foundation.layout.*
@@ -76,11 +77,7 @@ internal fun TerminalRequestHistoryDialog(
         } finally { loading = false }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = AppSurfaces.panel,
-    ) {
+    AppModalSheet(onDismiss = onDismiss) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.94f)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box {

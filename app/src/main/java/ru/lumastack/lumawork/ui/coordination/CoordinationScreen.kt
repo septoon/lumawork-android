@@ -6,8 +6,11 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -205,28 +208,92 @@ private fun CoordinationActiveContent(state: CoordinationUiState, userName: Stri
 
 @Composable
 private fun CoordinationSummary(state: CoordinationUiState, userName: String, engineers: List<CoordinationEngineer>, detail: Boolean, onRegion: (CoordinationRegion) -> Unit) {
-    var menu by remember { mutableStateOf(false) }
+    if (state.section == CoordinationSection.Distribution && !detail) {
+        CoordinationRegionSummary(state, engineers, onRegion)
+        return
+    }
     AppCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 if (state.section == CoordinationSection.Distribution) {
-                    if (!detail) Text("Регион / город", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Box {
-                        if (detail) Text(state.region.title, style = MaterialTheme.typography.titleMedium)
-                        else TextButton(onClick = { menu = true }) { Text(state.region.title); Icon(Icons.Default.KeyboardArrowDown, null) }
-                        DropdownMenu(menu, { menu = false }) { CoordinationRegion.entries.forEach { region -> DropdownMenuItem({ Text(region.title) }, { menu = false; onRegion(region) },
-                            trailingIcon = { if (region == state.region) Icon(Icons.Default.Check, null) }) } }
-                    }
+                    Text(state.region.title, style = MaterialTheme.typography.titleMedium)
                 } else { Text("Возврат ТО", style = MaterialTheme.typography.titleMedium); Text(userName, style = MaterialTheme.typography.bodyMedium) }
             }
             if (state.isLoading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            if (state.section == CoordinationSection.Distribution && !detail) Text("${engineers.count { !it.isUnassigned }} инженеров", style = MaterialTheme.typography.titleMedium)
             Text("${if (detail) state.engineerRequests.size else state.currentGroup?.requests?.size ?: 0} заявок", style = MaterialTheme.typography.titleMedium)
         }
-        state.currentGroup?.updatedAtEpochMillis?.let { Text("Обновлено ${COORDINATION_UPDATED.format(Instant.ofEpochMilli(it))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        state.currentGroup?.updatedAtEpochMillis?.let { CoordinationUpdatedAt(it) }
     } }
+}
+
+@Composable
+private fun CoordinationRegionSummary(state: CoordinationUiState, engineers: List<CoordinationEngineer>, onRegion: (CoordinationRegion) -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
+    val engineerCount = engineers.count { !it.isUnassigned }
+    val requestCount = state.currentGroup?.requests?.size ?: 0
+    Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+            Box(Modifier.size(40.dp).background(colors.primary.copy(alpha = .12f), CircleShape), contentAlignment = Alignment.Center) {
+                Icon(painterResource(R.drawable.ic_nav_groups), null, Modifier.size(24.dp), tint = colors.primary)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Регион / город", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = colors.onSurfaceVariant)
+                Box {
+                    TextButton(onClick = { menu = true }, contentPadding = PaddingValues(0.dp)) {
+                        Text(state.region.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold, color = colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Icon(Icons.Default.KeyboardArrowUp, null, Modifier.size(12.dp))
+                            Icon(Icons.Default.KeyboardArrowDown, null, Modifier.size(12.dp))
+                        }
+                    }
+                    DropdownMenu(menu, { menu = false }) {
+                        CoordinationRegion.entries.forEach { region ->
+                            DropdownMenuItem(text = { Text(region.title) }, onClick = { menu = false; onRegion(region) },
+                                trailingIcon = { if (region == state.region) Icon(Icons.Default.Check, null) })
+                        }
+                    }
+                }
+                Text("Координация СО ТО Крым", style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
+            }
+            if (state.isLoading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
+        HorizontalDivider(color = colors.onSurface.copy(alpha = .12f))
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CoordinationSummaryMetric(engineerCount, coordinationEngineerCountTitle(engineerCount), Modifier.weight(1f).fillMaxHeight())
+            CoordinationSummaryMetric(requestCount, coordinationRequestCountTitle(requestCount), Modifier.weight(1f).fillMaxHeight())
+        }
+        state.currentGroup?.updatedAtEpochMillis?.let { CoordinationUpdatedAt(it) }
+    }
+}
+
+@Composable
+private fun CoordinationSummaryMetric(value: Int, title: String, modifier: Modifier = Modifier) {
+    Surface(modifier, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(value.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun CoordinationUpdatedAt(updatedAtEpochMillis: Long) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val now by produceState(Instant.now(), updatedAtEpochMillis, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                value = Instant.now()
+                delay(60_000)
+            }
+        }
+    }
+    Text("Обновлено ${coordinationUpdatedText(updatedAtEpochMillis, now)}",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -271,7 +338,30 @@ internal fun CoordinationMessage(title: String, message: String, modifier: Modif
         Text(title, style = MaterialTheme.typography.titleMedium); Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } }
 }
-private val COORDINATION_UPDATED = DateTimeFormatter.ofPattern("d MMM, HH:mm", Locale.forLanguageTag("ru")).withZone(ZoneId.systemDefault())
+private val COORDINATION_UPDATED = DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale.forLanguageTag("ru"))
+private val COORDINATION_UPDATED_TIME = DateTimeFormatter.ofPattern("HH:mm", Locale.forLanguageTag("ru"))
+
+internal fun coordinationUpdatedText(updatedAtEpochMillis: Long, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
+    val updated = Instant.ofEpochMilli(updatedAtEpochMillis).atZone(zone)
+    val today = now.atZone(zone).toLocalDate()
+    val day = when (updated.toLocalDate()) {
+        today -> "сегодня"
+        today.minusDays(1) -> "вчера"
+        else -> return COORDINATION_UPDATED.format(updated)
+    }
+    return "$day, ${COORDINATION_UPDATED_TIME.format(updated)}"
+}
+
+internal fun coordinationEngineerCountTitle(count: Int): String = coordinationCountTitle(count, "инженер", "инженера", "инженеров")
+
+internal fun coordinationRequestCountTitle(count: Int): String = coordinationCountTitle(count, "активная заявка", "активные заявки", "активных заявок")
+
+private fun coordinationCountTitle(count: Int, one: String, few: String, many: String): String = when {
+    count % 100 in 11..14 -> many
+    count % 10 == 1 -> one
+    count % 10 in 2..4 -> few
+    else -> many
+}
 
 @Composable
 private fun coordinationStatusColor(status: String): androidx.compose.ui.graphics.Color {

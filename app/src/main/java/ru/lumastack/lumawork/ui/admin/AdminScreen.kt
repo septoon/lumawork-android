@@ -1,5 +1,9 @@
 package ru.lumastack.lumawork.ui.admin
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
+import ru.lumastack.lumawork.ui.theme.AppModalHeader
+import androidx.compose.foundation.layout.fillMaxHeight
+
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import android.content.Context
@@ -383,55 +387,52 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
 }
 
 @Composable private fun UserDialog(session: AppSession, state: AdminUiState, user: AdminUser, model: AdminViewModel) {
-    AlertDialog(
-        onDismissRequest = model::closeUser,
-        title = { Text(user.email) },
-        text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { Text("Роль: ${user.roleTitle()}. ${if (user.isBlocked) "Заблокирован" else "Активен"}.") }
-            if (session.user.can(AdminPermission.ManageUserPermissions) && !user.isProtectedAdmin && user.id != session.user.id) {
-                item { AppOutlinedButton(onClick = model::toggleAdmin, modifier = Modifier.fillMaxWidth()) { Text(if (user.role == "admin") "Сделать пользователем" else "Сделать администратором") } }
-                if (user.role == "admin") item {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        AdminPermission.entries.forEach { permission ->
-                            AppOutlinedButton(onClick = { model.togglePermission(permission) }, modifier = Modifier.fillMaxWidth()) {
-                                Text("${if (permission.rawValue in user.adminPermissions) "✓ " else ""}${permission.title()}")
+    AppModalSheet(onDismiss = model::closeUser, dismissEnabled = !state.saving) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            AppModalHeader(user.email, model::closeUser, closeEnabled = !state.saving)
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                item { Text("Роль: ${user.roleTitle()}. ${if (user.isBlocked) "Заблокирован" else "Активен"}.") }
+                if (session.user.can(AdminPermission.ManageUserPermissions) && !user.isProtectedAdmin && user.id != session.user.id) {
+                    item { AppOutlinedButton(onClick = model::toggleAdmin, modifier = Modifier.fillMaxWidth()) { Text(if (user.role == "admin") "Сделать пользователем" else "Сделать администратором") } }
+                    if (user.role == "admin") item {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            AdminPermission.entries.forEach { permission ->
+                                AppOutlinedButton(onClick = { model.togglePermission(permission) }, modifier = Modifier.fillMaxWidth()) {
+                                    Text("${if (permission.rawValue in user.adminPermissions) "✓ " else ""}${permission.title()}")
+                                }
                             }
                         }
                     }
                 }
+                if (session.user.can(AdminPermission.BlockUsers) && !user.isProtectedAdmin && user.id != session.user.id) item { AppOutlinedButton(onClick = model::toggleBlock, modifier = Modifier.fillMaxWidth()) { Text(if (user.isBlocked) "Разблокировать" else "Заблокировать на год") } }
+                if (session.user.can(AdminPermission.DeleteUsers) && !user.isProtectedAdmin && user.id != session.user.id) item {
+                    AppTextField(state.deleteConfirmation, model::deleteConfirmation, label = "Email для удаления", modifier = Modifier.fillMaxWidth())
+                }
             }
-            if (session.user.can(AdminPermission.BlockUsers) && !user.isProtectedAdmin && user.id != session.user.id) item { AppOutlinedButton(onClick = model::toggleBlock, modifier = Modifier.fillMaxWidth()) { Text(if (user.isBlocked) "Разблокировать" else "Заблокировать на год") } }
-            if (session.user.can(AdminPermission.DeleteUsers) && !user.isProtectedAdmin && user.id != session.user.id) item {
-                AppTextField(state.deleteConfirmation, model::deleteConfirmation, label = "Email для удаления", modifier = Modifier.fillMaxWidth())
-            }
-        } },
-        confirmButton = {
             if (session.user.can(AdminPermission.DeleteUsers) && !user.isProtectedAdmin && user.id != session.user.id) AppButton(onClick = model::deleteUser, enabled = !state.saving) { Text("Удалить") }
-        },
-        dismissButton = { TextButton(onClick = model::closeUser) { Text("Закрыть") } },
-    )
+        }
+    }
 }
 
 @Composable private fun FeedbackDialog(session: AppSession, state: AdminUiState, report: FeedbackMessage, model: AdminViewModel) {
-    AlertDialog(
-        onDismissRequest = model::closeFeedback,
-        title = { Text("${report.number} · ${report.status.title}") },
-        text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { Text(report.title, fontWeight = FontWeight.Bold); Text(report.message); Text(report.reporterEmail, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            if (session.user.can(AdminPermission.ManageFeedback)) {
-                item { AppTextField(state.adminNote, model::adminNote, label = "Внутренняя заметка", minLines = 2, modifier = Modifier.fillMaxWidth()) }
-                item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FeedbackStatus.entries.filterNot { it == FeedbackStatus.Draft }.forEach { status -> AppOutlinedButton(onClick = { model.updateFeedback(status, report.priority) }) { Text(status.title) } }
-                } }
-                item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FeedbackPriority.entries.forEach { priority -> AppOutlinedButton(onClick = { model.updateFeedback(report.status, priority) }) { Text(priority.title) } }
-                } }
-                item { AppOutlinedButton(onClick = model::retryEmail, modifier = Modifier.fillMaxWidth()) { Text("Повторить отправку письма") } }
+    AppModalSheet(onDismiss = model::closeFeedback, dismissEnabled = !state.saving) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            AppModalHeader("${report.number} · ${report.status.title}", model::closeFeedback, closeEnabled = !state.saving)
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                item { Text(report.title, fontWeight = FontWeight.Bold); Text(report.message); Text(report.reporterEmail, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (session.user.can(AdminPermission.ManageFeedback)) {
+                    item { AppTextField(state.adminNote, model::adminNote, label = "Внутренняя заметка", minLines = 2, modifier = Modifier.fillMaxWidth()) }
+                    item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FeedbackStatus.entries.filterNot { it == FeedbackStatus.Draft }.forEach { status -> AppOutlinedButton(onClick = { model.updateFeedback(status, report.priority) }) { Text(status.title) } }
+                    } }
+                    item { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FeedbackPriority.entries.forEach { priority -> AppOutlinedButton(onClick = { model.updateFeedback(report.status, priority) }) { Text(priority.title) } }
+                    } }
+                    item { AppOutlinedButton(onClick = model::retryEmail, modifier = Modifier.fillMaxWidth()) { Text("Повторить отправку письма") } }
+                }
             }
-        } },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = model::closeFeedback) { Text("Закрыть") } },
-    )
+        }
+    }
 }
 
 @Composable private fun ImageDialog(session: AppSession, state: AdminUiState, image: AdminServerImage, model: AdminViewModel) {
@@ -441,21 +442,20 @@ private fun androidx.compose.foundation.lazy.LazyListScope.overviewItems(state: 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let { readAdminUri(context, it, 20 * 1024 * 1024)?.second?.let(model::uploadImage) }
     }
-    AlertDialog(
-        onDismissRequest = model::closeImage,
-        title = { Text(image.title) },
-        text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            item { Text("Тип: ${image.kind.title}"); Text(image.purpose); Text("Использований: ${image.usageCount}") }
-            image.path?.let { item { Text("Путь: $it", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-            image.sizeBytes?.let { item { Text("Размер: ${bytes(it.toLong())}") } }
-            if (image.width != null && image.height != null) item { Text("Разрешение: ${image.width} × ${image.height}") }
-            if (image.bindings.isNotEmpty()) item { Column { Text("Связанные переменные", fontWeight = FontWeight.Bold); image.bindings.forEach { Text("${it.name}: ${it.value}") } } }
-            if (canUpload) item { AppOutlinedButton(onClick = { picker.launch("image/*") }, enabled = !state.saving, modifier = Modifier.fillMaxWidth()) { Text(if (image.isMissing) "Загрузить изображение" else "Заменить изображение") } }
-            if (canDelete) item { AppOutlinedButton(onClick = model::deleteImage, enabled = !state.saving, modifier = Modifier.fillMaxWidth()) { Text("Удалить изображение") } }
-        } },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = model::closeImage) { Text("Закрыть") } },
-    )
+    AppModalSheet(onDismiss = model::closeImage, dismissEnabled = !state.saving) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.94f).padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            AppModalHeader(image.title, model::closeImage, closeEnabled = !state.saving)
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                item { Text("Тип: ${image.kind.title}"); Text(image.purpose); Text("Использований: ${image.usageCount}") }
+                image.path?.let { item { Text("Путь: $it", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+                image.sizeBytes?.let { item { Text("Размер: ${bytes(it.toLong())}") } }
+                if (image.width != null && image.height != null) item { Text("Разрешение: ${image.width} × ${image.height}") }
+                if (image.bindings.isNotEmpty()) item { Column { Text("Связанные переменные", fontWeight = FontWeight.Bold); image.bindings.forEach { Text("${it.name}: ${it.value}") } } }
+                if (canUpload) item { AppOutlinedButton(onClick = { picker.launch("image/*") }, enabled = !state.saving, modifier = Modifier.fillMaxWidth()) { Text(if (image.isMissing) "Загрузить изображение" else "Заменить изображение") } }
+                if (canDelete) item { AppOutlinedButton(onClick = model::deleteImage, enabled = !state.saving, modifier = Modifier.fillMaxWidth()) { Text("Удалить изображение") } }
+            }
+        }
+    }
 }
 
 @Composable private fun GsmTemplateCard(session: AppSession, template: AdminGsmTemplate?, saving: Boolean, model: AdminViewModel) {

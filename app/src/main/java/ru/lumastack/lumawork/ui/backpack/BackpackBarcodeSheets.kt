@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.backpack
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -47,7 +48,7 @@ internal fun SerialBarcodeSheet(value: String, onDismiss: () -> Unit) {
     val matrix = remember(value) { SerialBarcode.encode(value) }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
-    ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+    AppModalSheet(onDismiss = onDismiss, maxWidth = 800.dp) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Text("Серийный номер", style = MaterialTheme.typography.titleLarge)
@@ -131,7 +132,7 @@ internal fun BackpackScannerSheet(onDismiss: () -> Unit, onScan: (String) -> Uni
         lifecycle.addObserver(observer); sync()
         onDispose { lifecycle.removeObserver(observer); view?.pause() }
     }
-    ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+    AppModalSheet(onDismiss = onDismiss, maxWidth = 800.dp) {
         Column(Modifier.fillMaxWidth().heightIn(min = 420.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Сканировать S/N", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))

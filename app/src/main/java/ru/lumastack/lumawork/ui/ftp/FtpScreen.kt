@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.ftp
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.*
 import android.os.Build
@@ -171,7 +172,7 @@ private fun FtpRouteContent(session: AppSession, startOffline: Boolean, reposito
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
     state.selected?.let { item ->
-        ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = model::closeSelected, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        AppModalSheet(onDismiss = model::closeSelected,) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     SelectionContainer(Modifier.weight(1f)) { Text(item.name + if (item.isDirectory) ".zip" else "", style = MaterialTheme.typography.titleLarge) }
@@ -187,7 +188,7 @@ private fun FtpRouteContent(session: AppSession, startOffline: Boolean, reposito
             }
         }
     }
-    if (state.queueOpen) ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = model::hideQueue, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    if (state.queueOpen) AppModalSheet(onDismiss = model::hideQueue,) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.9f)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Загрузки FTP", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)

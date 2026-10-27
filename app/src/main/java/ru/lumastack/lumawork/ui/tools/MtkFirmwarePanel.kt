@@ -1,5 +1,8 @@
 package ru.lumastack.lumawork.ui.tools
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
+import ru.lumastack.lumawork.ui.theme.AppModalHeader
+
 import android.os.SystemClock
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -255,8 +258,9 @@ internal fun MtkArchivePicker(state: ToolsUiState, onClose: () -> Unit, onRefres
 ) {
     val saved = state.files.filter { !it.downloading && it.name == MTK_P8_ARCHIVE && it.remotePath == "$MTK_P8_FTP_PATH/$MTK_P8_ARCHIVE" }
     val remote = state.ftpItems.filter { !it.isDirectory && it.name == MTK_P8_ARCHIVE }
-    AlertDialog(onDismissRequest = onClose, title = { Text("UniTodi P8 · комплект с FTP") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    AppModalSheet(onDismiss = onClose) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AppModalHeader("UniTodi P8 · комплект с FTP", onClose)
             Text("v1.0.48 · 11.03.2026", style = MaterialTheme.typography.bodySmall)
             if (state.ftpLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
             state.ftpError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
@@ -267,6 +271,6 @@ internal fun MtkArchivePicker(state: ToolsUiState, onClose: () -> Unit, onRefres
             }
             TextButton(onClick = onRefresh, enabled = !state.ftpLoading) { Text("Обновить каталог") }
         }
-    }, confirmButton = { TextButton(onClick = onClose) { Text("Закрыть") } })
+    }
 }
 private fun mtkBytes(bytes: Long): String = if (bytes >= 1024L * 1024 * 1024) "%.2f ГиБ".format(bytes.toDouble() / (1024 * 1024 * 1024)) else "%.1f МиБ".format(bytes.toDouble() / (1024 * 1024))

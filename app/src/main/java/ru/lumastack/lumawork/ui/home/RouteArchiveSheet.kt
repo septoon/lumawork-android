@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.home
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -260,8 +261,7 @@ internal fun RouteArchiveSheet(
         }
     }
     if (embedded) archiveContent() else {
-        ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim,
-            onDismissRequest = { if (!deleting) onDismiss() }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 800.dp) {
+        AppModalSheet(onDismiss = onDismiss, dismissEnabled = !deleting, maxWidth = 800.dp) {
             Box(Modifier.fillMaxWidth()) {
                 archiveContent()
                 RouteReportMessage(reportMessage, onDismiss = { reportMessage = null },

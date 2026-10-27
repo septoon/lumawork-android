@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.assistant
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.Manifest
 import android.content.ClipData
@@ -239,7 +240,7 @@ private fun sourceName(value: String) = when (value.lowercase()) {
 private fun AssistantHistory(model: AssistantViewModel, state: AssistantState, offline: Boolean, onClose: () -> Unit) {
     var rename by remember { mutableStateOf<AssistantConversation?>(null) }; var title by remember { mutableStateOf("") }
     var delete by remember { mutableStateOf<AssistantConversation?>(null) }
-    ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onClose) {
+    AppModalSheet(onDismiss = onClose) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).padding(horizontal = 16.dp)) {
             Text("Предыдущие чаты", style = MaterialTheme.typography.titleLarge)
             TextButton(onClick = { model.newChat(); onClose() }) { Text("Новый чат") }

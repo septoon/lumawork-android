@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.backpack
 
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -32,7 +33,7 @@ internal fun OfficeEquipmentSheet(
 ) {
     val selected = state.selectedOfficeItem
     BackHandler(enabled = selected != null, onBack = onBack)
-    ModalBottomSheet(containerColor = AppSurfaces.panel, tonalElevation = 0.dp, scrimColor = AppSurfaces.scrim, onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), sheetMaxWidth = 1000.dp) {
+    AppModalSheet(onDismiss = onDismiss, maxWidth = 1000.dp) {
         Column(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (selected != null) AppBackButton(onBack)
