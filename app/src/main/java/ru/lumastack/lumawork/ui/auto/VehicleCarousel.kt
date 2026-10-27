@@ -61,9 +61,13 @@ internal fun VehicleSelector(
             HorizontalPager(state = pager, contentPadding = PaddingValues(horizontal = maxWidth * .07f),
                 beyondViewportPageCount = 1, modifier = Modifier.fillMaxWidth().height(if (tablet) 170.dp else 190.dp), key = { ids.getOrNull(it) ?: "add-car" }) { page ->
                 val vehicle = vehicles.getOrNull(page)
+                val imageModifier = Modifier.fillMaxSize().graphicsLayer {
+                    scaleX = 1.46f
+                    scaleY = 1.46f
+                }
                 if (vehicle == null) Image(painterResource(R.drawable.car_placeholder), "Добавить автомобиль",
-                    Modifier.fillMaxSize().clickable(onClick = onAdd), contentScale = ContentScale.Fit)
-                else VehicleImage(vehicle, imageRepository, Modifier.fillMaxSize())
+                    imageModifier.clickable(onClick = onAdd), contentScale = ContentScale.Fit)
+                else VehicleImage(vehicle, imageRepository, imageModifier)
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
