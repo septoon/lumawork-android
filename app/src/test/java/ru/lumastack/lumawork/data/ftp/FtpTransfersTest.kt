@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.data.ftp
 
+import ru.lumastack.lumawork.data.simpleone.testSimpleOneAccess
 import java.io.File
 import java.util.UUID
 import java.nio.file.Files
@@ -12,16 +13,35 @@ import org.junit.Test
 class FtpTransfersTest {
     @get:Rule val temporary = TemporaryFolder()
     private val item = FtpItem("driver.zip", "/drivers/driver.zip", FtpItemType.File)
+    @Test fun `SO logout cancels native downloads and prevents queued folder exports`() = runBlocking {
+        var signedIn = true
+        val access = ru.lumastack.lumawork.data.simpleone.SimpleOneAccess({ "owner" }, { id ->
+            if (signedIn) ru.lumastack.lumawork.data.simpleone.StoredSimpleOneSession(id, "so", "engineer") else null
+        })
+        val store = MemoryTransferStore(); val gateway = FakeTransferGateway()
+        val transfers = FtpTransfers(store, gateway, access)
+        transfers.start("owner", "token", item, FtpTransferAction.SaveToFolder, "content://chosen/tree/1")
+        signedIn = false
+        gateway.progress = FtpTransferProgress(FtpTransferState.Completed, 123, 123)
+        transfers.finishPending()
+        assertEquals(FtpTransferState.Cancelled, store.values.single().state)
+        assertEquals(1, gateway.removed)
+        assertNull(store.values.single().documentUri)
+        assertTrue(runCatching { transfers.records("owner") }.isFailure)
+        assertTrue(runCatching { transfers.start("owner", "token", item, FtpTransferAction.Download) }.isFailure)
+        assertEquals(1, gateway.enqueued)
+    }
+
     @Test fun `active downloads deduplicate and completion survives repository recreation`() = runBlocking {
         val store = MemoryTransferStore(); val gateway = FakeTransferGateway()
-        val transfers = FtpTransfers(store, gateway)
+        val transfers = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         val first = transfers.start("owner", "token", item, FtpTransferAction.Download)
         assertEquals(first.id, transfers.start("owner", "new-token", item, FtpTransferAction.Share).id)
         assertEquals(1, gateway.enqueued)
         gateway.progress = FtpTransferProgress(FtpTransferState.Completed, 123, 123)
-        val restored = FtpTransfers(store, gateway)
+        val restored = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         assertEquals(FtpTransferState.Completed, restored.refresh("owner").single().state)
-        assertTrue(restored.records("other").isEmpty())
+        assertTrue(runCatching { restored.records("other") }.isFailure)
         restored.remove("owner", first.id)
         assertEquals(1, restored.records("owner").size) // Saved downloads are not deleted by history cleanup.
         assertEquals(0, gateway.removed)
@@ -29,14 +49,14 @@ class FtpTransfersTest {
     @Test fun `screen cancellation during native enqueue still persists returned task id`() = runBlocking {
         val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
         val store = MemoryTransferStore(); val gateway = FakeTransferGateway().apply { onEnqueue = { entered.complete(Unit); release.await() } }
-        val transfers = FtpTransfers(store, gateway)
+        val transfers = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         val task = launch { transfers.start("owner", "token", item, FtpTransferAction.Download) }
         entered.await(); task.cancel(); release.complete(Unit); task.join()
         assertEquals(1L, transfers.records("owner").single().downloadId)
         assertTrue(transfers.records("owner").single().state.isActive)
     }
     @Test fun `cancellation is durable and a late success cannot revive it`() = runBlocking {
-        val store = MemoryTransferStore(); val gateway = FakeTransferGateway(); val transfers = FtpTransfers(store, gateway)
+        val store = MemoryTransferStore(); val gateway = FakeTransferGateway(); val transfers = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         val record = transfers.start("owner", "token", item, FtpTransferAction.Download)
         transfers.cancel("owner", record.id)
         gateway.progress = FtpTransferProgress(FtpTransferState.Completed, 123, 123)
@@ -44,17 +64,17 @@ class FtpTransfersTest {
         assertEquals(1, gateway.removed)
     }
     @Test fun `share is presented only for its owner and only once`() = runBlocking {
-        val store = MemoryTransferStore(); val gateway = FakeTransferGateway(); val transfers = FtpTransfers(store, gateway)
+        val store = MemoryTransferStore(); val gateway = FakeTransferGateway(); val transfers = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         val record = transfers.start("owner", "token", item, FtpTransferAction.Share)
         gateway.progress = FtpTransferProgress(FtpTransferState.Completed, 123, 123)
         transfers.refresh("owner")
-        assertNull(transfers.pendingShare("other"))
+        assertTrue(runCatching { transfers.pendingShare("other") }.isFailure)
         assertEquals(record.id, transfers.pendingShare("owner")?.id)
         transfers.acknowledgeShare("owner", record.id)
-        assertNull(FtpTransfers(store, gateway).pendingShare("owner"))
+        assertNull(FtpTransfers(store, gateway, access = testSimpleOneAccess()).pendingShare("owner"))
     }
     @Test fun `selected-folder completion waits until copy succeeds and never deletes user documents`() = runBlocking {
-        val store = MemoryTransferStore(); val gateway = FakeTransferGateway(); val transfers = FtpTransfers(store, gateway)
+        val store = MemoryTransferStore(); val gateway = FakeTransferGateway(); val transfers = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         val record = transfers.start("owner", "token", item, FtpTransferAction.SaveToFolder, "content://chosen/tree/1")
         gateway.progress = FtpTransferProgress(FtpTransferState.Completed, 123, 123)
         assertTrue(transfers.refresh("owner").single().state.isActive)
@@ -65,7 +85,7 @@ class FtpTransfersTest {
         assertEquals(1, gateway.removed) // Only staging was removed after the document was saved.
     }
     @Test fun `delete saved file checks owner before removing managed download`() = runBlocking {
-        val store = MemoryTransferStore(); val gateway = FakeTransferGateway(); val transfers = FtpTransfers(store, gateway)
+        val store = MemoryTransferStore(); val gateway = FakeTransferGateway(); val transfers = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         val record = transfers.start("owner", "token", item, FtpTransferAction.Download)
         gateway.progress = FtpTransferProgress(FtpTransferState.Completed, 123, 123); transfers.refresh("owner")
         assertTrue(runCatching { transfers.deleteSaved("other", record.id) }.isFailure)
@@ -85,7 +105,7 @@ class FtpTransfersTest {
             state = FtpTransferState.Completed)
         store.values = listOf(saved) + (1..60).map { FtpTransfer(UUID.randomUUID().toString(), "owner", "/$it", "$it.zip", false,
             FtpTransferAction.Share, it.toLong(), state = FtpTransferState.Failed) }
-        val transfers = FtpTransfers(store, gateway)
+        val transfers = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         transfers.start("owner", "token", item, FtpTransferAction.Download)
         assertEquals(52, transfers.records("owner").size)
         assertTrue(transfers.records("owner").any { it.id == saved.id })
@@ -93,7 +113,7 @@ class FtpTransfersTest {
     }
     @Test fun `failed selected-folder copy is never presented as completed`() = runBlocking {
         val store = MemoryTransferStore(); val gateway = FakeTransferGateway().apply { failSave = true }
-        val transfers = FtpTransfers(store, gateway)
+        val transfers = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         transfers.start("owner", "token", item, FtpTransferAction.SaveToFolder, "content://selected/tree/1")
         gateway.progress = FtpTransferProgress(FtpTransferState.Completed, 123, 123)
         transfers.finishPending()

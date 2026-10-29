@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.data.tools
 
+import ru.lumastack.lumawork.data.simpleone.testSimpleOneAccess
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -15,7 +16,7 @@ class FtpLocalToolFilesTest {
         val file = temporary.newFile("update.zip").apply { writeText("firmware") }
         val store = LocalFtpStore(listOf(record("owner"), record("other")))
         val gateway = LocalFtpGateway(file)
-        val ftp = FtpTransfers(store, gateway)
+        val ftp = FtpTransfers(store, gateway, access = testSimpleOneAccess())
         val source = FtpLocalToolFiles(ftp)
         val listed = source.list("owner")
         assertEquals(1, listed.size)
@@ -29,18 +30,18 @@ class FtpLocalToolFilesTest {
         val file = temporary.newFile("update.zip").apply { writeText("firmware") }
         val entries = listOf(record("owner"), record("owner").copy(action = FtpTransferAction.Share),
             record("owner").copy(action = FtpTransferAction.SaveToFolder))
-        assertEquals(1, FtpLocalToolFiles(FtpTransfers(LocalFtpStore(entries), LocalFtpGateway(file))).list("owner").size)
+        assertEquals(1, FtpLocalToolFiles(FtpTransfers(LocalFtpStore(entries), LocalFtpGateway(file), access = testSimpleOneAccess())).list("owner").size)
     }
     @Test fun `partial download appears with downloading flag and cannot be opened`() = runBlocking {
         val file = temporary.newFile("partial")
         val entry = record("owner").copy(state = FtpTransferState.Downloading)
-        val source = FtpLocalToolFiles(FtpTransfers(LocalFtpStore(listOf(entry)), LocalFtpGateway(file)))
+        val source = FtpLocalToolFiles(FtpTransfers(LocalFtpStore(listOf(entry)), LocalFtpGateway(file), access = testSimpleOneAccess()))
         assertTrue(source.list("owner").single().downloading)
         assertTrue(runCatching { source.open("owner", entry.id) }.isFailure)
     }
     @Test fun `deleted managed FTP file is removed from tools listing`() = runBlocking {
         val file = temporary.newFile("deleted").apply { delete() }
-        val source = FtpLocalToolFiles(FtpTransfers(LocalFtpStore(listOf(record("owner"))), LocalFtpGateway(file)))
+        val source = FtpLocalToolFiles(FtpTransfers(LocalFtpStore(listOf(record("owner"))), LocalFtpGateway(file), access = testSimpleOneAccess()))
         assertTrue(source.list("owner").isEmpty())
     }
     @Test fun `PAX selector uses FTP provenance and never offers Unitodi PayApp`() = runBlocking {
@@ -51,7 +52,7 @@ class FtpLocalToolFilesTest {
             record("owner").copy(remotePath = "/VTB_TO/TO/Vendor/Unitodi/update.zip", fileName = "update.zip"),
             record("owner").copy(remotePath = "${PAX_FIRMWARE_FTP_PATH}_old/package.zip", fileName = "package.zip"),
         )
-        val listed = FtpLocalToolFiles(FtpTransfers(LocalFtpStore(entries), LocalFtpGateway(file))).list("owner")
+        val listed = FtpLocalToolFiles(FtpTransfers(LocalFtpStore(entries), LocalFtpGateway(file), access = testSimpleOneAccess())).list("owner")
         assertEquals(4, listed.size) // Source remains shared; only the PAX chooser is scoped.
         assertEquals(listOf("3.0.65.014_ЦР.zip"), listed.filter { it.isPaxFirmwareSource() }.map { it.name })
         assertFalse(LocalToolFile("old", "pax.zip", 1, 1, 1, "managed").isPaxFirmwareSource())

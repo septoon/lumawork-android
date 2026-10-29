@@ -26,6 +26,7 @@ interface SimpleOneSessionStore {
 class EncryptedSimpleOneSessionStore(
     context: Context,
     private val json: Json,
+    private val onSessionChanged: () -> Unit = {},
 ) : SimpleOneSessionStore {
     private val encryptedStore = EncryptedValueStore(
         context = context,
@@ -44,10 +45,11 @@ class EncryptedSimpleOneSessionStore(
     override fun save(session: StoredSimpleOneSession) {
         encryptedStore.save(json.encodeToString(session))
         saveUsername(session.ownerUserId, session.username)
+        onSessionChanged()
     }
 
     override fun clear(ownerUserId: String) {
-        if (read(ownerUserId) != null) encryptedStore.clear()
+        if (read(ownerUserId) != null) { encryptedStore.clear(); onSessionChanged() }
     }
 
     override fun readUsername(ownerUserId: String): String =

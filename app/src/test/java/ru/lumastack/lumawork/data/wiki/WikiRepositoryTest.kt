@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.data.wiki
 
+import ru.lumastack.lumawork.data.simpleone.testSimpleOneAccess
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -15,6 +16,14 @@ import ru.lumastack.lumawork.domain.wiki.WikiSearchResult
 import ru.lumastack.lumawork.domain.wiki.WikiSearchSnapshot
 
 class WikiRepositoryTest {
+    @Test fun `Wiki denies cached search article and PDF without SO`() = runBlocking {
+        val repository = WikiRepository(FakeWikiApi(), FakeWikiCache())
+        org.junit.Assert.assertTrue(runCatching { repository.readSearch("owner") }.isFailure)
+        org.junit.Assert.assertTrue(runCatching { repository.readArticle("1") }.isFailure)
+        org.junit.Assert.assertTrue(runCatching { repository.search("owner", "secret") }.isFailure)
+        org.junit.Assert.assertTrue(runCatching { repository.pdf("1") }.isFailure)
+    }
+
     @Test
     fun `health returns the server snapshot version without requiring a token or using service updatedAt`() = runBlocking {
         listOf(
@@ -29,7 +38,7 @@ class WikiRepositoryTest {
                 Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
                     .body(body.toResponseBody("application/json".toMediaType())).build()
             }.build()
-            val api = OkHttpWikiApi("https://example.com/wiki", "", Json { ignoreUnknownKeys = true }, client)
+            val api = OkHttpWikiApi("https://example.com/wiki", { "" }, Json { ignoreUnknownKeys = true }, client)
             assertEquals(expected, api.catalogVersion())
         }
     }
@@ -39,19 +48,19 @@ class WikiRepositoryTest {
         val cache = FakeWikiCache()
         val result = WikiSearchResult("1", "VPN", "Сеть", "https://example.com", 9, "Инструкция")
         cache.searches["owner"] = WikiSearchSnapshot("VPN", listOf(result), 123L)
-        val repository = WikiRepository(FakeWikiApi(version = "20261022T234850Z"), cache)
+        val repository = WikiRepository(FakeWikiApi(version = "20261022T234850Z"), cache, access = testSimpleOneAccess())
 
         assertEquals("20261022T234850Z", repository.refreshCatalogVersion("owner"))
         assertEquals("20261022T234850Z", repository.readSearch("owner")?.snapshotId)
         assertEquals(listOf(result), repository.readSearch("owner")?.results)
         assertEquals(123L, repository.readSearch("owner")?.updatedAtEpochMillis)
-        assertEquals(null, repository.readSearch("another-owner"))
+        org.junit.Assert.assertTrue(runCatching { repository.readSearch("another-owner") }.isFailure)
     }
 
     @Test
     fun `new search preserves the last server catalog version`() = runBlocking {
         val cache = FakeWikiCache()
-        val repository = WikiRepository(FakeWikiApi(version = "20261022T234850Z"), cache) { 999L }
+        val repository = WikiRepository(FakeWikiApi(version = "20261022T234850Z"), cache, access = testSimpleOneAccess()) { 999L }
         repository.refreshCatalogVersion("owner")
 
         val snapshot = repository.search("owner", "PinPad")
@@ -64,7 +73,7 @@ class WikiRepositoryTest {
     fun `search saves scoped snapshot`() = runBlocking {
         val result = WikiSearchResult("1", "VPN", "Сеть", "https://example.com", 9, "Инструкция")
         val cache = FakeWikiCache()
-        val repository = WikiRepository(FakeWikiApi(results = listOf(result)), cache) { 123L }
+        val repository = WikiRepository(FakeWikiApi(results = listOf(result)), cache, access = testSimpleOneAccess()) { 123L }
 
         val snapshot = repository.search("owner", "VPN")
 
@@ -77,7 +86,7 @@ class WikiRepositoryTest {
     fun `article refresh persists exact server article`() = runBlocking {
         val article = WikiArticle("1", "VPN", "Сеть", "https://example.com", content = "Текст")
         val cache = FakeWikiCache()
-        val repository = WikiRepository(FakeWikiApi(article = article), cache)
+        val repository = WikiRepository(FakeWikiApi(article = article), cache, access = testSimpleOneAccess())
 
         val loaded = repository.refreshArticle("1")
 

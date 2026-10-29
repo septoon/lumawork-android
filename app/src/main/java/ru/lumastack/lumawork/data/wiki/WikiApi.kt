@@ -21,6 +21,7 @@ interface WikiApi {
     suspend fun search(query: String, limit: Int = 10): List<WikiSearchResult>
     suspend fun article(id: String, maxChars: Int = 90_000): WikiArticle
     suspend fun isPdfAvailable(id: String): Boolean
+    suspend fun pdf(id: String): ByteArray = throw WikiFailure.NotConfigured
     fun pdfUrl(id: String): String
 }
 
@@ -33,7 +34,7 @@ sealed class WikiFailure(message: String, cause: Throwable? = null) : Exception(
 
 class OkHttpWikiApi(
     origin: String,
-    private val token: String,
+    private val token: () -> String,
     private val json: Json,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
@@ -61,18 +62,26 @@ class OkHttpWikiApi(
     }
 
     override suspend fun isPdfAvailable(id: String): Boolean {
-        if (token.isBlank()) return false
+        requireToken()
         val response = runCatching { executeResponse(request(pdfUrl(id), method = "HEAD", accept = "application/pdf")) }.getOrNull()
             ?: return false
         return response.use { it.isSuccessful }
     }
 
-    override fun pdfUrl(id: String): String = base.newBuilder().addPathSegment("pdf").addPathSegment(id)
-        .apply { if (token.isNotBlank()) addQueryParameter("token", token) }.build().toString()
+    override fun pdfUrl(id: String): String = base.newBuilder().addPathSegment("pdf").addPathSegment(id).build().toString()
+
+    override suspend fun pdf(id: String): ByteArray {
+        requireToken()
+        return executeResponse(request(pdfUrl(id), accept = "application/pdf")).use { response ->
+            val source = response.body.source()
+            if (source.request(20_000_001)) throw WikiFailure.InvalidResponse
+            source.readByteArray()
+        }
+    }
 
     private fun request(url: String, method: String = "GET", accept: String = "application/json"): Request = Request.Builder()
         .url(url).header("Accept", accept).apply {
-            if (token.isNotBlank()) header("Authorization", "Bearer $token")
+            token().takeIf(String::isNotBlank)?.let { header("Authorization", "Bearer $it") }
             if (method == "HEAD") head() else get()
         }.build()
 
@@ -90,7 +99,7 @@ class OkHttpWikiApi(
         runCatching { json.decodeFromString<Value>(response.body.string()) }.getOrElse { throw WikiFailure.InvalidResponse }
     }
 
-    private fun requireToken() { if (token.isBlank()) throw WikiFailure.NotConfigured }
+    private fun requireToken() { if (token().isBlank()) throw WikiFailure.NotConfigured }
 
 }
 

@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.wiki
 
+import ru.lumastack.lumawork.data.simpleone.testSimpleOneAccess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.*
@@ -14,7 +15,7 @@ class WikiViewModelTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val api = WikiTestApi()
-            val model = WikiViewModel(WikiRepository(api, WikiTestCache("20261022T234850Z")), "owner", true)
+            val model = WikiViewModel(WikiRepository(api, WikiTestCache("20261022T234850Z"), access = testSimpleOneAccess()), "owner", true)
             advanceUntilIdle()
             model.refreshCatalogVersion(); advanceUntilIdle()
             assertEquals("20261022T234850Z", model.state.value.snapshotId)
@@ -25,7 +26,7 @@ class WikiViewModelTest {
     @Test fun `catalog info loads server date independently of a failing search`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
-            val model = WikiViewModel(WikiRepository(WikiTestApi("20261022T234850Z"), WikiTestCache()), "owner", false)
+            val model = WikiViewModel(WikiRepository(WikiTestApi("20261022T234850Z"), WikiTestCache(), access = testSimpleOneAccess()), "owner", false)
             advanceUntilIdle()
             assertEquals("20261022T234850Z", model.state.value.snapshotId)
             assertTrue(model.state.value.results.isNotEmpty())
@@ -35,7 +36,7 @@ class WikiViewModelTest {
     @Test fun `catalog failure preserves the cached server date`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
-            val model = WikiViewModel(WikiRepository(WikiTestApi(), WikiTestCache("20261022T234850Z")), "owner", false)
+            val model = WikiViewModel(WikiRepository(WikiTestApi(), WikiTestCache("20261022T234850Z"), access = testSimpleOneAccess()), "owner", false)
             advanceUntilIdle()
             assertEquals("20261022T234850Z", model.state.value.snapshotId)
         } finally { Dispatchers.resetMain() }
@@ -45,7 +46,7 @@ class WikiViewModelTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val api = WikiTestApi(); val cache = WikiTestCache()
-            val model = WikiViewModel(WikiRepository(api, cache), "owner", true)
+            val model = WikiViewModel(WikiRepository(api, cache, access = testSimpleOneAccess()), "owner", true)
             advanceUntilIdle(); model.open(cache.result); advanceUntilIdle()
             assertEquals("Cached content", model.state.value.article?.content)
             model.updateQuery("terminal"); advanceUntilIdle()
@@ -56,7 +57,7 @@ class WikiViewModelTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val api = WikiTestApi(); val cache = WikiTestCache()
-            val model = WikiViewModel(WikiRepository(api, cache), "owner", false)
+            val model = WikiViewModel(WikiRepository(api, cache, access = testSimpleOneAccess()), "owner", false)
             advanceUntilIdle()
             assertEquals(listOf(cache.result), model.state.value.results)
             assertNotNull(model.state.value.notice)

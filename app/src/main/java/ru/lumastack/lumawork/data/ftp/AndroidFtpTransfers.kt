@@ -28,13 +28,15 @@ class FileFtpTransferStore(context: Context, private val json: Json) : FtpTransf
     }
 }
 
-class AndroidFtpTransferGateway(private val context: Context, origin: String) : FtpTransferGateway {
+class AndroidFtpTransferGateway(private val context: Context, origin: String, private val access: ru.lumastack.lumawork.data.simpleone.SimpleOneAccess) : FtpTransferGateway {
     private val base = origin.trimEnd('/').toHttpUrl().also { require(it.isHttps) }
     private val manager: DownloadManager get() = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
     private val root: File get() = File(requireNotNull(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)) { "Хранилище недоступно." }, "ftp-downloads")
-    internal val archives = FtpArchiveDownloads(root = { root })
+    internal val archives = FtpArchiveDownloads(root = { root }, client = archiveHttpClient().newBuilder()
+        .addInterceptor(ru.lumastack.lumawork.data.simpleone.SimpleOneAccessInterceptor(access)).build())
     internal suspend fun downloadArchive(record: FtpTransfer, token: String, onProgress: (FtpTransferProgress) -> Unit) = archives.download(record, token, downloadUrl(record), onProgress)
     override suspend fun enqueue(token: String, record: FtpTransfer): Long = withContext(Dispatchers.IO) {
+        val soSession = access.require(record.ownerId)
         val target = managedFtpFile(root, record)
         check(target.parentFile!!.isDirectory || target.parentFile!!.mkdirs()) { "Не удалось создать папку загрузок FTP." }
         if (record.folderArchive) {
@@ -45,6 +47,7 @@ class AndroidFtpTransferGateway(private val context: Context, origin: String) : 
         }
         val url = downloadUrl(record)
         val request = DownloadManager.Request(url.toString().toUri())
+            .addRequestHeader(ru.lumastack.lumawork.data.simpleone.SimpleOneAccess.HEADER, soSession.authKey)
             .addRequestHeader("Authorization", "Bearer $token").addRequestHeader("Cache-Control", "no-cache")
             .setTitle(record.fileName).setDescription("Инженер • FTP")
             .setDestinationUri(Uri.fromFile(target)).setMimeType(ftpMimeType(record.fileName, record.folderArchive))

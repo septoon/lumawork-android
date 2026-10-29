@@ -170,6 +170,10 @@ fun AppShell(
         factory = SimpleOneViewModel.factory(simpleOneRepository, session.user.id, isOffline),
     )
     val simpleOneState by simpleOneViewModel.state.collectAsStateWithLifecycle()
+    val protectedRevision by ftpRepository.access.changes.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(protectedRevision) {
+        if (simpleOneState.isAuthorized && !ftpRepository.access.isAuthorized(session.user.id)) simpleOneViewModel.signOut()
+    }
     val groupClosed = coordinationRepository.groupClosedRepository
     val groupClosedRegion = ru.lumastack.lumawork.domain.coordination.coordinationRegionForProfileCity(session.user.profile?.city)
     androidx.compose.runtime.LaunchedEffect(session.user.id, simpleOneState.snapshot.currentUser?.sysId, simpleOneState.isAuthorized, simpleOneState.isInitializing, isOffline, groupClosedRegion) {
@@ -177,6 +181,11 @@ fun AppShell(
             if (!simpleOneState.isAuthorized || simpleOneState.snapshot.currentUser?.sysId == null || groupClosedRegion == null) groupClosed.deactivate()
             else if (groupClosed.state.value.didLoadCache) groupClosed.activate(session.user.id,
                 simpleOneState.snapshot.currentUser!!.sysId, true, groupClosedRegion, isOffline)
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(simpleOneState.isAuthorized, simpleOneState.isInitializing) {
+        if (!simpleOneState.isInitializing && !simpleOneState.isAuthorized) {
+            ftpRepository.transfers?.revokeUnauthorized()
         }
     }
     val shellLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
@@ -220,7 +229,7 @@ fun AppShell(
     var feedbackOpen by rememberSaveable(session.user.id) { mutableStateOf(false) }
     val openProfile = { profileEditing = false; profileOpen = true }
     val contentStateHolder = rememberSaveableStateHolder()
-    val assistantModels = remember(session.user.id, session.token, isOffline) {
+    val assistantModels = remember(session.user.id, session.token, isOffline, simpleOneState.isAuthorized, simpleOneState.snapshot.sessionFingerprint, protectedRevision) {
         object : androidx.lifecycle.ViewModelStoreOwner { override val viewModelStore = androidx.lifecycle.ViewModelStore() }
     }
     DisposableEffect(assistantModels) { onDispose { assistantModels.viewModelStore.clear() } }
@@ -732,11 +741,11 @@ private fun DestinationContent(
                 routeRepository = routeRepository,
                 widthClass = contentWidthClass,
             )
-            AppDestination.Wiki -> AssistantWorkspaceRoute(
+            AppDestination.Wiki -> SimpleOneProtectedContent(simpleOneState, ftpRepository.access.isAuthorized(session.user.id)) { AssistantWorkspaceRoute(
                 session = session, offline = isOffline, wiki = wikiRepository, models = assistantModels,
                 simpleOne = simpleOneRepository, backpack = backpackRepository,
                 widthClass = contentWidthClass, section = assistantSection, onSection = onAssistantSection,
-            )
+            ) }
             AppDestination.Tools -> ToolsRoute(
                 owner = session.user.id,
                 token = session.token,
@@ -746,14 +755,15 @@ private fun DestinationContent(
                 onFtp = { onSelect(AppDestination.Ftp) },
                 onWiki = { onAssistantSection("wiki"); onSelect(AppDestination.Wiki) },
             )
-            AppDestination.Ftp -> FtpRoute(
+            AppDestination.Ftp -> SimpleOneProtectedContent(simpleOneState, ftpRepository.access.isAuthorized(session.user.id)) { FtpRoute(
                 session = session,
                 startOffline = isOffline,
                 repository = ftpRepository,
                 widthClass = contentWidthClass,
+                models = assistantModels,
                 initialPath = requestedFtpPath,
                 onPathConsumed = { onRequestedFtpPath(null) },
-            )
+            ) }
             AppDestination.Salary -> SalaryRoute(
                 session = session,
                 startOffline = isOffline,
@@ -780,5 +790,13 @@ private fun DestinationContent(
                 widthClass = contentWidthClass,
             )
         }
+    }
+}
+
+@Composable
+private fun SimpleOneProtectedContent(state: SimpleOneUiState, authorized: Boolean, content: @Composable () -> Unit) {
+    if (!state.isInitializing && state.isAuthorized && authorized) content()
+    else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text("Доступ запрещен", style = MaterialTheme.typography.titleMedium)
     }
 }

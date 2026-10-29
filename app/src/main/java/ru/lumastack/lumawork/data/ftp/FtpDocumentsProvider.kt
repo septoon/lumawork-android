@@ -14,7 +14,7 @@ import ru.lumastack.lumawork.LumaWorkApplication
 /** Readable FTP downloads in the native Files picker; every query is scoped to the current app account. */
 class FtpDocumentsProvider : DocumentsProvider() {
     private val container get() = (context!!.applicationContext as LumaWorkApplication).container
-    private val owner get() = container.authRepository.session?.user?.id
+    private val owner get() = container.authRepository.session?.user?.id?.takeIf { container.simpleOneAccess.isAuthorized(it) }
     private val transfers get() = container.ftpTransfers
     override fun onCreate() = true
     override fun queryRoots(projection: Array<out String>?): Cursor {

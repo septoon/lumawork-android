@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.data.ftp
 
+import ru.lumastack.lumawork.data.simpleone.SimpleOneAccess
 import android.content.Context
 import java.io.File
 import java.io.IOException
@@ -111,26 +112,28 @@ class FtpRepository(
     private val api: FtpApi,
     private val cache: FtpCache,
     val transfers: FtpTransfers? = null,
+    val access: SimpleOneAccess = SimpleOneAccess.DenyAll,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
 ) {
-    suspend fun read(ownerUserId: String): FtpSnapshot? = cache.read(ownerUserId)
+    suspend fun read(ownerUserId: String): FtpSnapshot? = access.protect(ownerUserId) { cache.read(ownerUserId) }
     private val mutex = Mutex()
-    suspend fun load(ownerUserId: String, token: String, path: String): FtpSnapshot {
+    suspend fun load(ownerUserId: String, token: String, path: String): FtpSnapshot = access.protect(ownerUserId) {
         val normalized = normalizeFtpPath(path)
         val response = api.files(token, normalized)
-        return mutex.withLock {
+        mutex.withLock {
+            access.require(ownerUserId)
             val previous = read(ownerUserId) ?: FtpSnapshot()
             previous.copy(directories = previous.directories + (normalized to response.items), updatedAtEpochMillis = nowEpochMillis(), revision = previous.revision + 1)
                 .also { cache.save(ownerUserId, it) }
         }
     }
-    suspend fun toggleFavorite(owner: String, path: String): FtpSnapshot = mutex.withLock {
+    suspend fun toggleFavorite(owner: String, path: String): FtpSnapshot = access.protect(owner) { mutex.withLock {
         val normalized = normalizeFtpPath(path)
         val previous = read(owner) ?: FtpSnapshot()
         if (normalized == "/") return@withLock previous
         val paths = if (normalized in previous.favoritePaths) previous.favoritePaths - normalized else previous.favoritePaths + normalized
         previous.copy(favoritePaths = paths.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER), revision = previous.revision + 1).also { cache.save(owner, it) }
-    }
+    } }
 
 }
 

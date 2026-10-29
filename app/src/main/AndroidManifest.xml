@@ -30,7 +30,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.LumaWork">
         <provider
-            android:name="androidx.core.content.FileProvider"
+            android:name=".data.simpleone.ProtectedFileProvider"
             android:authorities="${applicationId}.files"
             android:exported="false"
             android:grantUriPermissions="true">

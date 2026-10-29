@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
+import ru.lumastack.lumawork.LumaWorkApplication
 import ru.lumastack.lumawork.BuildConfig
 import ru.lumastack.lumawork.data.assistant.*
 import ru.lumastack.lumawork.data.backpack.BackpackRepository
@@ -15,8 +16,11 @@ import ru.lumastack.lumawork.domain.model.AppSession
 class AssistantViewModel(context: Context, session: AppSession, offline: Boolean,
     simpleOne: SimpleOneRepository, backpack: BackpackRepository,
 ) : ViewModel() {
-    val controller = AssistantController(session.user.id, session.token, offline, OkHttpAssistantApi(BuildConfig.API_ORIGIN),
-        FileAssistantCache(context), AssistantLocalTools(session.user.id, simpleOne, backpack))
+    private val container = (context.applicationContext as LumaWorkApplication).container
+    val controller = AssistantController(session.user.id, session.token, offline,
+        AuthorizedAssistantApi(OkHttpAssistantApi(BuildConfig.API_ORIGIN, container.protectedHttpClient(180)), session.user.id, container.simpleOneAccess),
+        AuthorizedAssistantCache(FileAssistantCache(context), container.simpleOneAccess),
+        AuthorizedAssistantTools(AssistantLocalTools(session.user.id, simpleOne, backpack), session.user.id, container.simpleOneAccess))
     val state = controller.state
     private val attachments = AssistantAttachments(context.applicationContext)
     private var sendJob: Job? = null

@@ -20,10 +20,6 @@ fun xcconfigValue(key: String): String? = rootProject.file("../LumaWork/Secrets.
     ?.trim()
     ?.takeIf(String::isNotEmpty)
 fun buildConfigString(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-val wikiApiToken = providers.gradleProperty("WIKI_API_TOKEN").orNull
-    ?: localProperties.getProperty("WIKI_API_TOKEN")
-    ?: xcconfigValue("WIKI_API_TOKEN")
-    ?: ""
 val fuelArchiveOwnerEmail = providers.gradleProperty("FUEL_ARCHIVE_OWNER_EMAIL").orNull
     ?: localProperties.getProperty("FUEL_ARCHIVE_OWNER_EMAIL")
     ?: xcconfigValue("FUEL_ARCHIVE_OWNER_EMAIL")
@@ -74,8 +70,6 @@ android {
                 ?: ""
             buildConfigField("String", key, buildConfigString(value))
         }
-        buildConfigField("String", "WIKI_API_ORIGIN", "\"https://wiki.lumastack.ru\"")
-        buildConfigField("String", "WIKI_API_TOKEN", buildConfigString(wikiApiToken))
     }
 
     signingConfigs {

@@ -10,6 +10,20 @@ class AssistantControllerTest {
     private val api = TestAssistantApi()
     private val cache = MemoryAssistantCache()
     private fun controller(owner: String = "owner", tools: AssistantTools = AssistantTools { emptyList() }) = AssistantController(owner, "token", false, api, cache, tools)
+    @Test fun `SO boundary denies assistant cache history streaming and local tools`() = runTest {
+        val access = ru.lumastack.lumawork.data.simpleone.SimpleOneAccess.DenyAll
+        val guardedApi = AuthorizedAssistantApi(api, "owner", access)
+        val guardedCache = AuthorizedAssistantCache(cache, access)
+        var toolCalls = 0
+        val guardedTools = AuthorizedAssistantTools(AssistantTools { toolCalls++; emptyList() }, "owner", access)
+        assertTrue(runCatching { guardedCache.read("owner") }.isFailure)
+        assertTrue(runCatching { guardedApi.conversations("token", null) }.isFailure)
+        assertTrue(runCatching { guardedApi.run("token", AssistantRunRequest("request", "conversation", "secret"), true) {} }.isFailure)
+        assertTrue(runCatching { guardedTools.execute(emptyList()) }.isFailure)
+        assertTrue(api.requests.isEmpty())
+        assertEquals(0, toolCalls)
+    }
+
     @Test fun `stream completion stores final answer once and survives restart by account`() = runTest {
         val model = controller(); model.restore(); model.draft("Hello"); model.send()
         assertEquals(listOf("user", "assistant"), model.state.value.messages.map { it.role })

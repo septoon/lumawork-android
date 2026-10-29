@@ -39,7 +39,7 @@ class FtpArchiveDownloadService : Service() {
             try {
                 while (isActive) {
                     val record = container.ftpTransfers.pendingArchives().firstOrNull() ?: break
-                    val session = container.authRepository.session?.takeIf { it.user.id == record.ownerId }
+                    val session = container.authRepository.session?.takeIf { it.user.id == record.ownerId && container.simpleOneAccess.isAuthorized(record.ownerId) }
                     if (!container.ftpTransferGateway.archives.progress(record).state.isActive) Unit
                     else if (session == null) container.ftpTransferGateway.archives.fail(record, "Войдите в аккаунт снова и повторите загрузку.")
                     else {

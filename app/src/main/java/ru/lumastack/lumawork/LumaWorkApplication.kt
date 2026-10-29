@@ -62,13 +62,14 @@ class LumaWorkApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            try { if (container.ftpTransfers.hasPendingFolderCopies()) FtpTransferJobService.schedule(this@LumaWorkApplication) }
+            try { container.ftpTransfers.revokeUnauthorized(); if (container.ftpTransfers.hasPendingFolderCopies()) FtpTransferJobService.schedule(this@LumaWorkApplication) }
             catch (_: Exception) { /* The FTP screen reports cache errors when opened. */ }
         }
     }
 }
 
 class AppContainer(application: Application) {
+    private val protectedWorkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -97,18 +98,39 @@ class AppContainer(application: Application) {
         cache = FileFuelCache(application, json),
     )
 
+    private val simpleOneSessionStore: EncryptedSimpleOneSessionStore = EncryptedSimpleOneSessionStore(application, json) {
+        simpleOneAccess.sessionChanged()
+        protectedWorkScope.launch { ftpTransfers.revokeUnauthorized() }
+    }
+    val simpleOneAccess: ru.lumastack.lumawork.data.simpleone.SimpleOneAccess = ru.lumastack.lumawork.data.simpleone.SimpleOneAccess(
+        { authRepository.session?.user?.id }, simpleOneSessionStore::read, simpleOneSessionStore::clear,
+    )
+    fun protectedHttpClient(readSeconds: Long = 60) = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(readSeconds, java.util.concurrent.TimeUnit.SECONDS)
+        .followRedirects(false).followSslRedirects(false)
+        .addInterceptor(ru.lumastack.lumawork.data.simpleone.SimpleOneAccessInterceptor(simpleOneAccess)).build()
+
     val wikiRepository = WikiRepository(
-        api = OkHttpWikiApi(BuildConfig.WIKI_API_ORIGIN, BuildConfig.WIKI_API_TOKEN, json),
+        api = OkHttpWikiApi("${BuildConfig.API_ORIGIN}/api/v2/wiki", { authRepository.session?.token.orEmpty() }, json, protectedHttpClient()),
         cache = FileWikiCache(application, json),
+        access = simpleOneAccess,
     )
 
-    internal val ftpTransferGateway = AndroidFtpTransferGateway(application, BuildConfig.API_ORIGIN)
-    val ftpTransfers = FtpTransfers(FileFtpTransferStore(application, json), ftpTransferGateway)
+    internal val ftpTransferGateway = AndroidFtpTransferGateway(application, BuildConfig.API_ORIGIN, simpleOneAccess)
+    val ftpTransfers = FtpTransfers(FileFtpTransferStore(application, json), ftpTransferGateway, simpleOneAccess)
     val ftpRepository = FtpRepository(
-        api = OkHttpFtpApi(BuildConfig.API_ORIGIN, json),
+        api = OkHttpFtpApi(BuildConfig.API_ORIGIN, json, protectedHttpClient()),
         cache = FileFtpCache(application, json),
         transfers = ftpTransfers,
+        access = simpleOneAccess,
     )
+
+    init {
+        protectedWorkScope.launch {
+            authRepository.sessionChanges.collect { ftpTransfers.revokeUnauthorized() }
+        }
+    }
 
     val salaryRepository = SalaryRepository(
         api = OkHttpSalaryApi(BuildConfig.API_ORIGIN, json),
@@ -126,7 +148,6 @@ class AppContainer(application: Application) {
     )
 
     private val simpleOneApi = OkHttpSimpleOneApi(BuildConfig.SIMPLEONE_API_ORIGIN, json = json)
-    private val simpleOneSessionStore = EncryptedSimpleOneSessionStore(application, json)
 
     val simpleOneRepository = SimpleOneRepository(
         api = simpleOneApi,

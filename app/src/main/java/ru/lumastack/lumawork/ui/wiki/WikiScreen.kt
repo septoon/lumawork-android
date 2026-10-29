@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.wiki
 
+import kotlinx.coroutines.launch
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import android.content.ClipData
@@ -103,7 +104,7 @@ fun WikiRoute(wikiViewModel: WikiViewModel, widthClass: AppWidthClass, modifier:
         onRefresh = wikiViewModel::refresh,
         onOpen = wikiViewModel::open,
         onCloseArticle = wikiViewModel::closeArticle,
-        pdfUrl = wikiViewModel::pdfUrl,
+        pdf = wikiViewModel::pdf,
         modifier = Modifier.padding(padding),
     )
     }
@@ -117,7 +118,7 @@ private fun WikiScreen(
     onRefresh: () -> Unit,
     onOpen: (WikiSearchResult) -> Unit,
     onCloseArticle: () -> Unit,
-    pdfUrl: () -> String?,
+    pdf: suspend () -> ByteArray?,
     modifier: Modifier = Modifier,
 ) {
     val background = appScreenBackground()
@@ -137,7 +138,7 @@ private fun WikiScreen(
                 WikiSearchPanel(state, onQueryChange, onRefresh, onOpen,
                     Modifier.widthIn(max = 680.dp).fillMaxSize(), listState = searchState)
             } else {
-                WikiArticlePanel(state, pdfUrl,
+                WikiArticlePanel(state, pdf,
                     Modifier.widthIn(max = 760.dp).fillMaxSize(), listState = articleState)
             }
         } else {
@@ -156,7 +157,7 @@ private fun WikiScreen(
                     if (state.selectedResult == null) {
                         WikiEmpty("Выберите статью", "Содержание откроется здесь, а результаты поиска останутся слева.")
                     } else {
-                        WikiArticlePanel(state, pdfUrl = pdfUrl,
+                        WikiArticlePanel(state, pdf = pdf,
                             listState = articleState)
                     }
                 }
@@ -265,11 +266,12 @@ private fun WikiResultCard(result: WikiSearchResult, selected: Boolean, onClick:
 @Composable
 private fun WikiArticlePanel(
     state: WikiUiState,
-    pdfUrl: () -> String?,
+    pdf: suspend () -> ByteArray?,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
     val context = LocalContext.current
+    val pdfScope = androidx.compose.runtime.rememberCoroutineScope()
     val result = state.selectedResult ?: return
     LazyColumn(
         modifier,
@@ -309,7 +311,19 @@ private fun WikiArticlePanel(
                     ) { Text("Копировать") }
                     if (state.isPdfAvailable) {
                         AppOutlinedButton(
-                            onClick = { pdfUrl()?.let { openUrl(context, it) } },
+                            onClick = { pdfScope.launch {
+                                try {
+                                    val bytes = pdf() ?: return@launch
+                                    val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        val root = java.io.File(context.cacheDir, "wiki-pdfs").apply { mkdirs() }
+                                        java.io.File(root, "${java.util.UUID.randomUUID()}.pdf").apply { writeBytes(bytes) }
+                                    }
+                                    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
+                                        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                catch (_: Exception) { android.widget.Toast.makeText(context, "Не удалось открыть PDF.", android.widget.Toast.LENGTH_SHORT).show() }
+                            } },
                             modifier = Modifier.weight(1f),
                         ) { Text("PDF") }
                     }

@@ -115,7 +115,7 @@ class WikiViewModel(
         mutableState.update { it.copy(selectedResult = null, article = null, document = null, articleErrorMessage = null, isArticleLoading = false) }
     }
 
-    fun pdfUrl(): String? = mutableState.value.selectedResult?.id?.let(repository::pdfUrl)
+    suspend fun pdf(): ByteArray? = mutableState.value.selectedResult?.id?.let { repository.pdf(it) }
 
     private fun scheduleSearch(immediate: Boolean) {
         searchJob?.cancel()

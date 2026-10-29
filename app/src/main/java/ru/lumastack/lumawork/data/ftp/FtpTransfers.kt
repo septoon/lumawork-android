@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.data.ftp
 
+import ru.lumastack.lumawork.data.simpleone.SimpleOneAccess
 import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
@@ -40,11 +41,12 @@ interface FtpTransferGateway {
 }
 
 /** Owns persistent transfer state. Network byte transfers belong to Android, independently of screen lifetime. */
-class FtpTransfers(private val store: FtpTransferStore, private val gateway: FtpTransferGateway) {
-    suspend fun pendingArchives(): List<FtpTransfer> = mutex.withLock { store.read().filter { it.folderArchive && it.state.isActive && !it.downloadComplete } }
-    suspend fun hasPendingFolderCopies(): Boolean = mutex.withLock { store.read().any { it.action == FtpTransferAction.SaveToFolder && it.state.isActive } }
-    suspend fun records(owner: String): List<FtpTransfer> = mutex.withLock { store.read().filter { it.ownerId == owner }.sortedByDescending { it.createdAt } }
+class FtpTransfers(private val store: FtpTransferStore, private val gateway: FtpTransferGateway, private val access: SimpleOneAccess = SimpleOneAccess.DenyAll) {
+    suspend fun pendingArchives(): List<FtpTransfer> = mutex.withLock { store.read().filter { it.folderArchive && it.state.isActive && !it.downloadComplete && access.isAuthorized(it.ownerId) } }
+    suspend fun hasPendingFolderCopies(): Boolean = mutex.withLock { store.read().any { it.action == FtpTransferAction.SaveToFolder && it.state.isActive && access.isAuthorized(it.ownerId) } }
+    suspend fun records(owner: String): List<FtpTransfer> = access.protect(owner) { mutex.withLock { store.read().filter { it.ownerId == owner }.sortedByDescending { it.createdAt } } }
     suspend fun start(owner: String, token: String, item: FtpItem, action: FtpTransferAction, treeUri: String? = null): FtpTransfer = mutex.withLock { withContext(NonCancellable) {
+        access.require(owner)
         require(owner.isNotBlank() && token.isNotBlank()) { "Войдите в приложение, чтобы скачать файл." }
         require(action != FtpTransferAction.SaveToFolder || treeUri?.startsWith("content://") == true) { "Выберите папку для сохранения." }
         val existing = store.read()
@@ -56,6 +58,7 @@ class FtpTransfers(private val store: FtpTransferStore, private val gateway: Ftp
         var task: Long? = null
         try {
             task = gateway.enqueue(token, record)
+            access.require(owner)
             val enqueued = record.copy(downloadId = task)
             persist(existing + enqueued)
             enqueued
@@ -65,7 +68,7 @@ class FtpTransfers(private val store: FtpTransferStore, private val gateway: Ftp
             throw error
         }
     } }
-    suspend fun refresh(owner: String): List<FtpTransfer> = mutex.withLock {
+    suspend fun refresh(owner: String): List<FtpTransfer> = access.protect(owner) { mutex.withLock {
         val previous = store.read()
         val updated = previous.map { record ->
             if (record.ownerId != owner) record
@@ -84,7 +87,7 @@ class FtpTransfers(private val store: FtpTransferStore, private val gateway: Ftp
         }
         if (updated != previous) persist(updated)
         updated.filter { it.ownerId == owner }.sortedByDescending { it.createdAt }
-    }
+    } }
     suspend fun cancel(owner: String, id: String) = mutex.withLock {
         val all = store.read(); val record = all.firstOrNull { it.ownerId == owner && it.id == id } ?: return@withLock
         if (!record.canCancel) return@withLock
@@ -92,21 +95,23 @@ class FtpTransfers(private val store: FtpTransferStore, private val gateway: Ftp
         gateway.remove(record)
     }
     suspend fun remove(owner: String, id: String) = mutex.withLock {
+        access.require(owner)
         val all = store.read(); val record = all.firstOrNull { it.ownerId == owner && it.id == id } ?: return@withLock
         if (record.state.isActive || (record.action == FtpTransferAction.Download && record.state == FtpTransferState.Completed)) return@withLock
         gateway.remove(record) // Only the managed staging file; never the selected folder's document.
         persist(all.filterNot { it.id == id })
     }
     suspend fun deleteSaved(owner: String, id: String) = mutex.withLock {
+        access.require(owner)
         val all = store.read()
         val record = all.firstOrNull { it.id == id && it.ownerId == owner && it.action == FtpTransferAction.Download && it.state == FtpTransferState.Completed }
             ?: error("Скачанный файл не найден.")
         gateway.remove(record)
         persist(all.filterNot { it.id == id })
     }
-    suspend fun savedFile(owner: String, id: String): File? = mutex.withLock {
+    suspend fun savedFile(owner: String, id: String): File? = access.protect(owner) { mutex.withLock {
         store.read().firstOrNull { it.id == id && it.ownerId == owner && it.state == FtpTransferState.Completed }?.let { gateway.file(it) }
-    }
+    } }
     suspend fun pendingShare(owner: String): FtpTransfer? = records(owner).firstOrNull {
         it.action == FtpTransferAction.Share && it.state == FtpTransferState.Completed && it.presentationPending
     }
@@ -116,7 +121,8 @@ class FtpTransfers(private val store: FtpTransferStore, private val gateway: Ftp
     suspend fun finishPending(): Boolean {
         if (!finalization.tryLock()) return false
         try {
-            val owners = mutex.withLock { store.read().map { it.ownerId }.distinct() }
+            revokeUnauthorized()
+            val owners = mutex.withLock { store.read().map { it.ownerId }.distinct().filter(access::isAuthorized) }
             for (owner in owners) {
                 refresh(owner)
                 for (record in records(owner).filter { it.action == FtpTransferAction.SaveToFolder && it.state.isActive }) {
@@ -126,7 +132,8 @@ class FtpTransfers(private val store: FtpTransferStore, private val gateway: Ftp
                         if (records(owner).none { it.id == record.id && it.state.isActive }) continue
                         val uri = gateway.saveToFolder(record,
                             destinationCreated = { document -> update(owner, record.id) { if (it.state.isActive) it.copy(documentUri = document) else it } },
-                            isActive = { records(owner).any { it.id == record.id && it.state.isActive } })
+                            isActive = { access.isAuthorized(owner) && records(owner).any { it.id == record.id && it.state.isActive } })
+                        access.require(owner)
                         update(owner, record.id) { if (it.state.isActive) it.copy(state = FtpTransferState.Completed, documentUri = uri, errorMessage = null, isFinalizing = false) else it }
                         gateway.remove(record)
                     } catch (error: CancellationException) { throw error }
@@ -136,6 +143,17 @@ class FtpTransfers(private val store: FtpTransferStore, private val gateway: Ftp
             }
             return true
         } finally { finalization.unlock() }
+    }
+    /** Cancel queued downloads/exports on logout, including jobs restored after process death. */
+    suspend fun revokeUnauthorized() = mutex.withLock {
+        val previous = store.read()
+        val updated = previous.map { record ->
+            if (record.state.isActive && !access.isAuthorized(record.ownerId)) {
+                gateway.remove(record)
+                record.copy(state = FtpTransferState.Cancelled, presentationPending = false, isFinalizing = false)
+            } else record
+        }
+        if (updated != previous) store.write(updated)
     }
     private suspend fun persist(records: List<FtpTransfer>) {
         val retained = records.filter { it.state.isActive || it.presentationPending || (it.action == FtpTransferAction.Download && it.state == FtpTransferState.Completed) }
