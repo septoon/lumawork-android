@@ -16,6 +16,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncScope
 import ru.lumastack.lumawork.domain.requests.closedEffectiveTime
 import ru.lumastack.lumawork.data.simpleone.SimpleOneFailure
 import ru.lumastack.lumawork.data.simpleone.SimpleOneRepository
@@ -67,12 +71,15 @@ class SimpleOneViewModel(
     val state: StateFlow<SimpleOneUiState> = mutableState.asStateFlow()
     private var activeJob: Job? = null
     private var archiveJob: Job? = null
+    private val archiveMutations = mutableSetOf<Job>()
     private var detailJob: Job? = null
     private var authJob: Job? = null
     private var identityJob: Job? = null
     private var sessionEpoch = 0L
 
-    init { restore() }
+    init {
+        restore()
+    }
 
     fun updateUsername(value: String) { mutableState.update { it.copy(username = value, errorMessage = null) } }
     fun updatePassword(value: String) { mutableState.update { it.copy(password = value, errorMessage = null) } }
@@ -166,9 +173,36 @@ class SimpleOneViewModel(
     fun refreshAnalytics() { if (state.value.initialArchiveReady) loadClosedArchive() }
     fun refreshClosedRequests() { if (state.value.initialArchiveReady) loadClosedArchive() }
 
+    /** Runs only while the Requests screen is foreground, with the same backoff as iOS. */
+    suspend fun runAutomaticClosedSync() {
+        var unchanged = 0
+        while (currentCoroutineContext().isActive) {
+            val current = state.value
+            if (startOffline || !current.isAuthorized || !current.initialArchiveReady || current.isInitializing ||
+                current.isLoading || current.isClosedLoading) {
+                delay(1_000)
+                continue
+            }
+            val before = current.closedArchive.requests
+            suspend fun sync(scope: ClosedRequestsSyncScope) {
+                val job = loadClosedArchive(scope) ?: return
+                try { job.join() }
+                finally { if (!currentCoroutineContext().isActive) job.cancel() }
+            }
+            sync(ClosedRequestsSyncScope.Monthly)
+            val wideAt = state.value.closedArchive.lastWideSyncAtEpochMillis
+            if (state.value.errorMessage == null && (wideAt == null || System.currentTimeMillis() - wideAt >= 60_000)) {
+                sync(ClosedRequestsSyncScope.All)
+            }
+            unchanged = if (before === state.value.closedArchive.requests) unchanged + 1 else 0
+            delay(when (unchanged) { 0 -> 60_000L; 1, 2 -> 120_000L; else -> 300_000L })
+        }
+    }
+
     fun signOut() {
         sessionEpoch++
         activeJob?.cancel(); archiveJob?.cancel(); authJob?.cancel(); detailJob?.cancel(); identityJob?.cancel()
+        archiveMutations.toList().forEach { it.cancel() }
         mutableState.update { it.copy(password = "", isInitializing = false, isAuthorized = false, isLoading = false,
             isClosedLoading = false, isDetailLoading = false, isResolvingUser = false, selectedRequest = null, archiveProgress = null,
             showConnection = false, errorMessage = null, notice = null) }
@@ -207,18 +241,28 @@ class SimpleOneViewModel(
             ru.lumastack.lumawork.domain.requests.parseClosedRequestsDate(request.closedEffectiveTime())?.toLocalDate()?.let { it in period } == true }
     }
     private fun mutateArchive(block: suspend () -> ClosedSimpleOneArchive) {
-        if (state.value.isClosedLoading || state.value.isLoading) return
         val epoch = sessionEpoch
-        mutableState.update { it.copy(isClosedLoading = true, errorMessage = null) }
-        archiveJob = viewModelScope.launch {
+        val previous = archiveJob
+        // A picker result has priority over network polling; explicit local changes remain ordered.
+        if (previous !in archiveMutations) previous?.cancel()
+        val job = viewModelScope.launch {
+            previous?.join()
+            if (epoch != sessionEpoch) return@launch
+            mutableState.update { it.copy(isClosedLoading = true, errorMessage = null, archiveProgress = "Обновляю локальный архив…") }
             try {
                 val archive = block()
                 val prepared = prepareArchive(archive)
                 if (epoch == sessionEpoch) mutableState.update { it.copy(closedArchive = archive, closedArchiveItems = prepared.items, closedAnalytics = prepared.analytics,
-                    hasLoadedClosedArchive = true, initialArchiveReady = archive.isReady, isClosedLoading = false) }
-            } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, errorMessage = error.userMessage()) } }
+                    hasLoadedClosedArchive = true, initialArchiveReady = archive.isReady, isClosedLoading = false, archiveProgress = null) }
+            } catch (error: CancellationException) {
+                if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, archiveProgress = null) }
+                throw error
+            }
+            catch (error: Exception) { if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, archiveProgress = null, errorMessage = error.userMessage()) } }
         }
+        archiveJob = job
+        archiveMutations += job
+        job.invokeOnCompletion { archiveMutations.remove(job) }
     }
 
     private fun restore() {
@@ -241,16 +285,16 @@ class SimpleOneViewModel(
         }
     }
 
-    private fun loadClosedArchive() {
+    private fun loadClosedArchive(scope: ClosedRequestsSyncScope = ClosedRequestsSyncScope.All): Job? {
         val current = state.value
-        if (startOffline || current.isInitializing || current.isClosedLoading || archiveJob?.isActive == true) return
-        if (!current.isAuthorized) { mutableState.update { it.copy(showConnection = true) }; return }
+        if (startOffline || current.isInitializing || current.isClosedLoading || archiveJob?.isActive == true) return null
+        if (!current.isAuthorized) { mutableState.update { it.copy(showConnection = true) }; return null }
         val epoch = sessionEpoch
         mutableState.update { it.copy(initialLoadRequested = true, isClosedLoading = true, errorMessage = null,
             archiveProgress = "Загрузка закрытых заявок…") }
-        archiveJob = viewModelScope.launch {
+        val job = viewModelScope.launch {
             try {
-                val archive = repository.refreshClosedArchive(ownerUserId, mutableState.value.snapshot) { progress ->
+                val archive = repository.refreshClosedArchive(ownerUserId, mutableState.value.snapshot, scope) { progress ->
                     if (epoch == sessionEpoch) mutableState.update { it.copy(archiveProgress = progress) }
                 }
                 val prepared = prepareArchive(archive)
@@ -259,12 +303,17 @@ class SimpleOneViewModel(
                 mutableState.update { it.copy(closedArchive = archive, closedArchiveItems = prepared.items, closedAnalytics = prepared.analytics, hasLoadedClosedArchive = true,
                     initialArchiveReady = archive.isReady, isClosedLoading = false, isAuthorized = true, archiveProgress = null) }
                 if (!wasReady) refreshActiveRequests()
-            } catch (error: CancellationException) { throw error }
+            } catch (error: CancellationException) {
+                if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, archiveProgress = null) }
+                throw error
+            }
             catch (error: Exception) {
                 if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, archiveProgress = null,
                     isAuthorized = it.isAuthorized && error !is SimpleOneFailure.Unauthorized, errorMessage = error.userMessage()) }
             }
         }
+        archiveJob = job
+        return job
     }
     // Owned by the screen model, so navigation never discards the parsed/searchable archive.
     private data class PreparedArchive(val items: List<ClosedRequestsItem>, val analytics: ClosedRequestsAnalytics)
@@ -273,6 +322,7 @@ class SimpleOneViewModel(
         val current = state.value
         if (archive.requests === current.closedArchive.requests) return PreparedArchive(current.closedArchiveItems, current.closedAnalytics)
         return withContext(Dispatchers.Default) {
+            if (archive.requests == current.closedArchive.requests) return@withContext PreparedArchive(current.closedArchiveItems, current.closedAnalytics)
             val items = prepareClosedRequests(archive.requests)
             PreparedArchive(items, buildClosedRequestsAnalytics(items))
         }

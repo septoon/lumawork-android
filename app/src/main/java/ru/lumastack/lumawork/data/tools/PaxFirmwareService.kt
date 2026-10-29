@@ -122,7 +122,7 @@ class PaxFirmwareService : Service() {
             publish(snapshot.copy(step = step, fileName = file, bytes = 0, totalBytes = 0,
                 stepNumber = if (step == PaxFirmwareStep.Complete) snapshot.stepCount else snapshot.completedActions.size + 1,
                 critical = snapshot.critical || step in listOf(PaxFirmwareStep.Removing, PaxFirmwareStep.BootInstall, PaxFirmwareStep.OsInstall, PaxFirmwareStep.AppInstall),
-                detail = if (step == PaxFirmwareStep.Reconnect) "После перезапуска: main menu → General → XCB service → USB. Разрешите USB-доступ; продолжение автоматическое."
+                detail = if (step == PaxFirmwareStep.Reconnect) "После перезапуска: ${snapshot.model.xcbUsbMenuPath}. Разрешите USB-доступ; продолжение автоматическое."
                     else step.title))
         }, checkpoint = { done, pending ->
             publish(snapshot.copy(completedActions = done, pendingAction = pending,
@@ -380,7 +380,7 @@ private class AndroidPaxFirmwareHost(
                             return@withTimeout port
                         }
                     }
-                    onWaiting("Откройте main menu PAX → General → XCB service → USB. Ожидаем ответ того же терминала.")
+                    onWaiting("Откройте ${model.xcbUsbMenuPath}. Ожидаем ответ того же терминала.")
                 }
             }
             delay(1000)

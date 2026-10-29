@@ -12,6 +12,15 @@ import ru.lumastack.lumawork.domain.model.AppUser
 import ru.lumastack.lumawork.domain.requests.*
 
 class ClientPersonalCommentsTest {
+    @Test fun `copied phone keeps country prefix and all digits without mask`() {
+        assertEquals("+79781234567", clientCommentPhoneForCopy("+7 (978) 123-45-67"))
+        assertEquals("+79781234567", clientCommentPhoneForCopy("8 (978) 123-45-67"))
+        assertEquals("+79781234567", clientCommentPhoneForCopy("9781234567"))
+        assertEquals("+797812345671234", clientCommentPhoneForCopy("+7 (978) 123-45-67 доб. 1234"))
+        assertEquals("+7123", clientCommentPhoneForCopy("+7 (123)"))
+        assertEquals("", clientCommentPhoneForCopy(""))
+    }
+
     @Test fun `card hides matching scope while editor retains it`() {
         val comment = ClientPersonalComment("comment", displayTIN = "1234567890",
             targets = listOf(ClientPersonalCommentTarget("Адрес клиента")), terminalIDs = listOf("000123"),

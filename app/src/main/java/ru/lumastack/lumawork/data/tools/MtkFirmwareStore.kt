@@ -22,7 +22,7 @@ internal fun cleanupMtkImports(root: File, referencedPackage: File?) {
 @Serializable data class MtkInstallState(
     val owner: String = "", val operationId: String = "", val phase: MtkInstallPhase = MtkInstallPhase.Idle,
     val packageDirectory: String? = null, val packageHash: String? = null,
-    val detail: String = "Выберите исходный Download Agent и комплект прошивки.",
+    val detail: String = "Выберите комплект прошивки. Download Agent встроен в приложение.",
     val fileName: String? = null, val bytes: Long = 0, val totalBytes: Long = 0,
     val usbPermission: Boolean = false, val info: MtkPreloaderInfo? = null, val updatedAt: Long = 0,
     val agentStarted: Boolean = false, val target: MtkTargetInfo? = null,

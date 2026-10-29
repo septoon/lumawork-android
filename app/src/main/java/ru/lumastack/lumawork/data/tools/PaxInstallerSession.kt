@@ -12,7 +12,7 @@ import kotlinx.coroutines.withTimeout
 
 internal data class PaxTransferAsset(val name: String, val size: Long, val modifiedSeconds: Long, val open: () -> InputStream)
 
-/** Fixed commands reconstructed from the supplied successful D270 and Q25 captures. No shell, retries or resume. */
+/** Fixed commands reconstructed from the supplied successful D230, D270 and Q25 captures. No shell, retries or resume. */
 internal class PaxInstallerSession(
     private val wire: PaxMessageWire,
     private val progress: (Long, Long) -> Unit = { _, _ -> },
@@ -91,7 +91,7 @@ internal class PaxInstallerSession(
     suspend fun removeMainApp() = install("uaip", listOf("MAINAPP"), "installer uaip done.")
     suspend fun installBoot(remote: String) = install("boot", listOf(checkedRemote(remote)), "installer boot done.")
     suspend fun installOs(remote: String, model: PaxModel = PaxModel.D270) = install("firmware", listOf(checkedRemote(remote)),
-        if (model == PaxModel.Q25) "installer firmware-base done." else "installer rootfs.img done.")
+        if (model == PaxModel.Q25 || model == PaxModel.D230) "installer firmware-base done." else "installer rootfs.img done.")
     suspend fun installMainApp(remote: String) = install("aip", listOf(checkedRemote(remote)), "installer aip done.")
     suspend fun installAppData(remote: String) = install("appdata", listOf("MAINAPP", checkedRemote(remote)), "installer appdata done.")
     suspend fun installOption(remote: String) = install("opt", listOf(checkedRemote(remote)), "installer opt done.")

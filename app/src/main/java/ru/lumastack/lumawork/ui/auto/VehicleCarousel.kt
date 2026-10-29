@@ -58,7 +58,7 @@ internal fun VehicleSelector(
             displayed?.licensePlate?.takeIf(String::isNotBlank)?.let { PlateBadge(it) }
         }
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            HorizontalPager(state = pager, contentPadding = PaddingValues(horizontal = maxWidth * .07f),
+            HorizontalPager(state = pager, contentPadding = PaddingValues(horizontal = maxWidth * .07f), pageSpacing = maxWidth * .12f,
                 beyondViewportPageCount = 1, modifier = Modifier.fillMaxWidth().height(if (tablet) 170.dp else 190.dp), key = { ids.getOrNull(it) ?: "add-car" }) { page ->
                 val vehicle = vehicles.getOrNull(page)
                 val imageModifier = Modifier.fillMaxSize().graphicsLayer {

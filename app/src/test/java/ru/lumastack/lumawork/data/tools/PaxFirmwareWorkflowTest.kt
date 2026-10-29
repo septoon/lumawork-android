@@ -20,6 +20,40 @@ class PaxFirmwareWorkflowTest {
     private fun asset(name: String) = PaxFirmwareAsset(name, File("unused/$name"), "synthetic")
     private fun workflow() = PaxFirmwareWorkflow(host) { _, _ -> }
 
+    @Test fun `D230 full cycle follows captured order without a boot update`() = runBlocking {
+        before.current = PaxPassport("D230", "Prolin2.9.54", "7.0.11.232(R)", "3.0.53.012", "same", "Inpas")
+        after.current = before.current.copy(mainApp = null)
+        val d230 = bundle.asPackage().copy(model = PaxModel.D230, boot = null, expectedBoot = null,
+            expectedOs = "2.9.54-r12262",
+            appData = listOf("Config.sys", "agent.mod", "cah.mod", "kdh.mod", "RootCA1-ITS_RootCA0.pem").map(::asset),
+            options = listOf("fonts_sig.tar.gz", "libbt-2.9.12_SIG.tar.gz").map(::asset))
+        val result = workflow().execute(d230, PaxInstallMode.Full, "usb", "same")
+        assertEquals("D230", result.model)
+        assertEquals("3.0.65.014", result.mainApp)
+        assertEquals(listOf("open", "passport", "remove", "passport", "upload:os.zip", "os", "reboot", "close",
+            "reconnect", "passport", "remove", "upload:app.aip", "app", "upload:Config.sys", "data", "upload:agent.mod", "data",
+            "upload:cah.mod", "data", "upload:kdh.mod", "data", "upload:RootCA1-ITS_RootCA0.pem", "data",
+            "upload:fonts_sig.tar.gz", "opt", "upload:libbt-2.9.12_SIG.tar.gz", "opt", "passport", "close"), actions)
+    }
+
+    @Test fun `D230 resume rechecks model identity and Prolin before installing MAINAPP`() = runBlocking {
+        val checked = PaxPassport("D230", "Prolin2.9.54", "7.0.11.232(R)", null, "same", "Inpas")
+        val d230 = bundle.asPackage().copy(model = PaxModel.D230, boot = null, expectedBoot = null, expectedOs = "2.9.54-r12262")
+        for (invalid in listOf(checked.copy(model = "D270"), checked.copy(fingerprint = "another"),
+            checked.copy(target = "Other"), checked.copy(os = "Prolin2.9.53"))) {
+            actions.clear(); before.current = invalid
+            assertTrue(runCatching { workflow().execute(d230, PaxInstallMode.Full, "usb", "same",
+                completed = listOf("remove", "os", "reboot", "reconnect")) }.isFailure)
+            assertEquals(listOf("open", "passport", "close"), actions)
+        }
+        actions.clear(); before.current = checked
+        val result = workflow().execute(d230, PaxInstallMode.Full, "usb", "same",
+            completed = listOf("remove", "os", "reboot", "reconnect"))
+        assertEquals("3.0.65.014", result.mainApp)
+        assertFalse(actions.any { it in listOf("boot", "os", "reboot", "reconnect") })
+        assertEquals(1, actions.count { it == "remove" })
+    }
+
     @Test fun `Q25 continues saved OS checkpoint when devinfo spells the revision with a dot`() = runBlocking {
         val installed = passport().copy(model = "Q25", os = "prolin-pelican-2.7.181.13278R-Inpas")
         before.current = installed; after.current = installed

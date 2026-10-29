@@ -22,6 +22,9 @@ import ru.lumastack.lumawork.domain.requests.closedRegistrationTime
 import ru.lumastack.lumawork.domain.requests.closedClosureCode
 import ru.lumastack.lumawork.domain.requests.isClosedReturnEquipment
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncScope
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncRecord
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncCursor
 
 class SimpleOneRepository(
     private val api: SimpleOneApi,
@@ -124,11 +127,27 @@ class SimpleOneRepository(
     suspend fun refreshClosedArchive(
         ownerUserId: String,
         cachedSnapshot: SimpleOneSnapshot? = null,
+        scope: ClosedRequestsSyncScope = ClosedRequestsSyncScope.All,
         onProgress: (String) -> Unit = {},
     ): ClosedSimpleOneArchive = archiveMutex.withLock {
         val session = storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials
         try {
             val currentUser = cachedSnapshot?.takeIf { it.sessionFingerprint == simpleOneSessionFingerprint(session) }?.currentUser ?: api.currentUser(session.authKey)
+            val previous = supplementalCache.readClosedArchive(ownerUserId)
+            if (previous?.isReady == true && (previous.syncUserId == null || previous.syncUserId == currentUser.sysId)) {
+                // iOS reconciles an imported archive through narrow/wide scans, without downloading its baseline again.
+                return@withLock updateClosedArchive(ownerUserId, session, currentUser.sysId,
+                    previous.copy(syncRevision = 1, syncUserId = currentUser.sysId), scope, onProgress)
+            }
+            // As on iOS, capture the server heads before the full XLSX baseline, never from the device clock.
+            val heads = coroutineScope {
+                ClosedRequestsSyncScope.entries.map { syncScope -> async {
+                    try { api.closedSyncHead(currentUser.sysId, session.authKey, syncScope) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (unauthorized: SimpleOneFailure.Unauthorized) { throw unauthorized }
+                    catch (_: Exception) { null }
+                } }.awaitAll()
+            }
             onProgress("Подготовка полного архива SimpleOne…")
             val (listed, source) = try {
                 val xlsx = api.exportClosedRequests(currentUser.sysId, session.authKey)
@@ -141,9 +160,28 @@ class SimpleOneRepository(
                 onProgress("Загрузка всех страниц закрытых заявок…")
                 api.closedRequests(currentUser.sysId, session.authKey) to ClosedArchiveSource.ListApi
             }
-            val records = completeClosedArchive(ownerUserId, session, currentUser.sysId, listed, onProgress)
-            val archive = ClosedSimpleOneArchive(records, nowEpochMillis(), true, source, 2)
+            onProgress("Проверяю поля архива: ${listed.size} заявок…")
+            android.util.Log.i("SimpleOneSync", "baseline received=${listed.size} source=$source")
+            val completed = completeClosedArchive(ownerUserId, session, currentUser.sysId, listed, onProgress)
+            val records = withContext(Dispatchers.Default) {
+                val existing = previous?.takeIf { it.syncUserId == null || it.syncUserId == currentUser.sysId }?.requests.orEmpty()
+                val merged = existing.associateBy { it.number }.toMutableMap()
+                completed.forEach { record ->
+                    val old = merged[record.number]
+                    val updated = if (source == ClosedArchiveSource.ListApi && old != null) record.mergeMissing(old) else record
+                    var fields = old?.tableFields.orEmpty() + record.tableFields
+                    val tin = closedMerchantTIN(record).ifBlank { old?.let(::closedMerchantTIN).orEmpty() }
+                    if (tin.isNotBlank()) fields = fields + ("ИНН ТСП" to tin)
+                    merged[record.number] = updated.copy(tableFields = fields)
+                }
+                merged.values.toList()
+            }
+            val archive = ClosedSimpleOneArchive(records, nowEpochMillis(), true, source, 2,
+                syncUpdatedAt = heads[1]?.updatedAt, syncUserId = currentUser.sysId,
+                monthlyCursor = heads[0], wideCursor = heads[1], syncRevision = 1,
+                lastWideSyncAtEpochMillis = nowEpochMillis())
             withCurrentSession(ownerUserId, session) { supplementalCache.saveClosedArchive(ownerUserId, archive) }
+            android.util.Log.i("SimpleOneSync", "baseline saved=${archive.requests.size} monthly=${archive.monthlyCursor != null} wide=${archive.wideCursor != null}")
             archive
         } catch (error: SimpleOneFailure.Unauthorized) {
             sessionMutex.withLock {
@@ -151,6 +189,58 @@ class SimpleOneRepository(
             }
             throw error
         }
+    }
+
+    private suspend fun updateClosedArchive(
+        owner: String,
+        session: StoredSimpleOneSession,
+        userId: String,
+        previous: ClosedSimpleOneArchive,
+        scope: ClosedRequestsSyncScope,
+        onProgress: (String) -> Unit,
+    ): ClosedSimpleOneArchive {
+        onProgress(if (scope == ClosedRequestsSyncScope.Monthly) "Проверяю текущий и прошлый месяцы…" else "Проверяю изменения архива…")
+        val (knownVersions, recoveryCursor) = withContext(Dispatchers.Default) {
+            val numbers = previous.requests.map { it.number }.toSet()
+            val known = previous.syncRecords.filterValues { it.excluded || it.number in numbers }.mapValues { it.value.updatedAt }
+            val missing = previous.syncRecords.filterValues { !it.excluded && it.number !in numbers }
+                .map { (id, record) -> ClosedRequestsSyncCursor(record.updatedAt, id) }.minOrNull()
+            known to missing
+        }
+        val batch = api.closedSyncChanges(userId, session.authKey, scope,
+            recoveryCursor ?: if (scope == ClosedRequestsSyncScope.Monthly) previous.monthlyCursor else previous.wideCursor,
+            knownVersions, onProgress)
+        val archive = withContext(Dispatchers.Default) {
+            val known = previous.requests.associateBy { it.number }
+            val merged = known.toMutableMap()
+            val metadata = previous.syncRecords.toMutableMap()
+            val idsByNumber = metadata.entries.associate { it.value.number to it.key }.toMutableMap()
+            for (change in batch.changes) {
+                if (metadata[change.sysId]?.number?.let { it != change.number } == true ||
+                    idsByNumber[change.number]?.let { it != change.sysId } == true ||
+                    known[change.number]?.sysId?.takeIf(String::isNotBlank)?.let { it != change.sysId } == true) {
+                    throw SimpleOneFailure.Http(409, "SimpleOne вернул конфликт идентификаторов для заявки ${change.number}. Архив не обновлён.")
+                }
+                change.request?.let { record ->
+                    val oldFields = known[record.number]?.tableFields.orEmpty()
+                    var fields = oldFields + record.tableFields
+                    val tin = closedMerchantTIN(record).ifBlank { known[record.number]?.let(::closedMerchantTIN).orEmpty() }
+                    if (tin.isNotBlank()) fields = fields + ("ИНН ТСП" to tin)
+                    merged[record.number] = record.copy(tableFields = fields)
+                }
+                metadata[change.sysId] = ClosedRequestsSyncRecord(change.number, change.cursor.updatedAt, change.request == null)
+                idsByNumber[change.number] = change.sysId
+            }
+            previous.copy(requests = if (merged == known) previous.requests else merged.values.toList(),
+                updatedAtEpochMillis = nowEpochMillis(), syncRecords = metadata, syncUserId = userId,
+                monthlyCursor = if (scope == ClosedRequestsSyncScope.Monthly) batch.cursor ?: previous.monthlyCursor else previous.monthlyCursor,
+                wideCursor = if (scope == ClosedRequestsSyncScope.All) batch.cursor ?: previous.wideCursor else previous.wideCursor,
+                syncUpdatedAt = if (scope == ClosedRequestsSyncScope.All) batch.cursor?.updatedAt ?: previous.syncUpdatedAt else previous.syncUpdatedAt,
+                lastWideSyncAtEpochMillis = if (scope == ClosedRequestsSyncScope.All) nowEpochMillis() else previous.lastWideSyncAtEpochMillis)
+        }
+        withCurrentSession(owner, session) { supplementalCache.saveClosedArchive(owner, archive) }
+        android.util.Log.i("SimpleOneSync", "sync scope=$scope changes=${batch.changes.size} saved=${archive.requests.size}")
+        return archive
     }
 
     private fun SimpleOneRequest.needsClosedDetails(): Boolean = closedRequestType().isBlank() ||
@@ -312,3 +402,12 @@ class SimpleOneRepository(
 
 internal fun simpleOneSessionFingerprint(session: StoredSimpleOneSession): String = java.security.MessageDigest.getInstance("SHA-256")
     .digest("${session.ownerUserId.length}:${session.ownerUserId}${session.authKey}".toByteArray()).joinToString("") { "%02x".format(it) }
+
+internal fun closedSyncTimestamp(value: String): String? {
+    if (!value.matches(Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"))) return null
+    return runCatching {
+        java.time.LocalDateTime.parse(value, java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss")
+            .withResolverStyle(java.time.format.ResolverStyle.STRICT))
+        value
+    }.getOrNull()
+}

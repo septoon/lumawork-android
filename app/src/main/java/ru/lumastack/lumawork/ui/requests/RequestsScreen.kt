@@ -35,6 +35,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
@@ -58,6 +60,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import ru.lumastack.lumawork.R
@@ -122,7 +125,13 @@ fun RequestsScreen(
     val list: @Composable () -> Unit = {
         if (state.mode == RequestsMode.Closed) {
             savedLists.SaveableStateProvider("closed") {
-            PullToRefreshBox(isRefreshing = state.isClosedLoading, onRefresh = actions.onRefresh) {
+            val refreshState = rememberPullToRefreshState()
+            PullToRefreshBox(isRefreshing = state.isClosedLoading, state = refreshState, onRefresh = actions.onRefresh,
+                indicator = {
+                    if (!state.isClosedLoading) PullToRefreshDefaults.Indicator(
+                        state = refreshState, isRefreshing = false, modifier = Modifier.align(Alignment.TopCenter),
+                    )
+                }) {
                 ClosedRequestsContent(state.closedArchiveItems, state.searchQuery, actions.onSearchQueryChange,
                     state.isClosedLoading, state.hasLoadedClosedArchive, state.isOffline || !state.isAuthorized,
                     actions.onOpenRequest, onOpenTerminal, personalComment = personalComment, widthClass = listWidthClass)
@@ -439,12 +448,12 @@ private fun RequestCard(request: SimpleOneRequest, selected: Boolean, onClick: (
         border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(Modifier.weight(1f)) {
-                Text(data.number, style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(data.number, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 if (data.number != request.number) Text(request.number, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Surface(shape = RoundedCornerShape(12.dp), color = closedTypeColor(type)) {
-                Text(type.ifBlank { "Тип не указан" }, Modifier.widthIn(max = if (compact) 110.dp else 150.dp).padding(horizontal = 10.dp, vertical = 6.dp),
-                    color = androidx.compose.ui.graphics.Color.White, style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
+            Surface(shape = RoundedCornerShape(50), color = closedTypeColor(type)) {
+                Text(type.ifBlank { "Тип не указан" }, Modifier.widthIn(max = if (compact) 110.dp else 150.dp).padding(horizontal = 10.dp, vertical = 4.dp),
+                    color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.labelSmall)
             }
         }
         request.registeredDateTime()?.let { RequestCardInfo("Зарегистрирована", it.format(DEADLINE_FORMATTER)) }
@@ -455,7 +464,7 @@ private fun RequestCard(request: SimpleOneRequest, selected: Boolean, onClick: (
         RequestCardInfo("Заказчик", data.legalName.ifBlank { "Информация отсутствует" })
         Column {
             Text("Адрес", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(data.address.ifBlank { "Информация отсутствует" }, style = MaterialTheme.typography.bodyMedium)
+            Text(data.address.ifBlank { "Информация отсутствует" }, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 18.sp), fontWeight = FontWeight.SemiBold)
         }
         if (data.terminal.isNotBlank()) RequestTerminalRow(data.terminal, onOpenTerminal)
         personalComment(request)
@@ -463,10 +472,7 @@ private fun RequestCard(request: SimpleOneRequest, selected: Boolean, onClick: (
 }
 @Composable
 private fun RequestCardInfo(title: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, Modifier.weight(1.3f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-    }
+    ClosedCardRow(title, value)
 }
 
 @Composable

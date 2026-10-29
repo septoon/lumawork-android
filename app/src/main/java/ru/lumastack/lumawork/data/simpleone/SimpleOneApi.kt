@@ -53,6 +53,10 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneUser
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncScope
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncCursor
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncChange
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncBatch
 import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.workschedule.WorkSchedule
 import ru.lumastack.lumawork.domain.workschedule.WorkScheduleJournal
@@ -65,6 +69,16 @@ interface SimpleOneApi {
     suspend fun currentUser(authKey: String): SimpleOneUser
     suspend fun activeRequests(userId: String, authKey: String): List<SimpleOneRequest>
     suspend fun closedRequests(userId: String, authKey: String): List<SimpleOneRequest>
+    suspend fun closedRequestsSince(userId: String, authKey: String, updatedSince: String?): List<SimpleOneRequest> =
+        closedRequests(userId, authKey)
+    suspend fun closedSyncHead(userId: String, authKey: String, scope: ClosedRequestsSyncScope): ClosedRequestsSyncCursor? = null
+    suspend fun closedSyncChanges(userId: String, authKey: String, scope: ClosedRequestsSyncScope,
+        since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>, onProgress: (String) -> Unit): ClosedRequestsSyncBatch {
+        val records = closedRequestsSince(userId, authKey, since?.updatedAt)
+        val changes = records.map { record -> ClosedRequestsSyncChange(record.sysId, record.number,
+            ClosedRequestsSyncCursor(record.sysUpdatedAt, record.sysId), record) }
+        return ClosedRequestsSyncBatch(changes, changes.map { it.cursor }.filter { closedSyncTimestamp(it.updatedAt) != null }.maxOrNull() ?: since)
+    }
     suspend fun exportClosedRequests(userId: String, authKey: String): ByteArray
     suspend fun timeReportEntries(authKey: String): List<TimeReportEntry>
     suspend fun timeReportEntries(authKey: String, onProgress: (Int) -> Unit): List<TimeReportEntry> =
@@ -163,6 +177,23 @@ class OkHttpSimpleOneApi(
 
     override suspend fun exportClosedRequests(userId: String, authKey: String): ByteArray =
         exportClient.exportClosedRequests(userId, authKey)
+
+    override suspend fun closedRequestsSince(userId: String, authKey: String, updatedSince: String?): List<SimpleOneRequest> {
+        val since = updatedSince?.let { closedSyncTimestamp(it) ?: throw SimpleOneFailure.InvalidResponse }
+        return closedSyncChanges(userId, authKey, ClosedRequestsSyncScope.All,
+            since?.let { ClosedRequestsSyncCursor(it, "") }, emptyMap()) {}.changes.mapNotNull { it.request }
+    }
+
+    override suspend fun closedSyncHead(userId: String, authKey: String, scope: ClosedRequestsSyncScope): ClosedRequestsSyncCursor? =
+        closedSyncClient(authKey).head(userId, scope)
+
+    override suspend fun closedSyncChanges(userId: String, authKey: String, scope: ClosedRequestsSyncScope,
+        since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>, onProgress: (String) -> Unit): ClosedRequestsSyncBatch =
+        closedSyncClient(authKey).changes(userId, scope, since, knownVersions, onProgress)
+
+    private fun closedSyncClient(authKey: String) = SimpleOneClosedSyncClient(origin,
+        { url -> request(authenticatedRequest(url, authKey)) }, closedArchiveCondition,
+        { userId -> ClosedRequestsArchiveQuery().monthlyCondition(userId) })
 
     override suspend fun timeReportEntries(authKey: String): List<TimeReportEntry> = timeReportEntries(authKey) {}
 
@@ -502,6 +533,7 @@ class OkHttpSimpleOneApi(
                 ?: SimpleOneFailure.InvalidResponse
             val previousCount = records.size
             val total = simpleOneTotalCount(response)
+            if (source == SimpleOneRequestSource.Closed) android.util.Log.i("SimpleOneSync", "baseline page=$page rows=${items.size} total=$total")
             if (source == SimpleOneRequestSource.Closed) {
                 if (total != null && expectedTotal != null && total != expectedTotal) {
                     throw SimpleOneFailure.Http(409, "Список заявок изменился во время выгрузки. Повторите загрузку.")
@@ -511,7 +543,8 @@ class OkHttpSimpleOneApi(
                     throw SimpleOneFailure.Http(413, "Архив слишком велик. Загрузка не сохранена.")
                 }
             }
-            items.map { parseSimpleOneRequest(it, source) }.forEach { record ->
+            val parsed = items.map { parseSimpleOneRequest(it, source) }
+            parsed.forEach { record ->
                 if (record.number.isBlank()) {
                     if (source == SimpleOneRequestSource.Closed) throw SimpleOneFailure.InvalidResponse
                 } else if (seenIds.add(record.id)) records += record
@@ -628,6 +661,7 @@ class OkHttpSimpleOneApi(
             "assigned_user.c_full_name",
             "multicard_terminal_model",
             "multicard_id_terminal",
+            "multicard_merchant_tin",
         )
         private val CLOSED_COLUMNS = ACTIVE_COLUMNS + listOf(
             "resolved_at",
@@ -820,6 +854,9 @@ internal fun parseSimpleOneRequest(
             "multicard_ofd_activation_code",
         ),
         usedSimCard = item.field("multicard_used_sim_card", "multicard_sim_card", "multicard_sim"),
+        tableFields = (if (source == SimpleOneRequestSource.Closed) SimpleOneClosedSyncClient.exportFields(item) else emptyMap()) +
+            item.field("multicard_merchant_tin", "multicard_tsp_inn", "merchant_tin", "inn_tsp", "ИНН ТСП")
+            .takeIf(String::isNotBlank)?.let { mapOf("ИНН ТСП" to it) }.orEmpty(),
     )
 }
 
@@ -1079,7 +1116,7 @@ internal fun flattenSimpleOneRecord(item: JsonObject): JsonObject {
     }
 }
 
-private fun simpleOneTotalCount(response: JsonObject): Int? {
+internal fun simpleOneTotalCount(response: JsonObject): Int? {
     val containers = listOfNotNull(response["data"] as? JsonObject, response)
     return containers.firstNotNullOfOrNull { container ->
         listOf("total", "total_count", "count").firstNotNullOfOrNull { key ->
@@ -1090,6 +1127,7 @@ private fun simpleOneTotalCount(response: JsonObject): Int? {
 
 internal fun SimpleOneRequest.mergeMissing(fallback: SimpleOneRequest): SimpleOneRequest = copy(
     sysId = sysId.ifBlank { fallback.sysId },
+    sysUpdatedAt = sysUpdatedAt.ifBlank { fallback.sysUpdatedAt },
     number = number.ifBlank { fallback.number },
     incomingNumber = incomingNumber.ifBlank { fallback.incomingNumber },
     registeredAt = registeredAt.ifBlank { fallback.registeredAt },
@@ -1126,7 +1164,7 @@ internal fun SimpleOneRequest.mergeMissing(fallback: SimpleOneRequest): SimpleOn
     },
     ofdTariffActivationCode = ofdTariffActivationCode.ifBlank { fallback.ofdTariffActivationCode },
     usedSimCard = usedSimCard.ifBlank { fallback.usedSimCard },
-    tableFields = if (tableFields.isEmpty()) fallback.tableFields else tableFields,
+    tableFields = fallback.tableFields + tableFields,
 )
 
 private fun firstNonEmpty(vararg values: String): String = values.firstOrNull(String::isNotBlank).orEmpty()
@@ -1162,7 +1200,7 @@ private fun JsonObject.string(vararg keys: String): String = keys.firstNotNullOf
     (get(key) as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty)
 }.orEmpty()
 
-private fun JsonObject.field(vararg keys: String): String = keys.firstNotNullOfOrNull { key ->
+internal fun JsonObject.field(vararg keys: String): String = keys.firstNotNullOfOrNull { key ->
     fieldValue(rawField(key), preferDisplay = false).takeIf(String::isNotBlank)
 }.orEmpty()
 
@@ -1181,7 +1219,7 @@ private fun JsonObject.rawField(key: String): JsonElement? {
     return current
 }
 
-private fun fieldValue(raw: JsonElement?, preferDisplay: Boolean): String = when (raw) {
+internal fun fieldValue(raw: JsonElement?, preferDisplay: Boolean): String = when (raw) {
     null, JsonNull -> ""
     is JsonPrimitive -> raw.contentOrNull?.trim().orEmpty()
     is JsonArray -> raw.map { fieldValue(it, preferDisplay = true) }

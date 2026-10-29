@@ -8,7 +8,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
-/** Opt-in local artifact check. Firmware and agent never enter Git or test assets. */
+/** Opt-in local artifact check. Full firmware and captured GPT replies remain private. */
 class MtkP8ReferenceTest {
     @get:Rule val temp = TemporaryFolder()
     @Test fun captured_primary_and_backup_gpt_match_the_profile() {

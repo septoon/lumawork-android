@@ -8,6 +8,7 @@ import java.util.zip.ZipInputStream
 
 const val MTK_P8_FTP_PATH = "/VTB_TO/TO/Vendor/Telepower/UnitodiP8bio/OS/download tools"
 const val MTK_P8_ARCHIVE = "P8KC_20260311_v1.0.48_emmc_pbf_oldkey_config.zip"
+internal const val MTK_P8_AGENT_ASSET = "firmware/unitodi_p8/MTK_AllInOne_DA-P8-verified.bin"
 private const val MTK_SCATTER = "MT6761_Android_scatter.txt"
 internal const val MTK_WORK_RESERVE = 128L * 1024 * 1024
 
@@ -131,7 +132,7 @@ class MtkFirmwarePackageReader internal constructor(
     }
 
     fun verifyAgent(agent: File) {
-        require(agent.isFile && agent.length() == profile.agent.size && hash(agent) == profile.agent.sha256) { "Выберите исходный MTK_AllInOne_DA.bin из Agenew (591104 байта). SHA-256 не совпадает." }
+        require(agent.isFile && agent.length() == profile.agent.size && hash(agent) == profile.agent.sha256) { "Download Agent не соответствует проверенному профилю. Размер или SHA-256 не совпадает." }
         for (part in listOf(profile.agent.stage1, profile.agent.stage2)) {
             require(part.offset >= 0 && part.size > 0 && part.offset + part.size <= agent.length())
             agent.inputStream().use { input ->
@@ -141,6 +142,22 @@ class MtkFirmwarePackageReader internal constructor(
                 require(hash == part.sha256) { "Не совпадает ступень Download Agent." }
             }
         }
+    }
+
+    internal fun ensureBundledAgent(destination: File, open: () -> InputStream) {
+        try {
+            verifyAgent(destination)
+            return
+        } catch (_: IllegalArgumentException) {
+            // Missing or damaged private copy: restore it from the bundled asset.
+        }
+        val temp = File(destination.parentFile, ".agent-${UUID.randomUUID()}")
+        try {
+            open().use { copy(it, temp, profile.agent.size, "Download Agent") }
+            verifyAgent(temp)
+            checkpoint()
+            check(temp.renameTo(destination)) { "Не удалось сохранить встроенный агент." }
+        } finally { temp.delete() }
     }
 
     private fun stage(destination: File, agent: File, extract: (File) -> Unit): MtkFirmwarePackage {

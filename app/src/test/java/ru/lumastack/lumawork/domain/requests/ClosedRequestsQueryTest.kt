@@ -6,6 +6,19 @@ import org.junit.Test
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 
 class ClosedRequestsQueryTest {
+    @Test fun `canonical dates do not scan XLSX fallback columns`() {
+        var scans = 0
+        val fields = object : Map<String, String> by mapOf("Время регистрации" to "27.10.2026 10:00:00") {
+            override val entries: Set<Map.Entry<String, String>>
+                get() { scans++; return emptySet() }
+        }
+        val record = SimpleOneRequest("id", "REQ", registeredAt = "2026-10-27 10:00:00",
+            resolvedAt = "2026-10-28 12:00:00", tableFields = fields)
+        assertEquals("2026-10-27 10:00:00", record.closedRegistrationTime())
+        assertEquals("2026-10-28 12:00:00", record.closedCompletionTime())
+        assertEquals(0, scans)
+    }
+
     @Test fun `search ignores period and finds old and undated records`() {
         val records = listOf(
             SimpleOneRequest("1", "OLD", resolvedAt = "12.01.2020 12:00", customer = "Иванов"),

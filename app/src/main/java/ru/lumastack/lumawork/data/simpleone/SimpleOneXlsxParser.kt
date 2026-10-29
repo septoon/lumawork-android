@@ -18,11 +18,13 @@ internal object SimpleOneXlsxParser {
     fun parse(bytes: ByteArray): List<SimpleOneRequest> {
         return readRows(bytes, requiredHeader = "Номер заявки")
             .asSequence()
-            .mapNotNull(::makeRequest)
-            .filter { isIncludedStatus(it.state) || isReturnEquipment(it.requestType) }
+            .mapNotNull(::recordFromExportRow)
             .sortedByDescending { it.resolvedDateTime() ?: LocalDateTime.MIN }
             .toList()
     }
+
+    internal fun recordFromExportRow(row: Map<String, String>): SimpleOneRequest? =
+        makeRequest(row)?.takeIf { isIncludedStatus(it.state) || isReturnEquipment(it.requestType) }
 
     internal fun readRows(bytes: ByteArray, requiredHeader: String? = null): List<Map<String, String>> {
         val parts = readParts(bytes)

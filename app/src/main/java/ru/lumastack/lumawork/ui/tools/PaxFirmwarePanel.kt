@@ -80,10 +80,6 @@ internal fun PaxFirmwarePanel(
                 }
             }
         }
-        if (state.paxModel == PaxModel.D230) {
-            ToolsSubpanel(colors.mint) { Text("Скоро..", style = MaterialTheme.typography.titleMedium) }
-            return@Column
-        }
         ToolsStepCard(2, "Комплект прошивки", colors.mint) {
             val kinds = if (state.paxModel == PaxModel.S210) listOf(PaxArchiveKind.Firmware) else PaxArchiveKind.entries
             kinds.forEach { kind ->
@@ -208,7 +204,7 @@ internal fun PaxFirmwarePanel(
                 Text("${selectedModel.title} · ${paxModeTitle(selectedModel, selectedMode)}", style = MaterialTheme.typography.titleMedium)
                 if (resuming) Text("Продолжение использует прежние версии файлов, сохранённые при начале этой операции.", style = MaterialTheme.typography.bodyMedium)
                 if (resuming && selectedModel != PaxModel.S210 && installation.step in listOf(PaxFirmwareStep.Reboot, PaxFirmwareStep.Reconnect, PaxFirmwareStep.CheckingOs))
-                    Text("Продолжайте после перезагрузки PAX и входа в main menu → General → XCB service → USB.", style = MaterialTheme.typography.bodyMedium)
+                    Text("Продолжайте после перезагрузки PAX и входа в ${selectedModel.xcbUsbMenuPath}.", style = MaterialTheme.typography.bodyMedium)
                 if (!resuming && installation.canResume) Text("При запуске новой операции журнал продолжения предыдущей будет заменён. До запуска журнал сохранится.", style = MaterialTheme.typography.bodyMedium)
                 if (needsRetryConfirmation) {
                     Text("Результат последнего этапа не подтверждён. Сначала проверьте состояние терминала.", color = MaterialTheme.colorScheme.error)

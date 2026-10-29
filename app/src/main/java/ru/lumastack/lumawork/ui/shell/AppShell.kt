@@ -237,6 +237,13 @@ fun AppShell(
     var selectedName by rememberSaveable(session.user.id) { mutableStateOf(destinations.first().name) }
     // Visibility filters the menu; internal actions can still open an available hidden screen.
     val selected = availableDestinations.firstOrNull { it.name == selectedName } ?: destinations.first()
+    androidx.compose.runtime.LaunchedEffect(selected, shellLifecycle, isOffline, simpleOneViewModel) {
+        if (selected == AppDestination.Requests && !isOffline) {
+            shellLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                simpleOneViewModel.runAutomaticClosedSync()
+            }
+        }
+    }
     val navigationConfiguration = availableIds.joinToString(",") + ";" + visibleIds.joinToString(",")
     var appliedNavigationConfiguration by rememberSaveable(session.user.id) { mutableStateOf(navigationConfiguration) }
     androidx.compose.runtime.LaunchedEffect(navigationConfiguration) {

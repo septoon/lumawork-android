@@ -71,8 +71,12 @@ class MtkFirmwareController(context: Context, private val owner: String, private
                 }
                 mutable.update { it.copy(installation = recovered,serviceRunning=running!=null) }
                 val livePackage=MtkFirmwareRuntime.request?.takeIf { running!=null && it.initial.owner==owner }?.pkg
-                val agent = withContext(Dispatchers.IO) { runCatching { MtkFirmwarePackageReader().verifyAgent(store.agent) }.isSuccess }
-                mutable.update { it.copy(agentVerified = agent) }
+                if (running == null) withContext(Dispatchers.IO) {
+                    MtkFirmwarePackageReader(checkpoint = { ensureActive() }).ensureBundledAgent(store.agent) {
+                        context.assets.open(MTK_P8_AGENT_ASSET)
+                    }
+                }
+                mutable.update { it.copy(agentVerified = true) }
                 if(livePackage!=null) mutable.update { it.copy(firmware=livePackage,agentVerified=true) }
                 else recovered.packageDirectory?.let { path ->
                     val pkg = withContext(Dispatchers.IO) { MtkFirmwarePackageReader(checkpoint = { ensureActive() }).inspect(store.packageDirectory(path)) }
@@ -104,27 +108,8 @@ class MtkFirmwareController(context: Context, private val owner: String, private
             if (registered) { context.unregisterReceiver(receiver); registered = false }
         }
     }
-    fun importAgent(open: () -> InputStream) = prepare {
-        val temp = File(store.directory, ".agent-${UUID.randomUUID()}")
-        try {
-            open().use { input -> temp.outputStream().use { output ->
-                val buffer = ByteArray(16384); var size = 0L
-                while (true) {
-                    ensureActive()
-                    val n = input.read(buffer); if (n < 0) break
-                    require(n > 0 && size + n <= MTK_P8_PROFILE.agent.size) { "Неверный размер Download Agent." }
-                    output.write(buffer, 0, n); size += n
-                }
-            } }
-            MtkFirmwarePackageReader().verifyAgent(temp)
-            check(temp.renameTo(store.agent)) { "Не удалось сохранить агент." }
-            mutable.update { it.copy(agentVerified = true) }
-            persist(state.value.installation.copy(phase = if (state.value.firmware == null) MtkInstallPhase.Idle else MtkInstallPhase.Prepared,
-                detail = "Исходный Download Agent проверен по SHA-256, обе ступени совпали."))
-        } finally { temp.delete() }
-    }
     fun preparePackage(open: suspend () -> InputStream) {
-        if (!state.value.agentVerified) { mutable.update { it.copy(error = "Сначала выберите MTK_AllInOne_DA.bin из Agenew.") }; return }
+        if (!state.value.agentVerified) { mutable.update { it.copy(error = "Встроенный Download Agent не подготовлен. Откройте вкладку P8 заново.") }; return }
         prepare {
             val before = state.value.firmware
             val target = File(store.directory, "package-${UUID.randomUUID()}")
@@ -166,7 +151,7 @@ class MtkFirmwareController(context: Context, private val owner: String, private
     private fun startInspection(loadAgent: Boolean,upgrade: Boolean=false) {
         if (!visible || state.value.loading || job?.isActive == true) return
         if(upgrade && (state.value.firmware==null || !state.value.installation.canWrite)) return
-        if (loadAgent && !state.value.agentVerified) { mutable.update { it.copy(error = "Сначала выберите проверенный Download Agent.") }; return }
+        if (loadAgent && !state.value.agentVerified) { mutable.update { it.copy(error = "Встроенный Download Agent не подготовлен. Откройте вкладку P8 заново.") }; return }
         val operation = UUID.randomUUID().toString()
         if (!terminalOperationGate.tryAcquire(operation)) { mutable.update { it.copy(error = "USB занят другой операцией.") }; return }
         mutable.update { it.copy(error = null,serviceRunning=false, installation = it.installation.freshOperation(operation,

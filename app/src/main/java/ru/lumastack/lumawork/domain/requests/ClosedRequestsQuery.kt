@@ -32,9 +32,12 @@ data class ClosedRequestsItem(
     val dayKey: String get() = day?.toString() ?: timeText.ifBlank { "unknown" }
 }
 
+private val CLOSED_DIACRITICS = Regex("\\p{M}+")
+private val CLOSED_WHITESPACE = Regex("\\s+")
+
 fun normalizedClosedRequestsText(value: String): String = Normalizer.normalize(
     value.trim().lowercase(Locale.ROOT), Normalizer.Form.NFD,
-).replace(Regex("\\p{M}+"), "").replace(Regex("\\s+"), " ")
+).replace(CLOSED_DIACRITICS, "").replace(CLOSED_WHITESPACE, " ")
 
 fun SimpleOneRequest.closedTableValue(vararg titles: String): String {
     val keys = titles.map(::normalizedClosedRequestsText).toSet()
@@ -97,12 +100,12 @@ fun parseClosedRequestsDate(raw: String): LocalDateTime? {
     }?.takeIf { it.year > 1970 }
 }
 
-fun SimpleOneRequest.closedRegistrationTime(): String = (listOf(registeredAt) +
-    listOf("Время создания в МК", "Время регистрации", "Регистрация").map { closedTableValue(it) })
+fun SimpleOneRequest.closedRegistrationTime(): String = (sequenceOf(registeredAt) +
+    sequenceOf("Время создания в МК", "Время регистрации", "Регистрация").map { closedTableValue(it) })
     .firstOrNull { parseClosedRequestsDate(it) != null }.orEmpty()
 
-fun SimpleOneRequest.closedCompletionTime(): String = (listOf(resolvedAt, completedAt, closedAt) +
-    listOf("Время решения", "Время выполнения", "Время \"Выполнена\"", "Выполнена", "Дата выполнения", "Дата закрытия в МК").map { closedTableValue(it) })
+fun SimpleOneRequest.closedCompletionTime(): String = (sequenceOf(resolvedAt, completedAt, closedAt) +
+    sequenceOf("Время решения", "Время выполнения", "Время \"Выполнена\"", "Выполнена", "Дата выполнения", "Дата закрытия в МК").map { closedTableValue(it) })
     .firstOrNull { parseClosedRequestsDate(it) != null }.orEmpty()
 
 fun SimpleOneRequest.closedEffectiveTime(): String =

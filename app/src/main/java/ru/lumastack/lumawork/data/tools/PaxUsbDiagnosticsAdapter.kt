@@ -13,7 +13,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeout
 
 fun isPaxUsbCandidate(device: UsbEquipment): Boolean = isPaxPinpadCandidate(device) || isPaxXcbCandidate(device)
-// Both identities use the same XCB transport in the supplied D270 and Q25 captures.
+// D230/D270 and Q25 use these identities with the same captured XCB transport.
 internal fun isPaxXcbUsbId(vendorId: Int, productId: Int): Boolean =
     vendorId == 0x2FB8 && productId == 0x1101 || vendorId == 0x1234 && productId == 0x0101
 internal fun isPaxXcbCandidate(device: UsbEquipment): Boolean = isPaxXcbUsbId(device.vendorId, device.productId) &&

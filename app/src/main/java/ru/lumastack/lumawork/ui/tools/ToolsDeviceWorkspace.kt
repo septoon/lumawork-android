@@ -37,7 +37,7 @@ internal fun ToolsDeviceWorkspace(
                 ConnectionInfo("После записи OS: при перезагрузке нажимайте «Меню». Оставьте системное меню открытым — приложение проверит OS и продолжит APP.")
                 ConnectionInfo("В KeyInstaller: PAX S210_SL. После записи APP до 100% нажмите Cancel на терминале.")
             }
-        } else Text("На терминале: main menu → General → XCB service → USB. Оставайтесь в main menu.",
+        } else Text("На терминале: ${paxModel.xcbUsbMenuPath}. Оставайтесь в main menu.",
             style = MaterialTheme.typography.bodyMedium, color = colors.muted)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ToolsActionButton("Проверить USB", onScan, icon = ToolsIcons.usb, accent = colors.blue)

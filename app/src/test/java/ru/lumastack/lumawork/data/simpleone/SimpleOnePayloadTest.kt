@@ -10,6 +10,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SimpleOnePayloadTest {
+    @Test fun `detail merchant TIN remains available after merging archived fields`() {
+        val detail = parseSimpleOneRequest(Json.parseToJsonElement("""{"sys_id":"one","number":"REQ1","multicard_merchant_tin":"1234567890"}""").jsonObject)
+        val archived = ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest("one", "REQ1", tableFields = mapOf("Дополнительная колонка" to "сохранить"))
+        val merged = detail.mergeMissing(archived)
+        assertEquals("1234567890", ru.lumastack.lumawork.domain.requests.RequestDetailsData(merged).tin)
+        assertEquals("сохранить", merged.tableFields["Дополнительная колонка"])
+        val index = ru.lumastack.lumawork.domain.requests.ClientPersonalCommentMatchingIndex(
+            listOf(ru.lumastack.lumawork.domain.requests.ClientPersonalComment("comment", displayTIN = "1234567890")))
+        assertEquals("comment", index.comment(ru.lumastack.lumawork.domain.requests.RequestDetailsData(merged).tin)?.id)
+    }
     @Test fun `canonical closure fields preserve display label and resolution`() {
         val record = parseSimpleOneRequest(Json.parseToJsonElement("""
             {"sys_id":"done","number":"REQ-DONE",

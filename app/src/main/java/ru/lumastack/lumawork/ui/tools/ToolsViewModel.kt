@@ -109,7 +109,6 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
         }
     }
     fun updateToken(value: String) { token = value }
-    fun importMtkAgent(uri: Uri) = mtk.importAgent { requireNotNull(context.contentResolver.openInputStream(uri)) { "Не удалось открыть агент." } }
     fun importMtkFirmware(uri: Uri) = mtk.preparePackage { requireNotNull(context.contentResolver.openInputStream(uri)) { "Не удалось открыть ZIP." } }
     fun prepareMtkFromFtp(id: String) = mtk.preparePackage { requireNotNull(transfers.savedFile(owner, id)) { "Файл FTP недоступен." }.inputStream() }
     fun openMtkArchivePicker() {
@@ -151,7 +150,7 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
         prepareFirmware(kind, file.name, file.remotePath) { localFiles.open(owner, id) }
     }
     private fun prepareFirmware(kind: PaxArchiveKind, name: String, sourcePath: String? = null, open: suspend () -> InputStream) {
-        if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active || state.value.paxModel == PaxModel.D230) return
+        if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
         val selectedModel = state.value.paxModel
         mutable.update { it.copy(firmwareBusy = true, firmwareError = null, inspected = null, checkMessage = null) }
         viewModelScope.launch {
@@ -185,7 +184,7 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
         }
     }
     fun openArchivePicker(kind: PaxArchiveKind) {
-        if (state.value.firmwareBusy || state.value.globalInstallBusy || state.value.paxModel == PaxModel.D230) return
+        if (state.value.firmwareBusy || state.value.globalInstallBusy) return
         if (kind == PaxArchiveKind.Prolin && state.value.paxModel == PaxModel.S210) return
         mutable.update { it.copy(archivePicker = kind, ftpItems = emptyList(), ftpError = null) }
         navigateArchiveFtp(kind.ftpPathFor(state.value.paxModel))
@@ -274,7 +273,7 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
     }
     fun selectInstallMode(mode: PaxInstallMode) {
         if (state.value.firmwareBusy || PaxFirmwareRuntime.state.value.active) return
-        if (state.value.paxModel == PaxModel.D230 || state.value.paxModel == PaxModel.S210 && mode == PaxInstallMode.RemoveMainApp) return
+        if (state.value.paxModel == PaxModel.S210 && mode == PaxInstallMode.RemoveMainApp) return
         mutable.update { it.copy(installMode = mode) }
     }
     fun setPinpadExpectedOs(value: String) {
@@ -299,7 +298,6 @@ class ToolsViewModel(context: Context, private val ftp: FtpRepository, private v
             val saved = state.value.installation
             val model = if (resume) saved.model else state.value.paxModel
             val mode = if (resume) saved.mode else state.value.installMode
-            check(model != PaxModel.D230) { "Скоро.." }
             val path = if (mode == PaxInstallMode.RemoveMainApp) null else if (resume) saved.bundleDirectory else state.value.firmware?.takeIf { it.model == model }?.directory?.path
             check(mode == PaxInstallMode.RemoveMainApp || path != null) { "Сначала выберите ZIP этой модели." }
             val equipment = usb.state.value.devices.singleOrNull { it.hasPermission &&

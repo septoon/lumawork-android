@@ -25,7 +25,7 @@ import ru.lumastack.lumawork.data.ftp.FtpItem
 import ru.lumastack.lumawork.data.tools.*
 
 @Composable
-internal fun MtkFirmwarePanel(state: MtkFirmwareUiState, tools: ToolsUiState, onAgent: () -> Unit, onArchive: () -> Unit,
+internal fun MtkFirmwarePanel(state: MtkFirmwareUiState, tools: ToolsUiState, onArchive: () -> Unit,
     onFtp: () -> Unit, onInspect: () -> Unit, onInspectAgent: () -> Unit, onCancel: () -> Unit, onCancelDownload: () -> Unit,
     onDownload: () -> Unit, onEmergency: () -> Unit, onBootConfirmed: () -> Unit,
 ) {
@@ -43,13 +43,8 @@ internal fun MtkFirmwarePanel(state: MtkFirmwareUiState, tools: ToolsUiState, on
             Text("UniTodi P8", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         }
         ToolsStepCard(2, "Комплект прошивки", colors.mint) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1f)) {
-                    FirmwareSummaryRow(if (state.agentVerified) Icons.Outlined.CheckCircle else Icons.Outlined.Settings,
-                        if (state.agentVerified) "Агент проверен" else "Download Agent не выбран", accent = colors.mint)
-                }
-                TextButton(onClick = onAgent, enabled = editable) { Text(if (state.agentVerified) "Заменить" else "Выбрать") }
-            }
+            FirmwareSummaryRow(if (state.agentVerified) Icons.Outlined.CheckCircle else Icons.Outlined.Settings,
+                if (state.agentVerified) "Встроенный агент проверен" else "Встроенный агент не подготовлен", accent = colors.mint)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 ToolsActionButton("Выбрать на FTP", onFtp, Modifier.weight(1f), enabled = editable && state.agentVerified,
                     icon = ToolsIcons.folder, accent = colors.mint)
@@ -105,7 +100,7 @@ internal fun MtkFirmwarePanel(state: MtkFirmwareUiState, tools: ToolsUiState, on
                 }
                 else -> ToolsSubpanel(colors.mint) {
                     FirmwareSummaryRow(Icons.Outlined.Info,
-                        if (state.agentVerified) "Выберите комплект прошивки." else "Выберите Download Agent.", accent = colors.mint)
+                        if (state.agentVerified) "Выберите комплект прошивки." else "Встроенный Download Agent не подготовлен.", accent = colors.mint)
                     Text("Поддерживаемый комплект: v1.0.48 · 11.03.2026", style = MaterialTheme.typography.bodySmall, color = colors.muted)
                 }
             }

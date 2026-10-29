@@ -156,9 +156,35 @@ data class ClosedSimpleOneArchive(
     val isComplete: Boolean = false,
     val source: ClosedArchiveSource = ClosedArchiveSource.ListApi,
     val queryRevision: Int? = null,
+    val syncUpdatedAt: String? = null,
+    val syncUserId: String? = null,
+    val monthlyCursor: ClosedRequestsSyncCursor? = null,
+    val wideCursor: ClosedRequestsSyncCursor? = null,
+    val syncRecords: Map<String, ClosedRequestsSyncRecord> = emptyMap(),
+    val syncRevision: Int? = null,
+    val lastWideSyncAtEpochMillis: Long? = null,
 ) {
     val isReady: Boolean get() = isComplete && queryRevision == 2
 }
+
+enum class ClosedRequestsSyncScope { Monthly, All }
+
+@Serializable
+data class ClosedRequestsSyncCursor(val updatedAt: String, val sysId: String) : Comparable<ClosedRequestsSyncCursor> {
+    override fun compareTo(other: ClosedRequestsSyncCursor): Int =
+        compareValuesBy(this, other, ClosedRequestsSyncCursor::updatedAt, ClosedRequestsSyncCursor::sysId)
+}
+
+@Serializable
+data class ClosedRequestsSyncRecord(val number: String, val updatedAt: String, val excluded: Boolean = false)
+
+data class ClosedRequestsSyncChange(
+    val sysId: String, val number: String, val cursor: ClosedRequestsSyncCursor, val request: SimpleOneRequest?,
+)
+
+data class ClosedRequestsSyncBatch(
+    val changes: List<ClosedRequestsSyncChange>, val cursor: ClosedRequestsSyncCursor?,
+)
 
 @Serializable
 enum class ClosedArchiveSource {

@@ -22,6 +22,10 @@ enum class PaxModel(val title: String, val archiveFolder: String) {
         listOf(PaxInstallMode.Full, PaxInstallMode.Prolin, PaxInstallMode.MainApp) else PaxInstallMode.entries
 }
 
+internal val PaxModel.xcbUsbMenuPath: String get() =
+    if (this == PaxModel.D230) "main menu → System Config → XCB Service → USB"
+    else "main menu → General → XCB service → USB"
+
 data class PaxFirmwarePackage(
     val directory: File,
     val model: PaxModel,

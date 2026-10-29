@@ -80,6 +80,17 @@ fun displayClientCommentPhone(raw: String): String {
     return "+7 (${national.take(3)}) ${national.substring(3, 6)}-${national.substring(6, 8)}-${national.takeLast(2)}"
 }
 
+fun clientCommentPhoneForCopy(raw: String): String {
+    val digits = raw.filter(Char::isDigit)
+    if (digits.isEmpty()) return ""
+    return when {
+        raw.trim().startsWith("+") -> "+$digits"
+        digits.length >= 11 && digits.startsWith("8") -> "+7${digits.drop(1)}"
+        digits.length >= 11 && digits.startsWith("7") -> "+$digits"
+        else -> "+7$digits"
+    }
+}
+
 /** iOS priority: exact address within TIN, terminal within TIN, all addresses; terminal alone only without a valid TIN. */
 class ClientPersonalCommentMatchingIndex(comments: List<ClientPersonalComment>) {
     private val ordered = comments.sortedByDescending { runCatching { Instant.parse(it.updatedAt) }.getOrDefault(Instant.MIN) }
@@ -98,10 +109,7 @@ class ClientPersonalCommentMatchingIndex(comments: List<ClientPersonalComment>) 
     }
 }
 
-fun SimpleOneRequest.supportsClientPersonalComments(): Boolean {
-    val type = normalizedClientCommentScope(requestType.ifBlank { clientCommentField("Тип заявки") })
-    return type != "returnequip" && type != "return_equip" && !type.contains("возврат")
-}
+fun SimpleOneRequest.supportsClientPersonalComments(): Boolean = true
 
 fun SimpleOneRequest.clientCommentTIN(): String {
     for (label in listOf("ИНН ТСП", "ИНН", "ИНН клиента")) {

@@ -45,12 +45,24 @@ class PaxInstallerSessionTest {
         assertEquals(1, wire.quits)
     }
 
+    @Test fun `D230 Prolin completes only after captured firmware base marker and OKAY`() = runBlocking {
+        val wire = Device(status = "installer firmware-kernel done.\r\ninstaller firmware-ramdisk done.\r\ninstaller firmware-base done.\r\n")
+        val session = PaxInstallerSession(wire)
+        session.connect()
+        session.installOs("/tmp/prolin-albatross-2.9.54.12262R-Inpas_SIG.zip", PaxModel.D230)
+        assertEquals(listOf("firmware\u0000/tmp/prolin-albatross-2.9.54.12262R-Inpas_SIG.zip\u0000\u0000"), wire.commands)
+        assertEquals(1, wire.quits)
+    }
+
     @Test fun `OS completion marker must match selected model and incomplete Prolin stops`() = runBlocking {
         for ((model, status) in listOf(
             PaxModel.D270 to "installer firmware-base done.\r\n",
             PaxModel.Q25 to "installer rootfs.img done.\r\n",
             PaxModel.Q25 to "installer firmware-kernel done.\r\ninstaller firmware-ramdisk done.\r\n",
             PaxModel.Q25 to "verify failed\r\ninstaller firmware-base done.\r\n",
+            PaxModel.D230 to "installer rootfs.img done.\r\n",
+            PaxModel.D230 to "installer firmware-kernel done.\r\ninstaller firmware-ramdisk done.\r\n",
+            PaxModel.D230 to "verify failed\r\ninstaller firmware-base done.\r\n",
         )) {
             val wire = Device(status = status)
             val session = PaxInstallerSession(wire)

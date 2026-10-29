@@ -17,6 +17,39 @@ import ru.lumastack.lumawork.domain.simpleone.*
 
 class ClosedRequestsArchiveTest {
     @get:Rule val temporary = TemporaryFolder()
+    @Test fun `incremental scan includes entire boundary second and stops before old pages`() = runBlocking {
+        var calls = 0
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            calls++
+            if (chain.request().url.encodedPath.contains("list-cell-value")) {
+                val version = if (chain.request().url.pathSegments.last() == "old") "2026-10-27 12:00:00" else "2026-10-28 12:00:00"
+                return@addInterceptor Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                    .body("""{"status":"OK","data":{"value":"$version"}}""".toResponseBody()).build()
+            }
+            assertEquals("wide^ORDERBYDESCsys_updated_at^ORDERBYDESCsys_id", chain.request().url.queryParameter("condition"))
+            val page = chain.request().url.queryParameter("page")!!.toInt()
+            // Equal timestamp rows must also be in descending sys_id order.
+            val rows = if (page == 1) (20 downTo 1).joinToString(",") { syncItem(it.toString().padStart(3, '0')) }
+                else listOf(syncItem("000"), syncItem("old")).joinToString(",")
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"status":"OK","data":{"list":[$rows],"total_count":5000}}""".toResponseBody()).build()
+        }.build()
+        val records = OkHttpSimpleOneApi("https://sd.test/v1", client, closedArchiveCondition = { "wide" })
+            .closedRequestsSince("user", "auth", "2026-10-28 12:00:00")
+        assertEquals(21, records.size)
+        assertEquals(26, calls) // two pages + 22 cells, followed by the head page and cell
+        assertTrue(records.none { it.sysId == "old" })
+    }
+
+    @Test fun `incremental scan rejects missing versions instead of silently skipping changes`() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"status":"OK","data":{"list":[{"sys_id":"one","number":"REQ1"}]}}""".toResponseBody()).build()
+        }.build()
+        val api = OkHttpSimpleOneApi("https://sd.test/v1", client, closedArchiveCondition = { "wide" })
+        assertTrue(runCatching { api.closedRequestsSince("user", "auth", "2026-10-28 12:00:00") }.exceptionOrNull() is SimpleOneFailure.InvalidResponse)
+    }
+
     @Test fun `list fallback requests closure fields and supplies completed analytics`() = runBlocking {
         val client = OkHttpClient.Builder().addInterceptor { chain ->
             val columns = chain.request().url.queryParameter("columns").orEmpty().split(",")
@@ -78,10 +111,20 @@ class ClosedRequestsArchiveTest {
         val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
         val requests = (1..5001).map { SimpleOneRequest("$it", "REQ$it", terminalId = "000123", customer = "=not a formula & <text>",
             tableFields = mapOf("Дополнительная колонка" to "000045")) }
-        val archive = ClosedSimpleOneArchive(requests, isComplete = true, queryRevision = 2)
+        val archive = ClosedSimpleOneArchive(requests, isComplete = true, queryRevision = 2,
+            syncUpdatedAt = "2026-10-28 12:00:00", syncUserId = "simple-user", syncRevision = 1,
+            monthlyCursor = ClosedRequestsSyncCursor("2026-10-28 12:00:00", "1"),
+            wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "2"),
+            syncRecords = mapOf("1" to ClosedRequestsSyncRecord("REQ1", "2026-10-28 12:00:00")))
         val cache = FileSimpleOneSupplementalCache(temporary.newFolder(), json)
         cache.saveClosedArchive("owner", archive)
-        assertEquals(5001, cache.readClosedArchive("owner")!!.requests.size)
+        val restored = cache.readClosedArchive("owner")!!
+        assertEquals(5001, restored.requests.size)
+        assertEquals("2026-10-28 12:00:00", restored.syncUpdatedAt)
+        assertEquals("simple-user", restored.syncUserId)
+        assertEquals(archive.monthlyCursor, restored.monthlyCursor)
+        assertEquals(archive.wideCursor, restored.wideCursor)
+        assertEquals(archive.syncRecords, restored.syncRecords)
         assertNull(cache.readClosedArchive("other"))
         val parsed = SimpleOneXlsxParser.parse(ClosedRequestsXlsxExport.create(requests))
         assertEquals(5001, parsed.size)

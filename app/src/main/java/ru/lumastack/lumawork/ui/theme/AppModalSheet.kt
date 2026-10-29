@@ -3,9 +3,11 @@ package ru.lumastack.lumawork.ui.theme
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -31,12 +34,18 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Velocity
 import ru.lumastack.lumawork.ui.shell.AppBackButton
 
 /** Phone sheets span the window in either orientation; tablets keep a readable width. */
@@ -64,7 +73,7 @@ fun AppModalSheet(
     val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ModalBottomSheet(
         onDismissRequest = {},
-        modifier = modifier.background(appScreenBackground(), shape),
+        modifier = modifier,
         sheetState = state,
         sheetMaxWidth = if (phone) Dp.Unspecified else maxWidth,
         sheetGesturesEnabled = dismissEnabled,
@@ -73,13 +82,29 @@ fun AppModalSheet(
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
         scrimColor = AppSurfaces.scrim,
+        dragHandle = null,
         properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false, shouldDismissOnClickOutside = dismissEnabled),
     ) {
         // Keep Back under owner control: a discarded attempt must not leave a predictive
         // Back transform behind. Nested screen handlers can override this handler.
         BackHandler { if (canDismiss) currentOnDismiss() }
-        content()
+        Column(Modifier.fillMaxWidth().background(appScreenBackground(), shape)) {
+            Box(Modifier.align(Alignment.CenterHorizontally).clickable(enabled = canDismiss, role = Role.Button,
+                onClickLabel = "Закрыть", onClick = { currentOnDismiss() })) {
+                BottomSheetDefaults.DragHandle()
+            }
+            Column(Modifier.fillMaxWidth().nestedScroll(SheetContentScrollConnection)) {
+                content()
+            }
+        }
     }
+}
+
+internal object SheetContentScrollConnection : NestedScrollConnection {
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+        if (source == NestedScrollSource.UserInput) Offset(0f, available.y) else Offset.Zero
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = Velocity(0f, available.y)
 }
 
 @Composable

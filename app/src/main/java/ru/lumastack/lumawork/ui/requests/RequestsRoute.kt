@@ -18,6 +18,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
 import ru.lumastack.lumawork.BuildConfig
@@ -46,12 +48,10 @@ private fun RequestsRouteContent(session: AppSession, repository: SimpleOneRepos
         Box(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 24.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 if (isBusy) {
-                    CircularProgressIndicator(Modifier.size(36.dp), strokeWidth = 3.dp)
-                    Text(
-                        if (state.isInitializing) "Читаю заявки…" else state.archiveProgress ?: "Загружаю заявки…",
+                    RequestLoadingTitle(
+                        isLoading = true,
+                        text = "Обновляю список заявок",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     )
                 } else {
                     AppButton(onClick = actions.onInitialLoad) { Text("Загрузить заявки") }
@@ -73,20 +73,39 @@ private fun RequestsRouteContent(session: AppSession, repository: SimpleOneRepos
     val json = remember { Json { ignoreUnknownKeys = true; encodeDefaults = true } }
     val records = remember(state.activeRequests, state.closedArchive.requests) { state.activeRequests + state.closedArchive.requests }
     val comments = rememberClientPersonalCommentsController(session, state.isOffline, records, BuildConfig.API_ORIGIN, json)
+    val commentRequests = remember { mutableStateMapOf<String, ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest>() }
+    val commentLookupLimit = remember { Semaphore(4) }
     var terminal by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val screenActions = actions.copy(onRefresh = {
         actions.onRefresh()
-        if (state.mode == RequestsMode.Active) scope.launch { comments.repository.refresh({ comments.offline }, force = true) }
+        scope.launch { comments.repository.refresh({ comments.offline }, force = true) }
+    }, onRefreshClosed = {
+        actions.onRefreshClosed()
+        scope.launch { comments.repository.refresh({ comments.offline }, force = true) }
     })
     Box(Modifier.fillMaxSize()) {
     RequestsScreen(state, widthClass, screenActions,
-        toolbar = { RequestsToolbar(state, actions, comments) },
-        personalComment = { request -> comments.commentFor(request)?.let { comment ->
-            ClientPersonalCommentBlock(comment, onEdit = if (comments.canEdit(request)) ({ comments.openEditor(request) }) else null)
-        } ?: run {
-            if (comments.canEdit(request)) TextButton(onClick = { comments.openEditor(request) }) { Text("Добавить личный комментарий") }
-        } },
+        toolbar = { RequestsToolbar(state, screenActions, comments) },
+        personalComment = { request ->
+            val key = "${request.id}|${request.sysUpdatedAt}"
+            val resolved = commentRequests[key] ?: request
+            LaunchedEffect(request, comments.comments, state.isOffline, state.isAuthorized) {
+                if (!state.isOffline && state.isAuthorized && comments.comments.isNotEmpty() && request.sysId.isNotBlank() &&
+                    request.clientCommentTIN().isEmpty() && comments.commentFor(request) == null && key !in commentRequests) {
+                    try {
+                        val detail = commentLookupLimit.withPermit { repository.requestDetails(session.user.id, request, force = true) }
+                        commentRequests[key] = detail
+                    } catch (error: CancellationException) { throw error }
+                    catch (_: Exception) { /* The add action remains available when SimpleOne is unavailable. */ }
+                }
+            }
+            comments.commentFor(resolved)?.let { comment ->
+                ClientPersonalCommentBlock(comment, onEdit = if (comments.canEdit(resolved)) ({ comments.openEditor(resolved) }) else null)
+            } ?: run {
+                if (comments.canEdit(resolved)) TextButton(onClick = { comments.openEditor(resolved) }) { Text("Добавить личный комментарий") }
+            }
+        },
         onOpenTerminal = { terminal = it },
         detail = { request -> RequestsDetailContent(request, state, actions, comments, session,
             repository, json, onOpenTerminal = { terminal = it }) })
@@ -184,9 +203,9 @@ private fun RequestsToolbar(state: SimpleOneUiState, actions: RequestsActions, c
     }
     Column {
         if (busy) Row(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding), horizontalArrangement = Arrangement.End) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            if (state.isClosedLoading) RequestLoadingTitle(true, text = state.archiveProgress ?: "Обновляю список заявок", style = MaterialTheme.typography.bodyMedium)
+            else CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         }
-        state.archiveProgress?.let { Text(it, Modifier.padding(horizontal = AppContentHorizontalPadding), style = MaterialTheme.typography.bodySmall) }
         state.errorMessage?.let { Text(it, Modifier.padding(horizontal = AppContentHorizontalPadding), color = MaterialTheme.colorScheme.error) }
         message?.let { text -> Row(Modifier.padding(horizontal = AppContentHorizontalPadding), verticalAlignment = Alignment.CenterVertically) {
             Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)

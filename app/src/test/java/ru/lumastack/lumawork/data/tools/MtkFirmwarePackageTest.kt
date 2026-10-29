@@ -28,6 +28,42 @@ class MtkFirmwarePackageTest {
     }.toByteArray()
     private fun entries() = listOf("emmc/MT6761_Android_scatter.txt" to scatter, "emmc/preloader_P8KC.bin" to image, "emmc/logo-verified.bin" to image)
     private fun agent() = temp.newFile().apply { writeBytes(agentBytes) }
+    @Test fun bundled_p8_agent_matches_the_verified_profile_and_both_stages() {
+        val destination = File(temp.root, "agent.bin")
+        val reader = MtkFirmwarePackageReader()
+        reader.ensureBundledAgent(destination) { File("src/main/assets", MTK_P8_AGENT_ASSET).inputStream() }
+        reader.verifyAgent(destination)
+    }
+    @Test fun bundled_agent_restores_missing_and_damaged_private_copies() {
+        val destination = File(temp.root, "agent.bin")
+        val reader = MtkFirmwarePackageReader(profile())
+        reader.ensureBundledAgent(destination) { ByteArrayInputStream(agentBytes) }
+        assertArrayEquals(agentBytes, destination.readBytes())
+        destination.writeBytes(byteArrayOf(9, 9, 9, 9))
+        reader.ensureBundledAgent(destination) { ByteArrayInputStream(agentBytes) }
+        assertArrayEquals(agentBytes, destination.readBytes())
+        reader.ensureBundledAgent(destination) { error("Valid private copy must be reused") }
+    }
+    @Test fun invalid_bundled_agent_is_not_installed_and_temporary_files_are_removed() {
+        val destination = File(temp.root, "agent.bin")
+        val reader = MtkFirmwarePackageReader(profile())
+        listOf(byteArrayOf(4, 5), byteArrayOf(9, 9, 9, 9), agentBytes + 8).forEach { invalid ->
+            assertThrows(IllegalArgumentException::class.java) {
+                reader.ensureBundledAgent(destination) { ByteArrayInputStream(invalid) }
+            }
+            assertFalse(destination.exists())
+            assertFalse(temp.root.listFiles()!!.any { it.name.startsWith(".agent-") })
+        }
+    }
+    @Test fun cancelled_bundled_agent_copy_preserves_existing_file_and_removes_temporary_files() {
+        val destination = File(temp.root, "agent.bin").apply { writeBytes(byteArrayOf(9)) }
+        val reader = MtkFirmwarePackageReader(profile(), checkpoint = { throw InterruptedException() })
+        assertThrows(InterruptedException::class.java) {
+            reader.ensureBundledAgent(destination) { ByteArrayInputStream(agentBytes) }
+        }
+        assertArrayEquals(byteArrayOf(9), destination.readBytes())
+        assertFalse(temp.root.listFiles()!!.any { it.name.startsWith(".agent-") })
+    }
     @Test fun verified_names_and_backup_share_original_file() {
         val pkg = MtkFirmwarePackageReader(profile()).prepare(ByteArrayInputStream(zip(entries())), File(temp.root, "prepared"), agent())
         assertEquals(listOf("preloader", "preloader_backup", "logo"), pkg.images.map { it.partitionName })

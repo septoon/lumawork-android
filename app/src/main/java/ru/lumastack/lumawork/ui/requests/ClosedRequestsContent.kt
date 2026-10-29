@@ -13,13 +13,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DateRangePicker
@@ -29,6 +28,9 @@ import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.rememberDateRangePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -116,14 +119,18 @@ fun ClosedRequestsContent(
                     Text("${filtered.size} из ${prepared.size}", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = { showPeriodPicker = true }, enabled = prepared.any { it.day != null }) {
+                TextButton(onClick = { showPeriodPicker = true }, enabled = prepared.any { it.day != null },
+                    shape = RoundedCornerShape(50), colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = .10f)),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)) {
+                    Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(15.dp))
                     Text(when {
                         query.isNotBlank() -> "Весь архив"
                         chosenPeriod == null && period == ClosedRequestsPeriod(today.minusDays(1), today) -> "Сегодня и вчера"
                         period == null -> "Выбрать дату"
                         period.start == period.end -> period.start.format(PERIOD_FORMAT)
                         else -> "${period.start.format(PERIOD_FORMAT)}–${period.end.format(PERIOD_FORMAT)}"
-                    })
+                    }, Modifier.padding(start = 7.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -134,9 +141,8 @@ fun ClosedRequestsContent(
         if (filtered.isEmpty()) item(key = "closed-empty") {
             AppCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (isLoading && !hasArchive) CircularProgressIndicator()
-                    Text(when {
-                        isLoading && !hasArchive -> "Загружаем архив…"
+                    if (isLoading && !hasArchive) RequestLoadingTitle(true, text = "Обновляю список заявок")
+                    else Text(when {
                         !hasArchive && offline -> "Войдите в SimpleOne, чтобы загрузить архив."
                         query.isNotBlank() -> "Ничего не найдено"
                         else -> "За выбранную дату заявок нет"
@@ -151,13 +157,11 @@ fun ClosedRequestsContent(
         groups.forEach { (dayKey, group) ->
             stickyHeader(key = "closed-day-$dayKey") {
                 val day = group.first().day
-                Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(12.dp)) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(closedRequestsDayTitle(day, group.first().timeText, today), fontWeight = FontWeight.SemiBold)
-                        if (day != null) Text(day.format(DAY_CAPTION_FORMAT), style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(closedRequestsDayTitle(day, group.first().timeText, today), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    if (day != null) Text(day.format(DAY_CAPTION_FORMAT).replaceFirstChar { it.titlecase(Locale.forLanguageTag("ru-RU")) }, style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             items(group.chunked(columns), key = { "closed-record-${it.first().request.id}" }) { row ->
@@ -211,10 +215,10 @@ private fun ClosedRequestCard(
     RequestStatusCard(item.statusText, closed = true, onClick = onClick, compact = compact, modifier = modifier) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(request.incomingNumber.ifBlank { request.number }, fontWeight = FontWeight.SemiBold,
-                style = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Surface(shape = RoundedCornerShape(12.dp), color = closedTypeColor(item.typeText)) {
-                Text(item.typeText.ifBlank { "Тип не указан" }, Modifier.widthIn(max = if (compact) 110.dp else 150.dp).padding(horizontal = 10.dp, vertical = 6.dp),
-                    color = Color.White, style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
+                style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Surface(shape = RoundedCornerShape(50), color = closedTypeColor(item.typeText)) {
+                Text(item.typeText.ifBlank { "Тип не указан" }, Modifier.widthIn(max = if (compact) 110.dp else 150.dp).padding(horizontal = 10.dp, vertical = 4.dp),
+                    color = Color.White, style = MaterialTheme.typography.labelSmall)
             }
         }
         ClosedCardRow(item.timeTitle, item.timeText.ifBlank { "Информация отсутствует" })
@@ -222,15 +226,15 @@ private fun ClosedRequestCard(
             request.closedCustomer().takeIf { it.isNotBlank() }?.let { ClosedCardRow("Заказчик", it) }
             request.closedAddress().takeIf { it.isNotBlank() }?.let {
                 Column {
-                    Text("Адрес", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(normalizedClosedAddress(it), style = MaterialTheme.typography.bodyMedium)
+                    Text("Адрес", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(normalizedClosedAddress(it), style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 18.sp), fontWeight = FontWeight.SemiBold)
                 }
             }
         }
         request.closedTerminalId().takeIf { it.isNotBlank() }?.let { terminal ->
             RequestTerminalRow(terminal, onOpenTerminal)
         }
-        if (!isReturn) personalComment(request)
+        personalComment(request)
     }
 }
 
@@ -250,13 +254,13 @@ internal fun RequestStatusCard(
         contentColor = MaterialTheme.colorScheme.onSurface)
     val cardContent: @Composable ColumnScope.() -> Unit = {
         Surface(shape = shape, color = AppSurfaces.card.copy(alpha = 1f), border = BorderStroke(1.dp, AppSurfaces.border)) {
-            Column(Modifier.fillMaxWidth().padding(if (compact) 14.dp else 18.dp),
-                verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp), content = content)
+            Column(Modifier.fillMaxWidth().padding(if (compact) 12.dp else 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
         }
-        Text(status, Modifier.fillMaxWidth().heightIn(min = if (compactStatus) 24.dp else 32.dp)
-            .padding(horizontal = 14.dp, vertical = if (compactStatus) 2.dp else 6.dp),
+        Text(status, Modifier.fillMaxWidth().heightIn(min = if (compactStatus) 22.dp else 24.dp)
+            .padding(horizontal = 14.dp, vertical = 3.dp),
             textAlign = TextAlign.Center, color = requestStatusTextColor(status),
-            style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
     }
     if (onClick == null) {
         AppCard(modifier = modifier.fillMaxWidth(), shape = shape, border = border, colors = colors, content = cardContent)
@@ -266,11 +270,12 @@ internal fun RequestStatusCard(
 }
 
 @Composable
-private fun ClosedCardRow(title: String, value: String) {
+internal fun ClosedCardRow(title: String, value: String) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, Modifier.weight(1.4f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+        Text(value, Modifier.weight(1.4f), textAlign = TextAlign.End,
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 18.sp), fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -337,16 +342,16 @@ internal fun requestStatusColor(status: String, closed: Boolean): Color {
 internal fun RequestTerminalRow(terminal: String, onOpenTerminal: (String) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("ID терминала", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(terminal, modifier = Modifier.weight(1f).heightIn(min = 48.dp).then(Modifier.combinedClickable(
+        Text("ID терминала", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+        Text(terminal, modifier = Modifier.weight(1f).then(Modifier.combinedClickable(
             onClick = {
                 val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("ID терминала", terminal))
                 if (android.os.Build.VERSION.SDK_INT < 33) android.widget.Toast.makeText(context, "ID терминала скопирован", android.widget.Toast.LENGTH_SHORT).show()
             }, onClickLabel = "Скопировать ID терминала", onLongClick = { onOpenTerminal(terminal) },
-            onLongClickLabel = "Открыть складские заявки")).wrapContentHeight(Alignment.CenterVertically),
+            onLongClickLabel = "Открыть складские заявки")),
             textAlign = androidx.compose.ui.text.style.TextAlign.End, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 18.sp), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
     }
 }
 

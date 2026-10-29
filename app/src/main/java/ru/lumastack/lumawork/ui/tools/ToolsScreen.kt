@@ -69,9 +69,6 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
     val importFirmware = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) model.importFirmware(uri, importKind)
     }
-    val importMtkAgent = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) model.importMtkAgent(uri)
-    }
     val importMtkFirmware = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) model.importMtkFirmware(uri)
     }
@@ -139,7 +136,6 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
                         }
                         ToolsSection.P8 -> item {
                             MtkFirmwarePanel(mtk, state,
-                                onAgent = { importMtkAgent.launch(arrayOf("*/*")) },
                                 onArchive = { importMtkFirmware.launch(arrayOf("application/zip", "application/octet-stream")) },
                                 onFtp = model::openMtkArchivePicker, onInspect = model.mtk::inspect,
                                 onInspectAgent = model.mtk::inspectAgent,

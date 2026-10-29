@@ -1,5 +1,10 @@
 package ru.lumastack.lumawork.ui.requests
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,7 +14,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -38,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
@@ -62,6 +67,7 @@ import ru.lumastack.lumawork.domain.requests.canonicalClientCommentPhone
 import ru.lumastack.lumawork.domain.requests.clientCommentAddress
 import ru.lumastack.lumawork.domain.requests.clientCommentEditorDraft
 import ru.lumastack.lumawork.domain.requests.clientCommentTIN
+import ru.lumastack.lumawork.domain.requests.clientCommentPhoneForCopy
 import ru.lumastack.lumawork.domain.requests.clientCommentTargets
 import ru.lumastack.lumawork.domain.requests.clientCommentTerminalID
 import ru.lumastack.lumawork.domain.requests.clientCommentTerminals
@@ -136,8 +142,7 @@ class ClientPersonalCommentsController internal constructor(
     fun commentFor(request: SimpleOneRequest): ClientPersonalComment? = if (!request.supportsClientPersonalComments()) null
         else matching.comment(request.clientCommentTIN(), request.clientCommentAddress(), request.clientCommentTerminalID())
 
-    fun canEdit(request: SimpleOneRequest): Boolean = !offline && request.supportsClientPersonalComments() &&
-        (request.clientCommentTIN().isNotEmpty() || commentFor(request) != null)
+    fun canEdit(request: SimpleOneRequest): Boolean = !offline && request.supportsClientPersonalComments()
 
     /** null request is the top menu's blank «Комментарий» action. */
     fun openEditor(request: SimpleOneRequest? = null) {
@@ -351,23 +356,41 @@ private fun CommentCheckRow(title: String, selected: Boolean, enabled: Boolean, 
 
 @Composable
 fun ClientPersonalCommentBlock(comment: ClientPersonalComment, modifier: Modifier = Modifier, onEdit: (() -> Unit)? = null) {
+    val context = LocalContext.current
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .12f),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .22f))) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Личный комментарий", style = MaterialTheme.typography.titleSmall, fontSize = 15.sp,
+                Text("Личный комментарий", style = MaterialTheme.typography.bodyMedium, fontSize = 14.sp, lineHeight = 18.sp,
                     fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 if (onEdit != null) IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Edit, "Редактировать комментарий", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primary.copy(alpha = .18f)) {
+                        Icon(Icons.Default.Edit, "Редактировать комментарий", Modifier.padding(7.dp).size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
             SelectionContainer {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     clientPersonalCommentRows(comment).forEach { (title, value) ->
+                        val copyValue = when (title) {
+                            "Контактное лицо" -> comment.contactPerson
+                            "Телефон" -> clientCommentPhoneForCopy(comment.phone)
+                            "Почта" -> comment.email
+                            else -> null
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                            Text(title, Modifier.width(98.dp), style = MaterialTheme.typography.bodySmall, fontSize = 12.sp,
+                            Text(title, Modifier.weight(.4f), style = MaterialTheme.typography.bodySmall, fontSize = 11.sp, lineHeight = 16.sp,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(value, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+                            Text(value, Modifier.weight(.6f).then(if (!copyValue.isNullOrBlank()) Modifier.clickable(onClickLabel = "Скопировать $title") {
+                                (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                                    .setPrimaryClip(ClipData.newPlainText(title, copyValue))
+                                if (Build.VERSION.SDK_INT < 33) Toast.makeText(context, when (title) {
+                                    "Контактное лицо" -> "Имя скопировано"
+                                    "Телефон" -> "Телефон скопирован"
+                                    else -> "Почта скопирована"
+                                }, Toast.LENGTH_SHORT).show()
+                            } else Modifier), style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 18.sp), fontWeight = FontWeight.Medium,
                                 color = if (title == "Почта") androidx.compose.ui.graphics.Color(0xFF009DFF) else MaterialTheme.colorScheme.onSurface)
                         }
                     }
