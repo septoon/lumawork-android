@@ -18,9 +18,9 @@ import ru.lumastack.lumawork.domain.simpleone.*
 class ClosedRequestsArchiveTest {
     @get:Rule val temporary = TemporaryFolder()
     @Test fun `incremental scan includes entire boundary second and stops before old pages`() = runBlocking {
-        var calls = 0
+        val calls = java.util.concurrent.atomic.AtomicInteger()
         val client = OkHttpClient.Builder().addInterceptor { chain ->
-            calls++
+            calls.incrementAndGet()
             if (chain.request().url.encodedPath.contains("list-cell-value")) {
                 val version = if (chain.request().url.pathSegments.last() == "old") "2026-10-27 12:00:00" else "2026-10-28 12:00:00"
                 return@addInterceptor Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
@@ -37,7 +37,7 @@ class ClosedRequestsArchiveTest {
         val records = OkHttpSimpleOneApi("https://sd.test/v1", client, closedArchiveCondition = { "wide" })
             .closedRequestsSince("user", "auth", "2026-10-28 12:00:00")
         assertEquals(21, records.size)
-        assertEquals(26, calls) // two pages + 22 cells, followed by the head page and cell
+        assertEquals(26, calls.get()) // two pages + 22 cells, followed by the head page and cell
         assertTrue(records.none { it.sysId == "old" })
     }
 

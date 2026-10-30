@@ -109,7 +109,7 @@ class ClientPersonalCommentMatchingIndex(comments: List<ClientPersonalComment>) 
     }
 }
 
-fun SimpleOneRequest.supportsClientPersonalComments(): Boolean = true
+fun SimpleOneRequest.supportsClientPersonalComments(): Boolean = !isClosedReturnEquipment(closedRequestType())
 
 fun SimpleOneRequest.clientCommentTIN(): String {
     for (label in listOf("ИНН ТСП", "ИНН", "ИНН клиента")) {
@@ -133,6 +133,34 @@ private fun SimpleOneRequest.clientCommentField(vararg labels: String): String =
 
 fun SimpleOneRequest.clientCommentAddress(): String = address.ifBlank { clientCommentField("Адрес установки терминала", "Адрес ТСП", "Адрес") }.trim()
 fun SimpleOneRequest.clientCommentTerminalID(): String = terminalId.ifBlank { clientCommentField("ID терминал", "ID терминала", "ID терминала (TID)", "TID") }.trim()
+
+/** Build once for an immutable request snapshot; each record's TIN is parsed once. */
+class ClientPersonalCommentOptionsIndex(records: List<SimpleOneRequest>) {
+    private val targetsByTIN = mutableMapOf<String, MutableList<ClientPersonalCommentTarget>>()
+    private val terminalsByTIN = mutableMapOf<String, MutableList<ClientPersonalCommentTerminalOption>>()
+
+    init {
+        for (record in records) {
+            if (!record.supportsClientPersonalComments()) continue
+            val tin = record.clientCommentTIN()
+            if (tin.isEmpty()) continue
+            val address = record.clientCommentAddress()
+            if (address.isNotBlank()) targetsByTIN.getOrPut(tin, ::mutableListOf).add(ClientPersonalCommentTarget(address))
+            val terminal = record.clientCommentTerminalID()
+            if (terminal.isNotBlank()) terminalsByTIN.getOrPut(tin, ::mutableListOf).add(ClientPersonalCommentTerminalOption(terminal, address))
+        }
+    }
+
+    fun targets(tin: String, current: ClientPersonalCommentTarget? = null): List<ClientPersonalCommentTarget> =
+        (listOfNotNull(current) + targetsByTIN[normalizedClientCommentTIN(tin)].orEmpty())
+            .distinctBy { it.key }.sortedBy { normalizedClientCommentScope(it.displayText) }
+
+    fun terminals(tin: String, currentID: String = "", currentAddress: String = ""): List<ClientPersonalCommentTerminalOption> =
+        (listOf(ClientPersonalCommentTerminalOption(currentID.trim(), currentAddress)) + terminalsByTIN[normalizedClientCommentTIN(tin)].orEmpty())
+            .filter { it.key.isNotEmpty() }.groupBy { it.key }.values
+            .map { group -> group.firstOrNull { it.address.isNotBlank() } ?: group.first() }
+            .sortedWith(compareBy<ClientPersonalCommentTerminalOption> { it.terminalID.toLongOrNull() ?: Long.MAX_VALUE }.thenBy { it.key })
+}
 
 fun clientCommentTargets(records: List<SimpleOneRequest>, tin: String, currentTarget: ClientPersonalCommentTarget? = null): List<ClientPersonalCommentTarget> {
     val normalized = normalizedClientCommentTIN(tin)

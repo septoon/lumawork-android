@@ -18,6 +18,95 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class CoordinationGroupClosedRequestsRepositoryTest {
+    @Test fun `context activation and online resume wait for explicit refresh`() = runTest {
+        val api = ArchiveApi { _, _, _ -> GroupClosedRequestsPage(listOf(record("manual")), 1, false) }
+        val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), ArchiveCache(), this,
+            preparationDispatcher = StandardTestDispatcher(testScheduler))
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, refreshOnActivate = false)
+        advanceUntilIdle()
+        assertTrue(repository.state.value.didLoadCache)
+        assertFalse(repository.state.value.isLoading)
+        assertTrue(api.calls.isEmpty())
+
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta,
+            startOffline = true, refreshOnActivate = false)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, refreshOnActivate = false)
+        advanceUntilIdle()
+        assertTrue(api.calls.isEmpty())
+
+        repository.refresh()
+        advanceUntilIdle()
+        assertEquals("manual", repository.state.value.records.single().id)
+        assertEquals(1, api.calls.size)
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, refreshOnActivate = false)
+        advanceUntilIdle()
+        assertEquals(1, api.calls.size)
+    }
+
+    @Test fun `context activation restores partial checkpoint without resuming until explicit refresh`() = runTest {
+        val cache = ArchiveCache()
+        val session = ArchiveSession()
+        val initial = CoordinationGroupClosedRequestsRepository(ArchiveApi { page, _, _ ->
+            if (page == 1) GroupClosedRequestsPage(listOf(record("first")), hasMore = true)
+            else throw SimpleOneFailure.InvalidResponse
+        }, session, cache, this, preparationDispatcher = StandardTestDispatcher(testScheduler))
+        initial.activate("owner", "simple", true, CoordinationRegion.Alushta)
+        advanceUntilIdle()
+        val api = ArchiveApi { _, _, _ -> GroupClosedRequestsPage(listOf(record("second")), hasMore = false) }
+        val restored = CoordinationGroupClosedRequestsRepository(api, session, cache, this,
+            preparationDispatcher = StandardTestDispatcher(testScheduler))
+        restored.activate("owner", "simple", true, CoordinationRegion.Alushta, refreshOnActivate = false)
+        advanceUntilIdle()
+        assertTrue(api.calls.isEmpty())
+        assertEquals("first", restored.state.value.preparedItems.single().request.id)
+        assertEquals(1, restored.state.value.loadedCount)
+        restored.refresh()
+        advanceUntilIdle()
+        assertEquals(2, api.calls.single().first)
+        assertEquals(setOf("first", "second"), restored.state.value.records.map { it.id }.toSet())
+    }
+
+    @Test fun `same context activation preserves manually started refresh and page checkpoints`() = runTest {
+        val response = CompletableDeferred<GroupClosedRequestsPage>()
+        val api = ArchiveApi { page, _, _ ->
+            if (page == 1) response.await()
+            else GroupClosedRequestsPage(listOf(record("second")), hasMore = false)
+        }
+        val cache = ArchiveCache()
+        val repository = CoordinationGroupClosedRequestsRepository(api, ArchiveSession(), cache, this,
+            preparationDispatcher = StandardTestDispatcher(testScheduler))
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, refreshOnActivate = false)
+        repository.refresh()
+        runCurrent()
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, refreshOnActivate = false)
+        assertTrue(repository.state.value.isLoading)
+        response.complete(GroupClosedRequestsPage(listOf(record("first")), hasMore = true))
+        advanceUntilIdle()
+        assertEquals(listOf(1, 2), api.calls.map { it.first })
+        assertEquals(setOf("first", "second"), repository.state.value.records.map { it.id }.toSet())
+        assertEquals(2, cache.writes.size)
+    }
+
+    @Test fun `context activation cancels stale session without refreshing replacement session`() = runTest {
+        val response = CompletableDeferred<GroupClosedRequestsPage>()
+        val api = ArchiveApi { _, _, _ -> kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { response.await() } }
+        val session = ArchiveSession()
+        val cache = ArchiveCache()
+        val repository = CoordinationGroupClosedRequestsRepository(api, session, cache, this,
+            preparationDispatcher = StandardTestDispatcher(testScheduler))
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, refreshOnActivate = false)
+        repository.refresh()
+        runCurrent()
+        session.auth = "replacement-auth"
+        repository.activate("owner", "simple", true, CoordinationRegion.Alushta, refreshOnActivate = false)
+        response.complete(GroupClosedRequestsPage(listOf(record("stale")), 1, false))
+        advanceUntilIdle()
+        assertEquals(1, api.calls.size)
+        assertTrue(repository.state.value.records.isEmpty())
+        assertTrue(cache.writes.isEmpty())
+        assertFalse(repository.state.value.isLoading)
+    }
+
     @Test fun `switching profile city clears data uses new query and keeps separate offline caches`() = runTest {
         var city = "alushta"
         val api = ArchiveApi { _, _, _ -> GroupClosedRequestsPage(listOf(record(city)), 1, false) }

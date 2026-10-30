@@ -40,11 +40,101 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.backpack.BackpackItem
 
 class SimpleOneRepositoryTest {
+    @Test fun `successful empty XLSX baseline without heads does not export again on manual refresh`() = runBlocking {
+        val cache = FakeSimpleOneSupplementalCache()
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val api = FakeSimpleOneApi(exportedXlsx = ClosedRequestsXlsxExport.create(emptyList()))
+        val repository = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache)
+        val first = repository.refreshClosedArchive("owner")
+        assertTrue(first.isReady)
+        assertTrue(first.requests.isEmpty())
+        assertNull(first.wideCursor)
+        assertTrue(first.lastWideSyncAtEpochMillis != null)
+        repository.refreshClosedArchive("owner")
+        assertEquals(1, api.exportCalls)
+        assertEquals(1, api.syncCalls)
+    }
+
+    @Test fun `successful nonempty legacy XLSX baseline with unavailable head is not exported again`() = runBlocking {
+        val monthly = ClosedRequestsSyncCursor("2026-10-28 12:00:00", "request-1")
+        val record = request().copy(state = "Закрыта", requestType = "returnEquip", registeredAt = "2026-10-27 10:00:00",
+            sysUpdatedAt = "2026-10-29 12:01:00")
+        val cache = FakeSimpleOneSupplementalCache().apply {
+            archives["owner"] = ClosedSimpleOneArchive(listOf(record), isComplete = true, queryRevision = 2,
+                syncRevision = 1, syncUserId = "simple-user", monthlyCursor = monthly)
+        }
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val api = FakeSimpleOneApi(closed = listOf(record), exportedXlsx = ClosedRequestsXlsxExport.create(listOf(record)),
+            beforeHead = { throw SimpleOneFailure.Http(500, "Head unavailable") })
+        val first = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache).refreshClosedArchive("owner")
+        assertEquals(1, api.exportCalls)
+        assertNull(first.wideCursor)
+        assertTrue(first.lastWideSyncAtEpochMillis != null)
+        SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache).refreshClosedArchive("owner")
+        assertEquals(1, api.exportCalls)
+        assertEquals(1, api.syncCalls)
+        assertNull(api.lastUpdatedSince)
+    }
+
+    @Test fun `legacy ready archive without requested wide cursor establishes one XLSX baseline before incremental refresh`() = runBlocking {
+        val monthly = ClosedRequestsSyncCursor("2026-10-28 12:00:00", "request-1")
+        val head = ClosedRequestsSyncCursor("2026-10-29 12:00:00", "request-2")
+        val existing = request().copy(state = "Закрыта", requestType = "returnEquip", registeredAt = "2026-10-27 10:00:00",
+            contactPhone = "+79780000000", tableFields = mapOf("Локальная колонка" to "000123", "ИНН ТСП" to "1234567890"))
+        val historical = existing.copy(sysId = "historic", number = "REQ-HISTORY")
+        val old = ClosedSimpleOneArchive(listOf(existing, historical), isComplete = true, queryRevision = 2,
+            syncRevision = 1, syncUserId = "simple-user", monthlyCursor = monthly)
+        val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = old }
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val fresh = existing.copy(contactPhone = "", engineerComment = "Новый комментарий", tableFields = emptyMap(),
+            sysUpdatedAt = "2026-10-29 12:01:00")
+        val new = fresh.copy(sysId = "request-2", number = "REQ2")
+        lateinit var api: FakeSimpleOneApi
+        api = FakeSimpleOneApi(closed = listOf(fresh, new), exportedXlsx = ClosedRequestsXlsxExport.create(listOf(fresh, new)),
+            closedHeads = mapOf(ClosedRequestsSyncScope.Monthly to monthly, ClosedRequestsSyncScope.All to head),
+            beforeExport = {
+                assertEquals(ClosedRequestsSyncScope.entries.toSet(), api.headCalls.toSet())
+                assertEquals(old, cache.archives["owner"])
+            })
+        val first = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache).refreshClosedArchive("owner")
+        assertEquals(1, api.exportCalls)
+        assertEquals(0, api.syncCalls + api.archiveCalls + api.detailCalls)
+        assertEquals(head, first.wideCursor)
+        assertEquals(setOf("REQ1", "REQ2", "REQ-HISTORY"), first.requests.map { it.number }.toSet())
+        val repaired = first.requests.single { it.number == "REQ1" }
+        assertEquals("Новый комментарий", repaired.engineerComment)
+        assertEquals("+79780000000", repaired.contactPhone)
+        assertEquals("000123", repaired.tableFields["Локальная колонка"])
+        assertEquals("1234567890", repaired.tableFields["ИНН ТСП"])
+        SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache).refreshClosedArchive("owner")
+        assertEquals("2026-10-29 12:00:00", api.lastUpdatedSince)
+        assertEquals(1, api.exportCalls)
+        assertEquals(1, api.syncCalls)
+    }
+
+    @Test fun `failed legacy baseline cannot save captured head over unchanged cached rows`() = runBlocking {
+        val monthly = ClosedRequestsSyncCursor("2026-10-28 12:00:00", "request-1")
+        val head = ClosedRequestsSyncCursor("2026-10-29 12:00:00", "request-2")
+        val old = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2,
+            syncRevision = 1, syncUserId = "simple-user", monthlyCursor = monthly)
+        val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = old }
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val api = FakeSimpleOneApi(error = SimpleOneFailure.Http(500, "Unavailable"),
+            closedHeads = mapOf(ClosedRequestsSyncScope.Monthly to monthly, ClosedRequestsSyncScope.All to head))
+        val snapshot = SimpleOneSnapshot(currentUser = SimpleOneUser("simple-user", "engineer", "", ""),
+            sessionFingerprint = simpleOneSessionFingerprint(sessions.read("owner")!!))
+        assertTrue(runCatching { SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache)
+            .refreshClosedArchive("owner", snapshot) }.isFailure)
+        assertEquals(1, api.exportCalls)
+        assertEquals(0, api.syncCalls)
+        assertEquals(old, cache.archives["owner"])
+    }
+
     @Test fun `a new TIN in description replaces the old direct TIN`() = runBlocking {
         val oldRecord = request().copy(tableFields = mapOf("ИНН ТСП" to "1234567890"))
         val cache = FakeSimpleOneSupplementalCache().apply {
             archives["owner"] = ClosedSimpleOneArchive(listOf(oldRecord), isComplete = true, queryRevision = 2,
-                syncRevision = 1, syncUserId = "simple-user")
+                syncRevision = 1, syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"))
         }
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
         val fresh = request().copy(description = "Адрес: Алушта<br>ИНН ТСП: 9876543210<br>Контакт: Иван")
@@ -67,7 +157,7 @@ class SimpleOneRepositoryTest {
 
     @Test fun `a sync cannot overwrite a saved valid merchant TIN with an invalid value`() = runBlocking {
         val oldRecord = request().copy(tableFields = mapOf("ИНН ТСП" to "1234567890"))
-        val old = ClosedSimpleOneArchive(listOf(oldRecord), isComplete = true, queryRevision = 2, syncRevision = 1, syncUserId = "simple-user")
+        val old = ClosedSimpleOneArchive(listOf(oldRecord), isComplete = true, queryRevision = 2, syncRevision = 1, syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"))
         val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = old }
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
         val api = FakeSimpleOneApi(closed = listOf(request().copy(tableFields = mapOf("ИНН ТСП" to "123..."))))
@@ -93,7 +183,7 @@ class SimpleOneRepositoryTest {
         val recent = request().copy(requestType = "returnEquip", registeredAt = "2026-10-28 10:00:00", sysUpdatedAt = "2026-10-28 12:00:00")
         val wide = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "historic")
         val archive = ClosedSimpleOneArchive(listOf(old), isComplete = true, queryRevision = 2,
-            syncRevision = 1, syncUserId = "simple-user", wideCursor = wide, lastWideSyncAtEpochMillis = 100)
+            syncRevision = 1, syncUserId = "simple-user", wideCursor = wide, monthlyCursor = wide, lastWideSyncAtEpochMillis = 100)
         val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = archive }
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
         val result = SimpleOneRepository(FakeSimpleOneApi(closed = listOf(recent)), sessions, FakeSimpleOneCache(), cache)
@@ -121,7 +211,7 @@ class SimpleOneRepositoryTest {
 
     @Test fun `sync identity conflict cannot replace a saved request or advance cursor`() = runBlocking {
         val old = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2,
-            syncRevision = 1, syncUserId = "simple-user", syncRecords = mapOf("request-1" to ClosedRequestsSyncRecord("REQ1", "2026-10-27 12:00:00")))
+            syncRevision = 1, syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"), syncRecords = mapOf("request-1" to ClosedRequestsSyncRecord("REQ1", "2026-10-27 12:00:00")))
         val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = old }
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
         val api = FakeSimpleOneApi(closed = listOf(request().copy(sysId = "wrong-id", sysUpdatedAt = "2026-10-28 12:00:00")))
@@ -133,7 +223,7 @@ class SimpleOneRepositoryTest {
         val api = FakeSimpleOneApi(closed = listOf(request().copy(sysUpdatedAt = "2026-10-28 12:00:00")),
             closedDetail = { it.copy(requestType = "returnEquip", registeredAt = "2026-10-27 10:00:00", sysUpdatedAt = "") })
         val cache = FakeSimpleOneSupplementalCache().apply {
-            archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2)
+            archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2, wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"))
         }
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
         val repo = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache)
@@ -146,7 +236,7 @@ class SimpleOneRepositoryTest {
         val record = request().copy(requestType = "returnEquip", registeredAt = "2026-10-27 10:00:00", sysUpdatedAt = "2026-10-28 12:00:00")
         val cache = FakeSimpleOneSupplementalCache().apply {
             archives["owner"] = ClosedSimpleOneArchive(listOf(record), isComplete = true, queryRevision = 2,
-                syncRevision = 1, syncUserId = "simple-user")
+                syncRevision = 1, syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"))
         }
         val api = FakeSimpleOneApi(closed = listOf(record))
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
@@ -160,7 +250,7 @@ class SimpleOneRepositoryTest {
 
     @Test fun `failed incremental hydration does not advance cursor or replace archive`() = runBlocking {
         val old = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2,
-            syncUpdatedAt = "2026-10-27 12:00:00", syncUserId = "simple-user")
+            syncUpdatedAt = "2026-10-27 12:00:00", syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"))
         val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = old }
         val api = FakeSimpleOneApi(closed = listOf(request().copy(sysUpdatedAt = "2026-10-28 12:00:00")),
             closedDetail = { throw SimpleOneFailure.InvalidResponse })
@@ -176,7 +266,7 @@ class SimpleOneRepositoryTest {
         val api = FakeSimpleOneApi(closed = listOf(changed))
         val cache = FakeSimpleOneSupplementalCache().apply {
             archives["owner"] = ClosedSimpleOneArchive(listOf(old, changed.copy(engineerComment = "Старый комментарий")), isComplete = true, queryRevision = 2,
-                syncRevision = 1, syncUserId = "simple-user")
+                syncRevision = 1, syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"))
         }
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
         val result = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache).refreshClosedArchive("owner")
@@ -325,15 +415,18 @@ class SimpleOneRepositoryTest {
     @Test
     fun `fresh detail cache avoids SimpleOne request`() = runBlocking {
         val api = FakeSimpleOneApi()
+        val session = StoredSimpleOneSession("owner-1", "auth", "engineer")
+        val sessions = FakeSimpleOneSessionStore().apply { save(session) }
         val supplemental = FakeSimpleOneSupplementalCache().apply {
             details["owner-1" to "request-1"] = SimpleOneDetailCacheEntry(
                 request().copy(description = "Сохранённые детали"),
                 cachedAtEpochMillis = 1_000L,
+                sessionFingerprint = simpleOneSessionFingerprint(session),
             )
         }
         val repository = SimpleOneRepository(
             api = api,
-            sessionStore = FakeSimpleOneSessionStore(),
+            sessionStore = sessions,
             cache = FakeSimpleOneCache(),
             supplementalCache = supplemental,
             nowEpochMillis = { 2_000L },
@@ -348,7 +441,7 @@ class SimpleOneRepositoryTest {
     @Test fun `coordination detail cache rejects changed and unknown list versions`() = runBlocking {
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner-1", "auth", "user")) }
         val supplemental = FakeSimpleOneSupplementalCache().apply {
-            details["owner-1" to "request-1"] = SimpleOneDetailCacheEntry(request().copy(sysUpdatedAt = "v1", description = "old"), 1_000L)
+            details["owner-1" to "request-1"] = SimpleOneDetailCacheEntry(request().copy(sysUpdatedAt = "v1", description = "old"), 1_000L, simpleOneSessionFingerprint(sessions.read("owner-1")!!))
         }
         val api = FakeSimpleOneApi()
         val repository = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), supplemental) { 2_000L }
@@ -362,7 +455,7 @@ class SimpleOneRepositoryTest {
     @Test fun `coordination network failure cannot replace current list version with stale cached detail`() = runBlocking {
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner-1", "auth", "user")) }
         val supplemental = FakeSimpleOneSupplementalCache().apply {
-            details["owner-1" to "request-1"] = SimpleOneDetailCacheEntry(request().copy(sysUpdatedAt = "v1"), 1_000L)
+            details["owner-1" to "request-1"] = SimpleOneDetailCacheEntry(request().copy(sysUpdatedAt = "v1"), 1_000L, simpleOneSessionFingerprint(sessions.read("owner-1")!!))
         }
         val repository = SimpleOneRepository(FakeSimpleOneApi(error = SimpleOneFailure.Http(500, "error")), sessions,
             FakeSimpleOneCache(), supplemental) { 2_000L }
@@ -377,6 +470,7 @@ class SimpleOneRepositoryTest {
             details["owner-1" to "request-1"] = SimpleOneDetailCacheEntry(
                 request().copy(description = "Старая копия"),
                 cachedAtEpochMillis = 0L,
+                sessionFingerprint = simpleOneSessionFingerprint(sessionStore.read("owner-1")!!),
             )
         }
         val repository = SimpleOneRepository(
@@ -476,10 +570,15 @@ private class FakeSimpleOneApi(
     private val error: SimpleOneFailure? = null,
     private val closed: List<SimpleOneRequest> = emptyList(),
     private val exportedXlsx: ByteArray? = null,
+    private val closedHeads: Map<ClosedRequestsSyncScope, ClosedRequestsSyncCursor> = emptyMap(),
+    private val beforeHead: suspend () -> Unit = {},
     private val beforeExport: suspend () -> Unit = {},
     private val beforeLogin: suspend () -> Unit = {},
     private val beforeHistory: suspend () -> Unit = {},
     private val beforeSync: suspend () -> Unit = {},
+    private val beforeActive: suspend () -> Unit = {},
+    private val active: () -> List<SimpleOneRequest> = { listOf(request()) },
+    private val activeDetail: suspend (SimpleOneRequest) -> SimpleOneRequest = { it },
     private val closedDetail: suspend (SimpleOneRequest) -> SimpleOneRequest = { it.copy(
         requestType = it.requestType.ifBlank { "install" }, resolvedAt = it.resolvedAt.ifBlank { "2026-10-27 10:00:00" },
         closureCode = it.closureCode.ifBlank { "Решено с выездом" },
@@ -491,10 +590,19 @@ private class FakeSimpleOneApi(
     var archiveCalls = 0
     var exportCalls = 0
     var lastUpdatedSince: String? = null
+    var syncCalls = 0
+    val headCalls = mutableListOf<ClosedRequestsSyncScope>()
+
+    override suspend fun closedSyncHead(userId: String, authKey: String, scope: ClosedRequestsSyncScope): ClosedRequestsSyncCursor? {
+        headCalls += scope
+        beforeHead()
+        return closedHeads[scope]
+    }
 
     override suspend fun closedSyncChanges(userId: String, authKey: String, scope: ClosedRequestsSyncScope,
         since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>, onProgress: (String) -> Unit): ClosedRequestsSyncBatch {
         beforeSync()
+        syncCalls++
         lastUpdatedSince = since?.updatedAt
         val listed = closedRequests(userId, authKey)
         val changes = listed.filter { it.sysUpdatedAt.isBlank() || knownVersions[it.sysId] != it.sysUpdatedAt }.map { listedRecord ->
@@ -524,8 +632,9 @@ private class FakeSimpleOneApi(
 
     override suspend fun activeRequests(userId: String, authKey: String): List<SimpleOneRequest> {
         activeCalls++
+        beforeActive()
         error?.let { throw it }
-        return listOf(request())
+        return active()
     }
 
     override suspend fun closedRequests(userId: String, authKey: String): List<SimpleOneRequest> {
@@ -557,7 +666,7 @@ private class FakeSimpleOneApi(
     override suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest {
         detailCalls += 1
         error?.let { throw it }
-        return if (request.source == ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource.Closed) closedDetail(request) else request
+        return if (request.source == ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource.Closed) closedDetail(request) else activeDetail(request)
     }
 
     override suspend fun coordinationRequests(
@@ -634,7 +743,7 @@ class RequestsBootstrapTest {
     private fun model(repository: SimpleOneRepository, offline: Boolean = false) =
         SimpleOneViewModel(repository, "owner", offline).also(models::add)
     private suspend fun settled(model: SimpleOneViewModel, complete: (SimpleOneUiState) -> Boolean = { true }) = withContext(Dispatchers.Default) {
-        withTimeout(5_000) { model.state.first { !it.isInitializing && !it.isLoading && !it.isClosedLoading && complete(it) } }
+        withTimeout(5_000) { model.state.first { !it.isInitializing && !it.isRestoringClosedArchive && !it.isRefreshingActive && !it.isClosedLoading && complete(it) } }
     }
     private fun session() = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "key", "engineer")) }
 
@@ -645,7 +754,7 @@ class RequestsBootstrapTest {
             val api = FakeSimpleOneApi(beforeSync = { started.complete(Unit); awaitCancellation() })
             val cache = FakeSimpleOneSupplementalCache().apply {
                 archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2,
-                    syncRevision = 1, syncUserId = "simple-user")
+                    syncRevision = 1, syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"))
             }
             val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
             settled(model)
@@ -665,7 +774,7 @@ class RequestsBootstrapTest {
             val directory = java.nio.file.Files.createTempDirectory("closed-refresh-tests").toFile()
             try {
                 val cache = FileSimpleOneSupplementalCache(directory, kotlinx.serialization.json.Json)
-                cache.saveClosedArchive("owner", ClosedSimpleOneArchive(listOf(record), isComplete = true, queryRevision = 2))
+                cache.saveClosedArchive("owner", ClosedSimpleOneArchive(listOf(record), isComplete = true, queryRevision = 2, wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1")))
                 val model = model(SimpleOneRepository(FakeSimpleOneApi(closed = listOf(record)), session(), FakeSimpleOneCache(), cache))
                 settled(model)
                 val items = model.state.value.closedArchiveItems
@@ -697,12 +806,16 @@ class RequestsBootstrapTest {
             val model = model(SimpleOneRepository(api, storedSession, activeCache, archiveCache))
             archiveReadStarted.await()
 
-            assertTrue(model.state.value.isInitializing)
+            assertFalse(model.state.value.isInitializing)
             assertTrue(model.state.value.isAuthorized)
             assertEquals("engineer", model.state.value.username)
             assertEquals(snapshot, model.state.value.snapshot)
             assertEquals(0, api.currentUserCalls + api.activeCalls + api.archiveCalls + api.exportCalls)
 
+            model.refreshActiveRequests()
+            withContext(Dispatchers.Default) { withTimeout(5_000) { model.state.first { !it.isRefreshingActive && api.activeCalls == 1 } } }
+            assertTrue(model.state.value.isRestoringClosedArchive)
+            assertEquals(0, api.archiveCalls + api.exportCalls)
             archiveResult.complete(null)
             settled(model)
             assertTrue(model.state.value.isAuthorized)
@@ -794,14 +907,19 @@ class RequestsBootstrapTest {
             val archive = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2)
             val cache = FakeSimpleOneSupplementalCache().apply { archives["owner"] = archive }
             val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
-            settled(model) { it.errorMessage != null }
+            settled(model)
             val prepared = model.state.value.closedArchiveItems
             val analytics = model.state.value.closedAnalytics
             assertEquals(1, prepared.size)
             model.refreshClosedRequests()
             assertTrue(model.state.value.isClosedLoading)
             org.junit.Assert.assertSame(prepared, model.state.value.closedArchiveItems)
+            settled(model) { it.closedErrorMessage != null }
+            assertNull(model.state.value.errorMessage)
+            val closedError = model.state.value.closedErrorMessage
+            model.refreshActiveRequests()
             settled(model) { it.errorMessage != null }
+            assertEquals(closedError, model.state.value.closedErrorMessage)
             org.junit.Assert.assertSame(prepared, model.state.value.closedArchiveItems)
             assertEquals(archive, model.state.value.closedArchive)
             org.junit.Assert.assertSame(analytics, model.state.value.closedAnalytics)
@@ -866,7 +984,7 @@ class RequestsBootstrapTest {
                 archives["owner"] = ClosedSimpleOneArchive(listOf(done), isComplete = true, queryRevision = 2)
             }
             val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
-            settled(model) { api.activeCalls > 0 }
+            settled(model)
             val activeCalls = api.activeCalls
             model.refreshAnalytics()
             settled(model) { api.archiveCalls > 0 }
@@ -875,24 +993,124 @@ class RequestsBootstrapTest {
         } finally { models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }; models.clear(); Dispatchers.resetMain() }
     }
 
-    @Test fun `only explicit click downloads archive then unlocks and refreshes active`() = runTest {
+    @Test fun `explicit initial load refreshes active without downloading closed baseline`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val api = FakeSimpleOneApi(closed = listOf(request()))
             val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), FakeSimpleOneSupplementalCache()))
             settled(model)
             model.initialLoad(); model.initialLoad()
-            assertTrue(model.state.value.isClosedLoading)
-            settled(model) { it.initialArchiveReady && it.activeRequests.isNotEmpty() }
+            assertTrue(model.state.value.isLoading)
+            settled(model) { it.activeRequests.isNotEmpty() }
+            assertEquals(0, api.exportCalls + api.archiveCalls)
+            assertEquals(1, api.activeCalls)
+            assertFalse(model.state.value.initialArchiveReady)
+            model.updateMode(ru.lumastack.lumawork.domain.simpleone.RequestsMode.Closed)
+            assertEquals(ru.lumastack.lumawork.domain.simpleone.RequestsMode.Closed, model.state.value.mode)
+            model.refreshClosedRequests()
+            settled(model) { it.initialArchiveReady }
             assertEquals(1, api.exportCalls)
             assertEquals(1, api.archiveCalls)
             assertEquals(1, api.activeCalls)
-            assertTrue(model.state.value.initialArchiveReady)
-            assertEquals(1, model.state.value.closedArchive.requests.size)
         } finally { models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }; models.clear(); Dispatchers.resetMain() }
     }
 
-    @Test fun `login starts only after button and archive failure keeps the gate`() = runTest {
+    @Test fun `late opened old details cannot replace newly refreshed card or selection`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val release = CompletableDeferred<Unit>()
+        try {
+            val started = CompletableDeferred<Unit>()
+            val old = request().copy(sysUpdatedAt = "2026-10-28 12:00:00", description = "old list")
+            val fresh = old.copy(sysUpdatedAt = "2026-10-29 12:00:00", description = "fresh list")
+            val api = FakeSimpleOneApi(active = { listOf(fresh) }, activeDetail = {
+                if (it.sysUpdatedAt == old.sysUpdatedAt) { started.complete(Unit); release.await(); it.copy(description = "old details") }
+                else it.copy(description = "fresh details")
+            })
+            val sessions = session()
+            val snapshot = SimpleOneSnapshot(currentUser = SimpleOneUser("simple-user", "engineer", "Иван", "Инженеров"),
+                activeRequests = listOf(old), sessionFingerprint = simpleOneSessionFingerprint(sessions.read("owner")!!))
+            val model = model(SimpleOneRepository(api, sessions, FakeSimpleOneCache().apply { values["owner"] = snapshot }))
+            settled(model)
+            model.openRequest(old)
+            started.await()
+            model.refreshActiveRequests()
+            settled(model) { it.activeRequests.single().description == "fresh details" }
+            release.complete(Unit)
+            withContext(Dispatchers.Default) { withTimeout(5_000) { model.state.first { !it.isDetailLoading } } }
+            assertEquals("fresh details", model.state.value.activeRequests.single().description)
+            assertEquals("fresh details", model.state.value.selectedRequest?.description)
+        } finally { release.complete(Unit); models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }; models.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun `concurrent archive authorization failure releases active loading flags`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val release = CompletableDeferred<Unit>()
+        try {
+            val sessions = session()
+            val started = CompletableDeferred<Unit>()
+            val api = FakeSimpleOneApi(beforeActive = { started.complete(Unit); release.await() },
+                beforeSync = { throw SimpleOneFailure.Unauthorized })
+            val cache = FakeSimpleOneSupplementalCache().apply {
+                archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2,
+                    syncRevision = 1, syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"))
+            }
+            val model = model(SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache))
+            settled(model)
+            model.refreshActiveRequests()
+            started.await()
+            model.refreshClosedRequests()
+            withContext(Dispatchers.Default) { withTimeout(5_000) { model.state.first { !it.isAuthorized } } }
+            release.complete(Unit)
+            settled(model)
+            assertFalse(model.state.value.isLoading)
+            assertTrue(model.state.value.hydratingRequestIds.isEmpty())
+        } finally { release.complete(Unit); models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }; models.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun `ready archive restore and five tab switches do not start any network work`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = FakeSimpleOneApi()
+            val cache = FakeSimpleOneSupplementalCache().apply {
+                archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2)
+            }
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
+            settled(model)
+            repeat(5) {
+                model.updateMode(ru.lumastack.lumawork.domain.simpleone.RequestsMode.Closed)
+                model.updateMode(ru.lumastack.lumawork.domain.simpleone.RequestsMode.Active)
+            }
+            assertEquals(0, api.currentUserCalls + api.activeCalls + api.archiveCalls + api.exportCalls)
+        } finally { models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }; models.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun `active refresh completes while manual closed sync continues across tab switches`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val started = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val api = FakeSimpleOneApi(beforeSync = { started.complete(Unit); release.await() })
+            val cache = FakeSimpleOneSupplementalCache().apply {
+                archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2,
+                    syncRevision = 1, syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1"))
+            }
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
+            settled(model)
+            model.refreshClosedRequests()
+            started.await()
+            model.updateMode(ru.lumastack.lumawork.domain.simpleone.RequestsMode.Closed)
+            model.updateMode(ru.lumastack.lumawork.domain.simpleone.RequestsMode.Active)
+            model.refreshActiveRequests()
+            withContext(Dispatchers.Default) { withTimeout(5_000) { model.state.first { !it.isLoading && it.activeRequests.isNotEmpty() } } }
+            assertTrue(model.state.value.isClosedLoading)
+            assertEquals(1, api.activeCalls)
+            release.complete(Unit)
+            settled(model)
+            assertEquals(1, api.archiveCalls)
+        } finally { models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }; models.clear(); Dispatchers.resetMain() }
+    }
+
+    @Test fun `login starts only after button and active failure does not start an archive baseline`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val api = FakeSimpleOneApi(error = SimpleOneFailure.Http(500, "Unavailable"))

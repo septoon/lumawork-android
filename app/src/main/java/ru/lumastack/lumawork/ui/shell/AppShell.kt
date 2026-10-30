@@ -72,7 +72,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlin.math.roundToInt
@@ -166,8 +165,12 @@ fun AppShell(
     onLogout: () -> Unit,
 ) {
     val simpleOneViewModel: SimpleOneViewModel = viewModel(
-        key = "simpleone-${session.user.id}-$isOffline",
+        key = "simpleone-${session.user.id}-${session.token.hashCode()}-$isOffline",
         factory = SimpleOneViewModel.factory(simpleOneRepository, session.user.id, isOffline),
+    )
+    val commentsJson = remember { kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true } }
+    val commentsRepository = ru.lumastack.lumawork.ui.requests.rememberClientPersonalCommentsRepository(
+        session, ru.lumastack.lumawork.BuildConfig.API_ORIGIN, commentsJson, isOffline,
     )
     val simpleOneState by simpleOneViewModel.state.collectAsStateWithLifecycle()
     val protectedRevision by ftpRepository.access.changes.collectAsStateWithLifecycle()
@@ -180,7 +183,7 @@ fun AppShell(
         if (!simpleOneState.isInitializing && groupClosed != null) {
             if (!simpleOneState.isAuthorized || simpleOneState.snapshot.currentUser?.sysId == null || groupClosedRegion == null) groupClosed.deactivate()
             else if (groupClosed.state.value.didLoadCache) groupClosed.activate(session.user.id,
-                simpleOneState.snapshot.currentUser!!.sysId, true, groupClosedRegion, isOffline)
+                simpleOneState.snapshot.currentUser!!.sysId, true, groupClosedRegion, isOffline, refreshOnActivate = false)
         }
     }
     androidx.compose.runtime.LaunchedEffect(simpleOneState.isAuthorized, simpleOneState.isInitializing) {
@@ -188,14 +191,6 @@ fun AppShell(
             ftpRepository.transfers?.revokeUnauthorized()
         }
     }
-    val shellLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-    androidx.compose.runtime.LaunchedEffect(groupClosed, shellLifecycle, isOffline, simpleOneState.isAuthorized, groupClosedRegion) {
-        shellLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-            if (!isOffline && simpleOneState.isAuthorized && groupClosed?.state?.value?.didLoadCache == true) groupClosed.refresh()
-            kotlinx.coroutines.awaitCancellation()
-        }
-    }
-
     val simpleOneActions = remember(simpleOneViewModel) {
         RequestsActions(
             onUsernameChange = simpleOneViewModel::updateUsername,
@@ -246,13 +241,6 @@ fun AppShell(
     var selectedName by rememberSaveable(session.user.id) { mutableStateOf(destinations.first().name) }
     // Visibility filters the menu; internal actions can still open an available hidden screen.
     val selected = availableDestinations.firstOrNull { it.name == selectedName } ?: destinations.first()
-    androidx.compose.runtime.LaunchedEffect(selected, shellLifecycle, isOffline, simpleOneViewModel) {
-        if (selected == AppDestination.Requests && !isOffline) {
-            shellLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-                simpleOneViewModel.runAutomaticClosedSync()
-            }
-        }
-    }
     val navigationConfiguration = availableIds.joinToString(",") + ";" + visibleIds.joinToString(",")
     var appliedNavigationConfiguration by rememberSaveable(session.user.id) { mutableStateOf(navigationConfiguration) }
     androidx.compose.runtime.LaunchedEffect(navigationConfiguration) {
@@ -283,7 +271,10 @@ fun AppShell(
         notification.consume()
     }
 
-    CompositionLocalProvider(LocalSalaryBiometricEnabled provides settings.salaryBiometricEnabled) {
+    CompositionLocalProvider(
+        LocalSalaryBiometricEnabled provides settings.salaryBiometricEnabled,
+        ru.lumastack.lumawork.ui.requests.LocalClientPersonalCommentsRepository provides commentsRepository,
+    ) {
         AppDrawerShell(
             contentStateHolder = contentStateHolder,
             assistantModels = assistantModels,
@@ -506,7 +497,7 @@ private fun AppTopBar(
                         selectedIndex = RouteWorkType.entries.indexOf(routeState.record.workType),
                         onSelect = { routeModel.selectWorkType(RouteWorkType.entries[it]) })
                 }
-                destination == AppDestination.Requests && requestsState.initialArchiveReady &&
+                destination == AppDestination.Requests &&
                     (requestsState.isAuthorized || requestsState.isOffline) && requestsState.selectedRequest == null -> {
                     AppSegmentedControl(
                         titles = RequestsMode.entries.map { it.title },

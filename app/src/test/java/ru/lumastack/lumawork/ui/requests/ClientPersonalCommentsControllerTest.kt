@@ -31,7 +31,7 @@ class ClientPersonalCommentsControllerTest {
             }
             try {
                 withContext(ui) { controller.openEditor(request) }
-                withTimeout(5000) { while (controller.draft == null && failure.get() == null) delay(10) }
+                withTimeout(5000) { while ((controller.draft == null || controller.isLoadingOptions) && failure.get() == null) delay(10) }
                 assertNull("Opening must not parse the archive on UI thread", failure.get())
                 withContext(ui) {
                     assertEquals(listOf("0001"), controller.draft!!.terminalIDs)
@@ -48,7 +48,7 @@ class ClientPersonalCommentsControllerTest {
                 }
                 withTimeout(5000) { while (controller.draft == null) delay(10) }
                 assertNull(failure.get())
-                assertEquals("Repeat opening must reuse archive options", 200, reads.get())
+                assertEquals("Repeat opening must reuse one archive index", 100, reads.get())
             } finally { scope.cancel() }
         }
     }
@@ -82,7 +82,7 @@ class ClientPersonalCommentsControllerTest {
                     }
                 }
                 try {
-                    withContext(ui) { controller.openEditor(first) }
+                    withContext(ui) { controller.openEditor(first); assertNotNull("Form must precede archive traversal", controller.draft) }
                     assertTrue(withContext(Dispatchers.IO) { started.await(5, TimeUnit.SECONDS) })
                     withContext(ui) { controller.dismissEditor(); assertFalse(controller.isOpening) }
                 } finally { release.countDown() }
@@ -90,6 +90,73 @@ class ClientPersonalCommentsControllerTest {
                 scope.coroutineContext[Job]!!.children.toList().joinAll()
                 assertNull(controller.draft)
                 assertNull(failure.get())
+            } finally { scope.cancel() }
+        }
+    }
+
+    @Test fun `typing coalesces disk writes and dismissal flushes the latest draft`() = runBlocking {
+        newSingleThreadContext("comment-ui").use { ui ->
+            val scope = CoroutineScope(SupervisorJob() + ui)
+            val written = mutableListOf<ClientPersonalCommentDraft?>()
+            val cache = object : ClientPersonalCommentsCache {
+                override suspend fun read(userId: String) = ClientPersonalCommentsSnapshot()
+                override suspend fun write(userId: String, snapshot: ClientPersonalCommentsSnapshot) = error("Draft cannot rewrite comments")
+                override suspend fun writeDraft(userId: String, draft: ClientPersonalCommentDraft?) { written += draft }
+            }
+            val api = object : ClientPersonalCommentsApi {
+                override suspend fun comments(token: String) = emptyList<ClientPersonalComment>()
+                override suspend fun save(token: String, draft: ClientPersonalCommentDraft) = error("Unused")
+            }
+            val repo = ClientPersonalCommentsRepository(AppSession("token", AppUser("owner", "test@example.test", "Test")), api, cache)
+            val controller = ClientPersonalCommentsController(repo, scope)
+            try {
+                withContext(ui) {
+                    controller.openEditor()
+                    repeat(20) { controller.updateDraft(controller.draft!!.copy(extraInfo = "Текст $it")) }
+                    assertTrue("Typing must not queue a write per character", written.isEmpty())
+                    controller.dismissEditor()
+                }
+                scope.coroutineContext[Job]!!.children.toList().joinAll()
+                assertEquals(listOf("Текст 19"), written.map { it?.extraInfo })
+                assertEquals("Текст 19", repo.snapshot.value.draft?.extraInfo)
+            } finally { scope.cancel() }
+        }
+    }
+
+    @Test fun `typing before hydration preserves edits and restores existing mutation identity`() = runBlocking {
+        newSingleThreadContext("comment-ui").use { ui ->
+            val scope = CoroutineScope(SupervisorJob() + ui)
+            val readStarted = CompletableDeferred<Unit>()
+            val releaseRead = CompletableDeferred<Unit>()
+            val existing = ClientPersonalComment("existing", displayTIN = "1234567890", contactPerson = "Контакт", extraInfo = "Старое")
+            val cache = object : ClientPersonalCommentsCache {
+                override suspend fun read(userId: String): ClientPersonalCommentsSnapshot {
+                    readStarted.complete(Unit); releaseRead.await(); return ClientPersonalCommentsSnapshot(listOf(existing))
+                }
+                override suspend fun write(userId: String, snapshot: ClientPersonalCommentsSnapshot) {}
+                override suspend fun writeDraft(userId: String, draft: ClientPersonalCommentDraft?) {}
+            }
+            val submitted = CompletableDeferred<ClientPersonalCommentDraft>()
+            val api = object : ClientPersonalCommentsApi {
+                override suspend fun comments(token: String) = emptyList<ClientPersonalComment>()
+                override suspend fun save(token: String, draft: ClientPersonalCommentDraft): ClientPersonalComment { submitted.complete(draft); return existing.copy(extraInfo = draft.extraInfo) }
+            }
+            val repo = ClientPersonalCommentsRepository(AppSession("token", AppUser("owner", "test@example.test", "Test")), api, cache)
+            val controller = ClientPersonalCommentsController(repo, scope)
+            val request = SimpleOneRequest("request", "R", tableFields = mapOf("ИНН" to "1234567890"))
+            try {
+                withContext(ui) { controller.openEditor(request) }
+                readStarted.await()
+                withContext(ui) { controller.updateDraft(controller.draft!!.copy(extraInfo = "Новый текст")) }
+                releaseRead.complete(Unit)
+                withTimeout(5000) { while (controller.isLoadingOptions) delay(10) }
+                withContext(ui) {
+                    assertEquals("existing", controller.draft!!.serverID)
+                    assertEquals("Контакт", controller.draft!!.contactPerson)
+                    assertEquals("Новый текст", controller.draft!!.extraInfo)
+                    controller.save()
+                }
+                assertEquals("existing", withTimeout(5000) { submitted.await() }.serverID)
             } finally { scope.cancel() }
         }
     }

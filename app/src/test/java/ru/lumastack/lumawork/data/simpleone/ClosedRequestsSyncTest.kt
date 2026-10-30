@@ -1,6 +1,7 @@
 package ru.lumastack.lumawork.data.simpleone
 
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -12,6 +13,49 @@ import ru.lumastack.lumawork.domain.simpleone.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
 class ClosedRequestsSyncTest {
+    @Test fun `closed row completion overlaps at most four requests and commits in cursor order`() = runTest {
+        var running = 0
+        var maximum = 0
+        val ids = listOf("h", "g", "f", "e", "d", "c", "b", "a")
+        val sync = SimpleOneClosedSyncClient("https://sd.test/v1", { url ->
+            val path = url.toHttpUrl().encodedPath
+            if (path.endsWith("/list/itsm_request")) {
+                Json.parseToJsonElement("""{"data":{"list":[${ids.joinToString(",") { syncItem(it) }}]}}""").jsonObject
+            } else {
+                running++
+                maximum = maxOf(maximum, running)
+                delay(100)
+                running--
+                Json.parseToJsonElement("""{"data":{"value":"2026-10-28 12:00:00"}}""").jsonObject
+            }
+        }, { "wide" }, { "monthly" })
+        val result = sync.changes("user", ClosedRequestsSyncScope.All, null, emptyMap()) {}
+        assertEquals(ids, result.changes.map { it.sysId })
+        assertEquals(4, maximum)
+        assertTrue(testScheduler.currentTime < 500)
+    }
+
+    @Test fun `older speculative cursor failure is ignored after ordered boundary is reached`() = runTest {
+        val sync = SimpleOneClosedSyncClient("https://sd.test/v1", { url ->
+            val path = url.toHttpUrl().encodedPath
+            when {
+                path.endsWith("/list/itsm_request") -> Json.parseToJsonElement(
+                    """{"data":{"list":[${syncItem("z")},${syncItem("y")},${syncItem("x")}]}}""").jsonObject
+                path.endsWith("/sys_updated_at/x") -> throw SimpleOneFailure.InvalidResponse
+                path.endsWith("/sys_updated_at/y") -> {
+                    delay(100)
+                    Json.parseToJsonElement("""{"data":{"value":"2026-10-27 12:00:00"}}""").jsonObject
+                }
+                else -> Json.parseToJsonElement("""{"data":{"value":"2026-10-28 12:00:00"}}""").jsonObject
+            }
+        }, { "wide" }, { "monthly" })
+        val boundary = ClosedRequestsSyncCursor("2026-10-28 12:00:00", "z")
+        val result = sync.changes("user", ClosedRequestsSyncScope.All, boundary,
+            mapOf("z" to "2026-10-28 12:00:00")) {}
+        assertTrue(result.changes.isEmpty())
+        assertEquals(boundary, result.cursor)
+    }
+
     @Test fun `serial missing from list and record is fetched from its cell`() = runBlocking {
         for (serial in listOf("00001234", "")) {
             val paths = mutableListOf<String>()

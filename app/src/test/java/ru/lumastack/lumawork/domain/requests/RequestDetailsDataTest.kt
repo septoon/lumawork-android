@@ -45,7 +45,10 @@ class RequestDetailsDataTest {
         assertEquals("1234567890", request.clientCommentTIN())
         assertFalse(RequestDetailsData(request.copy(requestType = "install")).sections.any { it.id == "dismantle" })
     }
-    @Test fun `return equipment supports personal comments`() {
-        assertTrue(SimpleOneRequest("1", "R", requestType = "returnEquip").supportsClientPersonalComments())
+    @Test fun `return equipment excludes personal comments while installation supports them`() {
+        assertFalse(SimpleOneRequest("1", "R", requestType = "returnEquip").supportsClientPersonalComments())
+        assertFalse(SimpleOneRequest("1", "R", requestType = "return_equip").supportsClientPersonalComments())
+        assertFalse(SimpleOneRequest("1", "R", tableFields = mapOf("Тип заявки" to "Возврат ТО")).supportsClientPersonalComments())
+        assertTrue(SimpleOneRequest("2", "I", requestType = "install").supportsClientPersonalComments())
     }
 }

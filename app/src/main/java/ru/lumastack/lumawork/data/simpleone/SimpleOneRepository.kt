@@ -10,6 +10,14 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 import ru.lumastack.lumawork.domain.simpleone.ClosedArchiveSource
 import ru.lumastack.lumawork.domain.simpleone.ClosedSimpleOneArchive
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
@@ -36,6 +44,10 @@ class SimpleOneRepository(
     private val sessionMutex = Mutex()
     private val archiveMutex = Mutex()
     private val generations = mutableMapOf<String, Long>()
+    private val detailMutex = Mutex()
+    private val detailScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private data class DetailKey(val owner: String, val fingerprint: String, val request: SimpleOneRequest, val unknownVersionRequired: Boolean)
+    private val detailTasks = mutableMapOf<DetailKey, Deferred<SimpleOneRequest>>()
 
     suspend fun storedSession(ownerUserId: String): StoredSimpleOneSession? = withContext(Dispatchers.IO) {
         sessionStore.read(ownerUserId)
@@ -97,25 +109,56 @@ class SimpleOneRepository(
             block()
         }
 
-    suspend fun refresh(ownerUserId: String, cached: SimpleOneSnapshot?): SimpleOneSnapshot {
+    suspend fun refresh(
+        ownerUserId: String,
+        cached: SimpleOneSnapshot?,
+        onSnapshot: suspend (SimpleOneSnapshot, Set<String>) -> Unit = { _, _ -> },
+    ): SimpleOneSnapshot {
         val session = storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials
         return try {
-            val currentUser = cached?.takeIf { it.sessionFingerprint == simpleOneSessionFingerprint(session) }?.currentUser ?: api.currentUser(session.authKey)
+            val fingerprint = simpleOneSessionFingerprint(session)
+            val currentUser = cached?.takeIf { it.sessionFingerprint == fingerprint }?.currentUser ?: api.currentUser(session.authKey)
             val listed = api.activeRequests(currentUser.sysId, session.authKey)
-            val requests = listed.chunked(4).flatMap { chunk -> coroutineScope {
-                chunk.map { request -> async {
-                    try { requestDetails(ownerUserId, request) }
-                    catch (error: CancellationException) { throw error }
-                    catch (error: SimpleOneFailure.Unauthorized) { throw error }
-                    catch (_: Exception) { request }
-                } }.awaitAll()
-            } }
-            SimpleOneSnapshot(
-                currentUser = currentUser,
-                activeRequests = requests,
-                updatedAtEpochMillis = nowEpochMillis(),
-                sessionFingerprint = simpleOneSessionFingerprint(session),
-            ).also { snapshot -> withCurrentSession(ownerUserId, session) { cache.save(ownerUserId, snapshot) } }
+            var snapshot = SimpleOneSnapshot(currentUser, listed, nowEpochMillis(), fingerprint)
+            // Persist and publish the useful list before any detail request can delay it.
+            withCurrentSession(ownerUserId, session) { cache.save(ownerUserId, snapshot) }
+            val pending = listed.mapTo(mutableSetOf()) { it.id }
+            withCurrentSession(ownerUserId, session) { onSnapshot(snapshot, pending.toSet()) }
+            coroutineScope {
+                val queue = Channel<IndexedValue<SimpleOneRequest>>(Channel.UNLIMITED)
+                listed.forEachIndexed { index, request -> queue.trySend(IndexedValue(index, request)) }
+                queue.close()
+                val completed = Channel<Pair<Int, SimpleOneRequest>>(4)
+                val workers = List(minOf(4, listed.size)) {
+                    launch {
+                        for ((index, request) in queue) {
+                            val detailed = try { requestDetails(ownerUserId, request) }
+                            catch (error: CancellationException) {
+                                // A cancelled child launch does not fail coroutineScope by itself.
+                                // Wake the collector rather than leaving an expected item missing.
+                                completed.close(error)
+                                throw error
+                            }
+                            catch (error: SimpleOneFailure.Unauthorized) { throw error }
+                            catch (_: Exception) { request }
+                            completed.send(index to detailed)
+                        }
+                    }
+                }
+                try {
+                    val requests = listed.toMutableList()
+                    repeat(listed.size) {
+                        val (index, detailed) = completed.receive()
+                        requests[index] = detailed
+                        pending.remove(listed[index].id)
+                        snapshot = snapshot.copy(activeRequests = requests.toList())
+                        withCurrentSession(ownerUserId, session) { onSnapshot(snapshot, pending.toSet()) }
+                    }
+                    workers.forEach { it.join() }
+                } finally { completed.cancel(); queue.cancel() }
+            }
+            withCurrentSession(ownerUserId, session) { cache.save(ownerUserId, snapshot) }
+            snapshot
         } catch (error: SimpleOneFailure.Unauthorized) {
             sessionMutex.withLock {
                 if (storedSession(ownerUserId) == session) withContext(Dispatchers.IO) { sessionStore.clear(ownerUserId) }
@@ -134,8 +177,15 @@ class SimpleOneRepository(
         try {
             val currentUser = cachedSnapshot?.takeIf { it.sessionFingerprint == simpleOneSessionFingerprint(session) }?.currentUser ?: api.currentUser(session.authKey)
             val previous = supplementalCache.readClosedArchive(ownerUserId)
-            if (previous?.isReady == true && (previous.syncUserId == null || previous.syncUserId == currentUser.sysId)) {
-                // iOS reconciles an imported archive through narrow/wide scans, without downloading its baseline again.
+            val hasScopeCursor = when (scope) {
+                ClosedRequestsSyncScope.Monthly -> previous?.monthlyCursor != null
+                ClosedRequestsSyncScope.All -> previous?.wideCursor != null
+            }
+            val hasCompletedBaseline = hasScopeCursor || previous?.lastWideSyncAtEpochMillis != null
+            if (previous?.isReady == true && hasCompletedBaseline && (previous.syncUserId == null || previous.syncUserId == currentUser.sysId)) {
+                // Older/imported archives can have rows and a monthly cursor without a wide baseline.
+                // A completed full baseline remains valid when optional heads were unavailable or empty:
+                // retain its null cursor and scan safely rather than repeatedly regenerating XLSX.
                 return@withLock updateClosedArchive(ownerUserId, session, currentUser.sysId,
                     previous.copy(syncRevision = 1, syncUserId = currentUser.sysId), scope, onProgress)
             }
@@ -168,7 +218,7 @@ class SimpleOneRepository(
                 val merged = existing.associateBy { it.number }.toMutableMap()
                 completed.forEach { record ->
                     val old = merged[record.number]
-                    val updated = if (source == ClosedArchiveSource.ListApi && old != null) record.mergeMissing(old) else record
+                    val updated = if (old != null) record.mergeMissing(old) else record
                     var fields = old?.tableFields.orEmpty() + record.tableFields
                     val tin = closedMerchantTIN(record).ifBlank { old?.let(::closedMerchantTIN).orEmpty() }
                     if (tin.isNotBlank()) fields = fields + ("ИНН ТСП" to tin)
@@ -180,7 +230,7 @@ class SimpleOneRepository(
                 syncUpdatedAt = heads[1]?.updatedAt, syncUserId = currentUser.sysId,
                 monthlyCursor = heads[0], wideCursor = heads[1], syncRevision = 1,
                 lastWideSyncAtEpochMillis = nowEpochMillis())
-            withCurrentSession(ownerUserId, session) { supplementalCache.saveClosedArchive(ownerUserId, archive) }
+            supplementalCache.saveClosedArchive(ownerUserId, archive) { commit -> withCurrentSession(ownerUserId, session, commit) }
             android.util.Log.i("SimpleOneSync", "baseline saved=${archive.requests.size} monthly=${archive.monthlyCursor != null} wide=${archive.wideCursor != null}")
             archive
         } catch (error: SimpleOneFailure.Unauthorized) {
@@ -238,7 +288,7 @@ class SimpleOneRepository(
                 syncUpdatedAt = if (scope == ClosedRequestsSyncScope.All) batch.cursor?.updatedAt ?: previous.syncUpdatedAt else previous.syncUpdatedAt,
                 lastWideSyncAtEpochMillis = if (scope == ClosedRequestsSyncScope.All) nowEpochMillis() else previous.lastWideSyncAtEpochMillis)
         }
-        withCurrentSession(owner, session) { supplementalCache.saveClosedArchive(owner, archive) }
+        supplementalCache.saveClosedArchive(owner, archive) { commit -> withCurrentSession(owner, session, commit) }
         android.util.Log.i("SimpleOneSync", "sync scope=$scope changes=${batch.changes.size} saved=${archive.requests.size}")
         return archive
     }
@@ -344,12 +394,10 @@ class SimpleOneRepository(
         val session = storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials
         try {
             val records = terminalRequestHistory(api.terminalHistory(terminal, session.authKey), terminal)
-            return withCurrentSession(ownerUserId, session) {
-                supplementalCache.saveClosedArchive(historyCacheScope(session, terminal), ClosedSimpleOneArchive(
-                    requests = records, updatedAtEpochMillis = nowEpochMillis(), isComplete = true, queryRevision = 2,
-                ))
-                records
-            }
+            supplementalCache.saveClosedArchive(historyCacheScope(session, terminal), ClosedSimpleOneArchive(
+                requests = records, updatedAtEpochMillis = nowEpochMillis(), isComplete = true, queryRevision = 2,
+            )) { commit -> withCurrentSession(ownerUserId, session, commit) }
+            return withCurrentSession(ownerUserId, session) { records }
         } catch (error: SimpleOneFailure.Unauthorized) {
             sessionMutex.withLock { if (storedSession(ownerUserId) == session) withContext(Dispatchers.IO) { sessionStore.clear(ownerUserId) } }
             throw error
@@ -359,33 +407,64 @@ class SimpleOneRepository(
     private fun historyCacheScope(session: StoredSimpleOneSession, terminalId: String): String =
         "${session.ownerUserId}|terminal-history-v2|${simpleOneSessionFingerprint(session)}|$terminalId"
 
-    suspend fun requestDetails(ownerUserId: String, request: SimpleOneRequest, force: Boolean = false, requiresCurrentVersion: Boolean = false): SimpleOneRequest {
-        val requiredSession = if (requiresCurrentVersion) storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials else null
-        val stored = supplementalCache.readDetail(ownerUserId, request.id)
-        val cached = stored?.takeIf { !requiresCurrentVersion || (request.sysUpdatedAt.isNotBlank() && request.sysUpdatedAt == it.request.sysUpdatedAt) }
-        if (!force && cached != null && nowEpochMillis() - cached.cachedAtEpochMillis < DETAIL_CACHE_LIFETIME_MILLIS &&
-            cached.request.state == request.state && cached.request.stateRaw == request.stateRaw &&
-            (request.multicardState.isBlank() || cached.request.multicardState == request.multicardState) &&
-            cached.request.deadline == request.deadline) {
-            return cached.request
-        }
+    /** Optional card enrichment from local storage only; navigation must never start HTTP. */
+    suspend fun cachedRequestDetails(ownerUserId: String, request: SimpleOneRequest): SimpleOneRequest? {
+        val session = storedSession(ownerUserId) ?: return null
+        val fingerprint = simpleOneSessionFingerprint(session)
+        val entry = supplementalCache.readDetail(ownerUserId, request.id)
+            ?.takeIf { it.matches(request, fingerprint, false) } ?: return null
+        return withCurrentSession(ownerUserId, session) { entry.request.mergeMissing(request).copy(source = request.source) }
+    }
 
-        val session = requiredSession ?: storedSession(ownerUserId) ?: return cached?.request ?: request
-        return try {
-            api.requestDetails(request, session.authKey).also { detailed ->
-                withCurrentSession(ownerUserId, session) {
-                    supplementalCache.saveDetail(ownerUserId, SimpleOneDetailCacheEntry(detailed, nowEpochMillis()))
+    private fun SimpleOneDetailCacheEntry.matches(request: SimpleOneRequest, fingerprint: String, requiresCurrentVersion: Boolean): Boolean =
+        sessionFingerprint == fingerprint &&
+            (if (requiresCurrentVersion) request.sysUpdatedAt.isNotBlank() && request.sysUpdatedAt == this.request.sysUpdatedAt
+            else request.sysUpdatedAt.isBlank() || request.sysUpdatedAt == this.request.sysUpdatedAt) &&
+            this.request.state == request.state && this.request.stateRaw == request.stateRaw &&
+            (request.multicardState.isBlank() || this.request.multicardState == request.multicardState) &&
+            this.request.deadline == request.deadline
+
+    suspend fun requestDetails(ownerUserId: String, request: SimpleOneRequest, force: Boolean = false, requiresCurrentVersion: Boolean = false): SimpleOneRequest {
+        val session = storedSession(ownerUserId)
+            ?: if (requiresCurrentVersion) throw SimpleOneFailure.MissingCredentials else return request
+        val fingerprint = simpleOneSessionFingerprint(session)
+        val task = detailMutex.withLock {
+            val stored = supplementalCache.readDetail(ownerUserId, request.id)
+            val cached = stored?.takeIf { it.matches(request, fingerprint, requiresCurrentVersion) }
+            if (!force && cached != null && nowEpochMillis() - cached.cachedAtEpochMillis in 0 until DETAIL_CACHE_LIFETIME_MILLIS) {
+                return withCurrentSession(ownerUserId, session) { cached.request.mergeMissing(request).copy(source = request.source) }
+            }
+
+            // Version is authoritative; for records without a version include all list fields.
+            val identity = if (request.sysUpdatedAt.isNotBlank()) SimpleOneRequest(request.sysId, "", sysUpdatedAt = request.sysUpdatedAt) else request
+            val key = DetailKey(ownerUserId, fingerprint, identity, requiresCurrentVersion && request.sysUpdatedAt.isBlank())
+            detailTasks[key] ?: detailScope.async(start = CoroutineStart.LAZY) {
+                try {
+                    val detailed = api.requestDetails(request, session.authKey).mergeMissing(request)
+                    if (detailed.id != request.id || detailed.number != request.number) throw SimpleOneFailure.InvalidResponse
+                    supplementalCache.saveDetail(ownerUserId, SimpleOneDetailCacheEntry(detailed, nowEpochMillis(), fingerprint)) {
+                        commit -> withCurrentSession(ownerUserId, session, commit)
+                    }
+                    detailed
+                } catch (error: SimpleOneFailure.Unauthorized) {
+                    sessionMutex.withLock {
+                        if (storedSession(ownerUserId) == session) withContext(Dispatchers.IO) { sessionStore.clear(ownerUserId) }
+                    }
+                    throw error
+                } catch (error: CancellationException) { throw error
+                } catch (error: Exception) {
+                    withCurrentSession(ownerUserId, session) { cached?.request ?: throw error }
+                } finally {
+                    val taskJob = currentCoroutineContext()[Job]
+                    withContext(NonCancellable) {
+                        detailMutex.withLock { if (detailTasks[key] === taskJob) detailTasks.remove(key) }
+                    }
                 }
-            }
-        } catch (error: SimpleOneFailure.Unauthorized) {
-            sessionMutex.withLock {
-                if (storedSession(ownerUserId) == session) withContext(Dispatchers.IO) { sessionStore.clear(ownerUserId) }
-            }
-            throw error
-        } catch (error: CancellationException) { throw error
-        } catch (error: Exception) {
-            cached?.request ?: throw error
+            }.also { detailTasks[key] = it; it.start() }
         }
+        // A card leaving composition only cancels its wait, never the shared network request.
+        val detailed = task.await()
+        return withCurrentSession(ownerUserId, session) { detailed.mergeMissing(request).copy(source = request.source) }
     }
 
     suspend fun signOut(ownerUserId: String) {
@@ -393,6 +472,7 @@ class SimpleOneRepository(
             generations[ownerUserId] = (generations[ownerUserId] ?: 0L) + 1
             withContext(Dispatchers.IO) { sessionStore.clear(ownerUserId) }
         }
+        detailMutex.withLock { detailTasks.filterKeys { it.owner == ownerUserId }.values.forEach { it.cancel() } }
     }
 
     companion object {

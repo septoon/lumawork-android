@@ -16,9 +16,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.isActive
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncScope
 import ru.lumastack.lumawork.domain.requests.closedEffectiveTime
 import ru.lumastack.lumawork.data.simpleone.SimpleOneFailure
@@ -43,11 +40,12 @@ data class SimpleOneUiState(
     val sortOrder: ActiveRequestsSortOrder = ActiveRequestsSortOrder.RegisteredAt,
     val selectedRequest: SimpleOneRequest? = null,
     val isInitializing: Boolean = true,
+    val isRestoringClosedArchive: Boolean = false,
+    val hydratingRequestIds: Set<String> = emptySet(),
     val isResolvingUser: Boolean = false,
     val initialArchiveReady: Boolean = false,
     val initialLoadRequested: Boolean = false,
     val showConnection: Boolean = false,
-    val archiveProgress: String? = null,
     val isOffline: Boolean = false,
     val isAuthorized: Boolean = false,
     val isLoading: Boolean = false,
@@ -57,7 +55,9 @@ data class SimpleOneUiState(
     val notice: String? = null,
     val errorMessage: String? = null,
     val detailErrorMessage: String? = null,
+    val closedErrorMessage: String? = null,
 ) {
+    val isRefreshingActive: Boolean get() = isLoading || hydratingRequestIds.isNotEmpty()
     val activeRequests: List<SimpleOneRequest>
         get() = snapshot.activeRequests
 }
@@ -71,8 +71,10 @@ class SimpleOneViewModel(
     val state: StateFlow<SimpleOneUiState> = mutableState.asStateFlow()
     private var activeJob: Job? = null
     private var archiveJob: Job? = null
+    private var archiveRestoreJob: Job? = null
     private val archiveMutations = mutableSetOf<Job>()
     private var detailJob: Job? = null
+    private var detailRevision = 0L
     private var authJob: Job? = null
     private var identityJob: Job? = null
     private var sessionEpoch = 0L
@@ -87,18 +89,18 @@ class SimpleOneViewModel(
     fun updateStatusFilter(value: ActiveRequestsStatusFilter) { mutableState.update { it.copy(statusFilter = value) } }
     fun updateSortOrder(value: ActiveRequestsSortOrder) { mutableState.update { it.copy(sortOrder = value) } }
     fun updateMode(value: RequestsMode) {
-        if (!state.value.initialArchiveReady) return
-        mutableState.update { it.copy(mode = value, selectedRequest = null, errorMessage = null) }
+        closeRequest()
+        mutableState.update { it.copy(mode = value) }
     }
 
     fun initialLoad() {
         val state = state.value
-        if (state.isInitializing || state.isClosedLoading || state.isLoading) return
+        if (state.isInitializing || state.isRefreshingActive) return
         if (startOffline) {
             mutableState.update { it.copy(initialLoadRequested = true, errorMessage = "Для загрузки заявок требуется подключение к сети.") }
         } else if (!state.isAuthorized) {
             mutableState.update { it.copy(initialLoadRequested = true, showConnection = true, errorMessage = null) }
-        } else loadClosedArchive()
+        } else refreshActiveRequests()
     }
 
     fun dismissConnection() { mutableState.update { it.copy(showConnection = false, password = "", errorMessage = null) } }
@@ -108,7 +110,7 @@ class SimpleOneViewModel(
 
     private fun signIn(loadRequests: Boolean) {
         val state = state.value
-        if (startOffline || state.isLoading || state.isClosedLoading || authJob?.isActive == true) return
+        if (startOffline || state.isLoading || authJob?.isActive == true) return
         if (state.username.isBlank() || state.password.isBlank()) {
             mutableState.update { it.copy(errorMessage = "Укажите логин и пароль SimpleOne.") }; return
         }
@@ -120,7 +122,7 @@ class SimpleOneViewModel(
                 if (epoch != sessionEpoch) return@launch
                 mutableState.update { it.copy(password = "", snapshot = SimpleOneSnapshot(), isAuthorized = true, isLoading = false, showConnection = false) }
                 if (!loadRequests) ensureCurrentUser()
-                else if (!mutableState.value.initialArchiveReady) loadClosedArchive() else refreshActiveRequests()
+                else refreshActiveRequests()
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
                 if (epoch == sessionEpoch) mutableState.update { it.copy(isLoading = false,
@@ -148,7 +150,6 @@ class SimpleOneViewModel(
     }
 
     fun refresh() {
-        if (!state.value.initialArchiveReady) return
         if (state.value.mode == RequestsMode.Closed) loadClosedArchive() else refreshActiveRequests()
     }
 
@@ -159,76 +160,72 @@ class SimpleOneViewModel(
         mutableState.update { it.copy(isLoading = true, errorMessage = null, notice = null) }
         activeJob = viewModelScope.launch {
             try {
-                val snapshot = repository.refresh(ownerUserId, mutableState.value.snapshot.takeIf { it.currentUser != null })
-                if (epoch == sessionEpoch) mutableState.update { it.copy(snapshot = snapshot, isAuthorized = true, isLoading = false) }
+                val snapshot = repository.refresh(ownerUserId, mutableState.value.snapshot.takeIf { it.currentUser != null }) { snapshot, pendingIds ->
+                    if (epoch == sessionEpoch) mutableState.update { current -> current.copy(
+                        snapshot = snapshot, isAuthorized = true, isLoading = false, hydratingRequestIds = pendingIds,
+                        selectedRequest = current.selectedRequest?.let { selected -> snapshot.activeRequests.firstOrNull { it.id == selected.id } ?: selected },
+                    ) }
+                }
+                if (epoch == sessionEpoch) mutableState.update { it.copy(snapshot = snapshot, isAuthorized = true, isLoading = false, hydratingRequestIds = emptySet()) }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
-                if (epoch == sessionEpoch) mutableState.update { it.copy(isLoading = false,
+                if (epoch == sessionEpoch) mutableState.update { it.copy(isLoading = false, hydratingRequestIds = emptySet(),
                     isAuthorized = it.isAuthorized && error !is SimpleOneFailure.Unauthorized,
                     errorMessage = error.userMessage()) }
+            } finally {
+                if (epoch == sessionEpoch) mutableState.update { it.copy(isLoading = false, hydratingRequestIds = emptySet()) }
             }
         }
     }
 
-    fun refreshAnalytics() { if (state.value.initialArchiveReady) loadClosedArchive() }
-    fun refreshClosedRequests() { if (state.value.initialArchiveReady) loadClosedArchive() }
-
-    /** Runs only while the Requests screen is foreground, with the same backoff as iOS. */
-    suspend fun runAutomaticClosedSync() {
-        var unchanged = 0
-        while (currentCoroutineContext().isActive) {
-            val current = state.value
-            if (startOffline || !current.isAuthorized || !current.initialArchiveReady || current.isInitializing ||
-                current.isLoading || current.isClosedLoading) {
-                delay(1_000)
-                continue
-            }
-            val before = current.closedArchive.requests
-            suspend fun sync(scope: ClosedRequestsSyncScope) {
-                val job = loadClosedArchive(scope) ?: return
-                try { job.join() }
-                finally { if (!currentCoroutineContext().isActive) job.cancel() }
-            }
-            sync(ClosedRequestsSyncScope.Monthly)
-            val wideAt = state.value.closedArchive.lastWideSyncAtEpochMillis
-            if (state.value.errorMessage == null && (wideAt == null || System.currentTimeMillis() - wideAt >= 60_000)) {
-                sync(ClosedRequestsSyncScope.All)
-            }
-            unchanged = if (before === state.value.closedArchive.requests) unchanged + 1 else 0
-            delay(when (unchanged) { 0 -> 60_000L; 1, 2 -> 120_000L; else -> 300_000L })
-        }
-    }
+    fun refreshAnalytics() { loadClosedArchive() }
+    fun refreshClosedRequests() { loadClosedArchive() }
 
     fun signOut() {
         sessionEpoch++
-        activeJob?.cancel(); archiveJob?.cancel(); authJob?.cancel(); detailJob?.cancel(); identityJob?.cancel()
+        activeJob?.cancel(); archiveJob?.cancel(); archiveRestoreJob?.cancel(); authJob?.cancel(); detailJob?.cancel(); identityJob?.cancel()
         archiveMutations.toList().forEach { it.cancel() }
         mutableState.update { it.copy(password = "", isInitializing = false, isAuthorized = false, isLoading = false,
-            isClosedLoading = false, isDetailLoading = false, isResolvingUser = false, selectedRequest = null, archiveProgress = null,
-            showConnection = false, errorMessage = null, notice = null) }
+            isClosedLoading = false, isRestoringClosedArchive = false, hydratingRequestIds = emptySet(), isDetailLoading = false, isResolvingUser = false, selectedRequest = null,
+            showConnection = false, errorMessage = null, closedErrorMessage = null, notice = null) }
         viewModelScope.launch { repository.signOut(ownerUserId) }
     }
 
     fun openRequest(request: SimpleOneRequest) {
         detailJob?.cancel()
         val epoch = sessionEpoch
+        val revision = ++detailRevision
         mutableState.update { it.copy(selectedRequest = request, isDetailLoading = !startOffline, detailErrorMessage = null) }
         if (startOffline) return
         detailJob = viewModelScope.launch {
             try {
-                val detailed = repository.requestDetails(ownerUserId, request, force = true)
-                if (epoch != sessionEpoch || mutableState.value.selectedRequest?.id != request.id) return@launch
-                mutableState.update { state -> state.copy(
-                    snapshot = state.snapshot.copy(activeRequests = state.activeRequests.map { if (it.id == detailed.id) detailed else it }),
-                    selectedRequest = detailed, isDetailLoading = false) }
+                val detailed = repository.requestDetails(ownerUserId, request)
+                if (epoch != sessionEpoch || revision != detailRevision || mutableState.value.selectedRequest?.id != request.id) return@launch
+                mutableState.update { state ->
+                    val current = state.activeRequests.firstOrNull { it.id == request.id }
+                    val selection = state.selectedRequest
+                    val stillSameVersion = selection?.sysUpdatedAt == request.sysUpdatedAt
+                    state.copy(
+                        snapshot = state.snapshot.copy(activeRequests = state.activeRequests.map {
+                            if (it.id == detailed.id && it.sysUpdatedAt == request.sysUpdatedAt) detailed else it
+                        }),
+                        selectedRequest = if (stillSameVersion) detailed else current ?: selection,
+                        isDetailLoading = false,
+                    )
+                }
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
-                if (epoch == sessionEpoch) mutableState.update { it.copy(isDetailLoading = false,
+                if (epoch == sessionEpoch && revision == detailRevision && mutableState.value.selectedRequest?.id == request.id) mutableState.update { it.copy(isDetailLoading = false,
                     isAuthorized = it.isAuthorized && error !is SimpleOneFailure.Unauthorized, detailErrorMessage = error.userMessage()) }
+            } finally {
+                if (epoch == sessionEpoch && revision == detailRevision && mutableState.value.selectedRequest?.id == request.id) {
+                    mutableState.update { it.copy(isDetailLoading = false) }
+                }
             }
         }
     }
     fun closeRequest() {
+        detailRevision++
         detailJob?.cancel()
         mutableState.update { it.copy(selectedRequest = null, isDetailLoading = false, detailErrorMessage = null) }
     }
@@ -246,19 +243,20 @@ class SimpleOneViewModel(
         // A picker result has priority over network polling; explicit local changes remain ordered.
         if (previous !in archiveMutations) previous?.cancel()
         val job = viewModelScope.launch {
+            archiveRestoreJob?.join()
             previous?.join()
             if (epoch != sessionEpoch) return@launch
-            mutableState.update { it.copy(isClosedLoading = true, errorMessage = null, archiveProgress = "Обновляю локальный архив…") }
+            mutableState.update { it.copy(isClosedLoading = true, closedErrorMessage = null) }
             try {
                 val archive = block()
                 val prepared = prepareArchive(archive)
                 if (epoch == sessionEpoch) mutableState.update { it.copy(closedArchive = archive, closedArchiveItems = prepared.items, closedAnalytics = prepared.analytics,
-                    hasLoadedClosedArchive = true, initialArchiveReady = archive.isReady, isClosedLoading = false, archiveProgress = null) }
+                    hasLoadedClosedArchive = true, initialArchiveReady = archive.isReady, isClosedLoading = false) }
             } catch (error: CancellationException) {
-                if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, archiveProgress = null) }
+                if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false) }
                 throw error
             }
-            catch (error: Exception) { if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, archiveProgress = null, errorMessage = error.userMessage()) } }
+            catch (error: Exception) { if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, closedErrorMessage = error.userMessage()) } }
         }
         archiveJob = job
         archiveMutations += job
@@ -267,49 +265,42 @@ class SimpleOneViewModel(
 
     private fun restore() {
         val epoch = sessionEpoch
-        viewModelScope.launch {
+        archiveRestoreJob = viewModelScope.launch {
             val session = localOrNull { repository.storedSession(ownerUserId) }
             val username = session?.username ?: localOrNull { repository.rememberedUsername(ownerUserId) }.orEmpty()
             val cached = localOrNull { repository.readSnapshot(ownerUserId) }
             if (epoch != sessionEpoch) return@launch
             // Session and active requests must not wait for the closed archive and its analytics.
-            mutableState.update { it.copy(username = username, snapshot = cached ?: it.snapshot, isAuthorized = session != null) }
+            mutableState.update { it.copy(username = username, snapshot = cached ?: it.snapshot, isAuthorized = session != null, isInitializing = false, isRestoringClosedArchive = true) }
             val archive = localOrNull { repository.readClosedArchive(ownerUserId) }
             val prepared = archive?.let { prepareArchive(it) } ?: PreparedArchive(emptyList(), ClosedRequestsAnalytics())
             if (epoch != sessionEpoch) return@launch
             mutableState.update { it.copy(
                 closedArchive = archive ?: it.closedArchive, closedArchiveItems = prepared.items, closedAnalytics = prepared.analytics, hasLoadedClosedArchive = archive != null,
-                initialArchiveReady = archive?.isReady == true, isInitializing = false) }
-            // First entry performs local reads only. Active networking starts after a full baseline exists.
-            if (archive?.isReady == true) refreshActiveRequests()
+                initialArchiveReady = archive?.isReady == true, isRestoringClosedArchive = false) }
         }
     }
 
     private fun loadClosedArchive(scope: ClosedRequestsSyncScope = ClosedRequestsSyncScope.All): Job? {
         val current = state.value
-        if (startOffline || current.isInitializing || current.isClosedLoading || archiveJob?.isActive == true) return null
+        if (startOffline || current.isInitializing || current.isRestoringClosedArchive || current.isClosedLoading || archiveJob?.isActive == true) return null
         if (!current.isAuthorized) { mutableState.update { it.copy(showConnection = true) }; return null }
         val epoch = sessionEpoch
-        mutableState.update { it.copy(initialLoadRequested = true, isClosedLoading = true, errorMessage = null,
-            archiveProgress = "Загрузка закрытых заявок…") }
+        mutableState.update { it.copy(initialLoadRequested = true, isClosedLoading = true, closedErrorMessage = null) }
         val job = viewModelScope.launch {
             try {
-                val archive = repository.refreshClosedArchive(ownerUserId, mutableState.value.snapshot, scope) { progress ->
-                    if (epoch == sessionEpoch) mutableState.update { it.copy(archiveProgress = progress) }
-                }
+                val archive = repository.refreshClosedArchive(ownerUserId, mutableState.value.snapshot, scope)
                 val prepared = prepareArchive(archive)
                 if (epoch != sessionEpoch) return@launch
-                val wasReady = mutableState.value.initialArchiveReady
                 mutableState.update { it.copy(closedArchive = archive, closedArchiveItems = prepared.items, closedAnalytics = prepared.analytics, hasLoadedClosedArchive = true,
-                    initialArchiveReady = archive.isReady, isClosedLoading = false, isAuthorized = true, archiveProgress = null) }
-                if (!wasReady) refreshActiveRequests()
+                    initialArchiveReady = archive.isReady, isClosedLoading = false, isAuthorized = true) }
             } catch (error: CancellationException) {
-                if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, archiveProgress = null) }
+                if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false) }
                 throw error
             }
             catch (error: Exception) {
-                if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false, archiveProgress = null,
-                    isAuthorized = it.isAuthorized && error !is SimpleOneFailure.Unauthorized, errorMessage = error.userMessage()) }
+                if (epoch == sessionEpoch) mutableState.update { it.copy(isClosedLoading = false,
+                    isAuthorized = it.isAuthorized && error !is SimpleOneFailure.Unauthorized, closedErrorMessage = error.userMessage()) }
             }
         }
         archiveJob = job

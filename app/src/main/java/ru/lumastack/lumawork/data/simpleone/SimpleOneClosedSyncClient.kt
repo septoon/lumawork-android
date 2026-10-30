@@ -3,8 +3,13 @@ package ru.lumastack.lumawork.data.simpleone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Deferred
 import kotlinx.serialization.json.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import ru.lumastack.lumawork.domain.simpleone.*
 import ru.lumastack.lumawork.domain.requests.normalizedClientCommentTIN
 
@@ -36,6 +41,8 @@ internal class SimpleOneClosedSyncClient(
     private val wideCondition: () -> String,
     private val monthlyCondition: (String) -> String,
 ) {
+    private data class CompletedRow(val id: String, val cursor: ClosedRequestsSyncCursor, val change: ClosedRequestsSyncChange?)
+
     suspend fun head(userId: String, scope: ClosedRequestsSyncScope): ClosedRequestsSyncCursor? =
         page(userId, scope, 1).first.firstOrNull()?.let { cursor(identity(it).first) }
 
@@ -43,6 +50,11 @@ internal class SimpleOneClosedSyncClient(
         userId: String, scope: ClosedRequestsSyncScope, since: ClosedRequestsSyncCursor?,
         knownVersions: Map<String, String>, onProgress: (String) -> Unit,
     ): ClosedRequestsSyncBatch {
+        val started = System.nanoTime()
+        val cursorCalls = AtomicInteger()
+        val cursorNanos = AtomicLong()
+        val completionCalls = AtomicInteger()
+        val completionNanos = AtomicLong()
         val changes = linkedMapOf<String, ClosedRequestsSyncChange>()
         var watermark = since
         repeat(3) {
@@ -56,26 +68,62 @@ internal class SimpleOneClosedSyncClient(
                 currentCoroutineContext().ensureActive()
                 val (items, hasMore) = page(userId, scope, pageNumber)
                 val before = seen.size
-                for (item in items) {
-                    val (id, number) = identity(item)
-                    if (!seen.add(id)) continue
-                    if (seen.size > 100_000) throw SimpleOneFailure.InvalidResponse
-                    val version = cursor(id)
-                    if (previous?.let { version > it } == true) throw SimpleOneFailure.InvalidResponse
-                    previous = version
-                    if (anchor == null) anchor = version
-                    if (since != null && version.updatedAt < since.updatedAt) {
-                        reachedBoundary = true
-                        break
+                // Fetch at most four rows ahead, but validate and apply in server order.
+                // Results beyond the stopping boundary are speculative and never committed.
+                coroutineScope {
+                    val queued = mutableSetOf<String>()
+                    val rows = items.filter { item ->
+                        val id = item.field("sys_id")
+                        // Validate malformed rows only when reached in order, just like cursor failures.
+                        id.isBlank() || item.field("number").isBlank() || (id !in seen && queued.add(id))
                     }
-                    if (knownVersions[id]?.let { it >= version.updatedAt } == true) continue
-                    val row = completeRow(item, id)
-                    val record = SimpleOneXlsxParser.recordFromExportRow(row)?.copy(
-                        sysId = id, sysUpdatedAt = version.updatedAt,
-                    )
-                    val change = ClosedRequestsSyncChange(id, number, version, record)
-                    if (changes[id]?.cursor?.let { it >= version } != true) changes[id] = change
-                    changed = true
+                    val inFlight = ArrayDeque<Deferred<Result<CompletedRow>>>()
+                    var scheduled = 0
+                    fun schedule() {
+                        if (scheduled >= rows.size) return
+                        val item = rows[scheduled++]
+                        inFlight.addLast(async {
+                            try {
+                                val (id, number) = identity(item)
+                                val cursorStarted = System.nanoTime()
+                                val version = cursor(id)
+                                cursorCalls.incrementAndGet()
+                                cursorNanos.addAndGet(System.nanoTime() - cursorStarted)
+                                val needsCompletion = (since == null || version.updatedAt >= since.updatedAt) &&
+                                    knownVersions[id]?.let { it >= version.updatedAt } != true
+                                val change = if (needsCompletion) {
+                                    val completionStarted = System.nanoTime()
+                                    val row = completeRow(item, id)
+                                    completionCalls.incrementAndGet()
+                                    completionNanos.addAndGet(System.nanoTime() - completionStarted)
+                                    val record = SimpleOneXlsxParser.recordFromExportRow(row)?.copy(sysId = id, sysUpdatedAt = version.updatedAt)
+                                    ClosedRequestsSyncChange(id, number, version, record)
+                                } else null
+                                Result.success(CompletedRow(id, version, change))
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (error: Exception) { Result.failure(error) }
+                        })
+                    }
+                    repeat(minOf(4, rows.size)) { schedule() }
+                    try {
+                        while (inFlight.isNotEmpty()) {
+                            val (id, version, change) = inFlight.removeFirst().await().getOrThrow()
+                            seen.add(id)
+                            if (seen.size > 100_000) throw SimpleOneFailure.InvalidResponse
+                            if (previous?.let { version > it } == true) throw SimpleOneFailure.InvalidResponse
+                            previous = version
+                            if (anchor == null) anchor = version
+                            if (since != null && version.updatedAt < since.updatedAt) {
+                                reachedBoundary = true
+                                break
+                            }
+                            if (change != null) {
+                                if (changes[id]?.cursor?.let { it >= version } != true) changes[id] = change
+                                changed = true
+                            }
+                            schedule()
+                        }
+                    } finally { inFlight.forEach { it.cancel() } }
                 }
                 onProgress("Проверено заявок: ${seen.size}")
                 if (!reachedBoundary && items.isNotEmpty() && seen.size == before) throw SimpleOneFailure.InvalidResponse
@@ -86,6 +134,9 @@ internal class SimpleOneClosedSyncClient(
             if (first != null && (watermark == null || first > watermark!!)) watermark = first
             // iOS rechecks the head only if this scan actually observed changes.
             if (!changed || first == null || head(userId, scope)?.let { it > first } != true) {
+                android.util.Log.i("SimpleOneSync", "scope=$scope changes=${changes.size} cursorCalls=${cursorCalls.get()} " +
+                    "cursorMs=${cursorNanos.get() / 1_000_000} completionCalls=${completionCalls.get()} " +
+                    "completionMs=${completionNanos.get() / 1_000_000} totalMs=${(System.nanoTime() - started) / 1_000_000}")
                 return ClosedRequestsSyncBatch(changes.values.sortedByDescending { it.cursor }, watermark)
             }
         }
@@ -100,10 +151,11 @@ internal class SimpleOneClosedSyncClient(
         val url = "$origin/list/itsm_request".toHttpUrl().newBuilder()
             .addQueryParameter("condition", "$condition^ORDERBYDESCsys_updated_at^ORDERBYDESCsys_id")
             .addQueryParameter("page", page.toString()).addQueryParameter("per_page", "20").build()
+        val started = System.nanoTime()
         val response = get(url.toString())
         val items = simpleOneListItems(response) ?: throw SimpleOneFailure.InvalidResponse
         val total = simpleOneTotalCount(response)
-        android.util.Log.i("SimpleOneSync", "scope=$scope page=$page rows=${items.size} total=$total")
+        android.util.Log.i("SimpleOneSync", "scope=$scope page=$page rows=${items.size} total=$total listMs=${(System.nanoTime() - started) / 1_000_000}")
         return items to (total?.let { page.toLong() * 20 < it } ?: (items.size == 20))
     }
 

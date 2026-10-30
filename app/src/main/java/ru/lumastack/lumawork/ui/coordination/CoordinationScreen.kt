@@ -95,7 +95,7 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
     val records = remember(state.snapshot, archiveState.records) {
         state.snapshot.regions.values.flatMap { it.requests } + state.snapshot.returnEquipment?.requests.orEmpty() + archiveState.records
     }
-    val comments = session?.let { rememberClientPersonalCommentsController(it, offline, records, BuildConfig.API_ORIGIN, json) }
+    val comments = session?.let { rememberClientPersonalCommentsController(ru.lumastack.lumawork.ui.requests.LocalClientPersonalCommentsRepository.current, offline, records) }
     var terminal by remember { mutableStateOf<String?>(null) }
     val copy: (String) -> Unit = { text ->
         (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Координация", text))

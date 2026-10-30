@@ -35,7 +35,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TextButton
@@ -126,14 +125,11 @@ fun RequestsScreen(
         if (state.mode == RequestsMode.Closed) {
             savedLists.SaveableStateProvider("closed") {
             val refreshState = rememberPullToRefreshState()
-            PullToRefreshBox(isRefreshing = state.isClosedLoading, state = refreshState, onRefresh = actions.onRefresh,
-                indicator = {
-                    if (!state.isClosedLoading) PullToRefreshDefaults.Indicator(
-                        state = refreshState, isRefreshing = false, modifier = Modifier.align(Alignment.TopCenter),
-                    )
-                }) {
+            PullToRefreshBox(isRefreshing = state.isClosedLoading, state = refreshState, onRefresh = {
+                if (!state.isOffline && state.isAuthorized && !state.isClosedLoading && !state.isRestoringClosedArchive) actions.onRefreshClosed()
+            }) {
                 ClosedRequestsContent(state.closedArchiveItems, state.searchQuery, actions.onSearchQueryChange,
-                    state.isClosedLoading, state.hasLoadedClosedArchive, state.isOffline || !state.isAuthorized,
+                    state.isClosedLoading || state.isRestoringClosedArchive, state.hasLoadedClosedArchive, state.isOffline || !state.isAuthorized,
                     actions.onOpenRequest, onOpenTerminal, personalComment = personalComment, widthClass = listWidthClass)
             }
             }
@@ -187,15 +183,18 @@ private fun RequestsListContent(
 
     PullToRefreshBox(
         isRefreshing = state.isAuthorized &&
-            (if (state.mode == RequestsMode.Active) state.isLoading else state.isClosedLoading),
+            (if (state.mode == RequestsMode.Active) state.isRefreshingActive else state.isClosedLoading),
         onRefresh = {
-            if (state.isAuthorized && !state.isLoading && !state.isClosedLoading) actions.onRefresh()
+            if (state.isAuthorized && !state.isOffline && !state.isRefreshingActive) actions.onRefreshActive()
         },
         modifier = Modifier.widthIn(max = 1120.dp).fillMaxSize(),
     ) {
-        if (state.mode == RequestsMode.Active && state.isAuthorized && !state.isLoading && visibleRequests.isEmpty()) {
+        if (state.mode == RequestsMode.Active && state.isAuthorized && !state.isRefreshingActive && visibleRequests.isEmpty()) {
             Column(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 RequestsSearchAndFilters(state = state, count = 0, actions = actions)
+                if (state.snapshot.updatedAtEpochMillis == null && !state.isOffline) {
+                    AppButton(onClick = actions.onRefreshActive) { Text("Загрузить активные заявки") }
+                }
                 ActiveRequestsEmptyState(Modifier.weight(1f).fillMaxWidth())
             }
             return@PullToRefreshBox
@@ -230,7 +229,7 @@ private fun RequestsListContent(
                 }
             } else {
                 items(visibleRequests, key = SimpleOneRequest::id) { request ->
-                    RequestCard(request, request.id == state.selectedRequest?.id, { actions.onOpenRequest(request) }, onOpenTerminal, personalComment, compact = columns > 1)
+                    RequestCard(request, request.id == state.selectedRequest?.id, { actions.onOpenRequest(request) }, onOpenTerminal, personalComment, compact = columns > 1, isHydrating = request.id in state.hydratingRequestIds)
                 }
             }
         }
@@ -349,7 +348,7 @@ private fun RequestsHeading(state: SimpleOneUiState, count: Int) {
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        if (state.isClosedLoading) {
+        if (state.mode == RequestsMode.Closed && state.isClosedLoading) {
             CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
         }
     }
@@ -441,7 +440,7 @@ internal fun SimpleOneConnectionCard(
 
 @Composable
 private fun RequestCard(request: SimpleOneRequest, selected: Boolean, onClick: () -> Unit,
-    onOpenTerminal: (String) -> Unit, personalComment: @Composable (SimpleOneRequest) -> Unit, compact: Boolean) {
+    onOpenTerminal: (String) -> Unit, personalComment: @Composable (SimpleOneRequest) -> Unit, compact: Boolean, isHydrating: Boolean) {
     val data = remember(request) { ru.lumastack.lumawork.domain.requests.RequestDetailsData(request) }
     val type = ru.lumastack.lumawork.domain.requests.closedRequestTypeTitle(data.type)
     RequestStatusCard(request.displayState, closed = false, onClick = onClick, compact = compact,
@@ -467,6 +466,7 @@ private fun RequestCard(request: SimpleOneRequest, selected: Boolean, onClick: (
             Text(data.address.ifBlank { "Информация отсутствует" }, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 18.sp), fontWeight = FontWeight.SemiBold)
         }
         if (data.terminal.isNotBlank()) RequestTerminalRow(data.terminal, onOpenTerminal)
+        if (isHydrating) RequestLoadingTitle(true, text = "Загружаю сведения…", style = MaterialTheme.typography.bodySmall)
         personalComment(request)
     }
 }

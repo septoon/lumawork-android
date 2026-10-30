@@ -65,12 +65,14 @@ class CoordinationGroupClosedRequestsRepository(
     private var networkAllowed = false
     private var pendingForceFull = false
 
+    /** With refreshOnActivate=false, restores cache and validates ongoing work without starting a network pass. */
     suspend fun activate(
         ownerUserId: String,
         simpleOneUserId: String,
         authorized: Boolean,
         region: CoordinationRegion?,
         startOffline: Boolean = false,
+        refreshOnActivate: Boolean = true,
     ) = mutex.withLock {
         val authKey = if (authorized) sessionStore.read(ownerUserId)?.authKey else null
         val next = if (!authKey.isNullOrBlank() && simpleOneUserId.isNotBlank() && region != null) {
@@ -113,7 +115,7 @@ class CoordinationGroupClosedRequestsRepository(
             refreshJob?.cancel()
             refreshJob = null
             mutableState.value = mutableState.value.copy(isLoading = false)
-        } else if (next != null) startRefreshLocked(next, forceFull = false)
+        } else if (refreshOnActivate && next != null) startRefreshLocked(next, forceFull = false)
     }
 
     suspend fun deactivate() = mutex.withLock {

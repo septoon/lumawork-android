@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.requests
 
+import ru.lumastack.lumawork.data.requests.ClientPersonalCommentsRepository
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,7 +23,6 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.Json
 import java.io.ByteArrayOutputStream
-import ru.lumastack.lumawork.BuildConfig
 import ru.lumastack.lumawork.data.simpleone.SimpleOneRepository
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.domain.requests.*
@@ -30,9 +30,12 @@ import ru.lumastack.lumawork.domain.simpleone.RequestsMode
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.shell.AppHeaderActions
-import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import ru.lumastack.lumawork.ui.theme.AppTextField
+
+internal val LocalClientPersonalCommentsRepository = staticCompositionLocalOf<ClientPersonalCommentsRepository> {
+    error("ClientPersonalCommentsRepository is provided by AppShell")
+}
 
 @Composable
 fun RequestsRoute(session: AppSession, repository: SimpleOneRepository, state: SimpleOneUiState,
@@ -43,50 +46,15 @@ fun RequestsRoute(session: AppSession, repository: SimpleOneRepository, state: S
 @Composable
 private fun RequestsRouteContent(session: AppSession, repository: SimpleOneRepository, state: SimpleOneUiState,
     widthClass: AppWidthClass, actions: RequestsActions) {
-    if (!state.initialArchiveReady) {
-        val isBusy = state.isInitializing || state.isClosedLoading || state.isLoading
-        Box(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 24.dp), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (isBusy) {
-                    RequestLoadingTitle(
-                        isLoading = true,
-                        text = "Обновляю список заявок",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                } else {
-                    AppButton(onClick = actions.onInitialLoad) { Text("Загрузить заявки") }
-                }
-                if (state.initialLoadRequested && !state.showConnection) {
-                    state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                }
-            }
-        }
-        if (state.showConnection) RequestsLoginDialog(state, actions)
-        return
-    }
-    if (!state.isAuthorized && !state.isOffline) {
-        Box(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp), contentAlignment = Alignment.TopCenter) {
-            Column(Modifier.widthIn(max = 520.dp)) { SimpleOneConnectionCard(state, actions) }
-        }
-        return
-    }
     val json = remember { Json { ignoreUnknownKeys = true; encodeDefaults = true } }
     val records = remember(state.activeRequests, state.closedArchive.requests) { state.activeRequests + state.closedArchive.requests }
-    val comments = rememberClientPersonalCommentsController(session, state.isOffline, records, BuildConfig.API_ORIGIN, json)
+    val comments = rememberClientPersonalCommentsController(LocalClientPersonalCommentsRepository.current, state.isOffline, records)
     val commentRequests = remember { mutableStateMapOf<String, ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest>() }
     val commentLookupLimit = remember { Semaphore(4) }
     var terminal by rememberSaveable { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-    val screenActions = actions.copy(onRefresh = {
-        actions.onRefresh()
-        scope.launch { comments.repository.refresh({ comments.offline }, force = true) }
-    }, onRefreshClosed = {
-        actions.onRefreshClosed()
-        scope.launch { comments.repository.refresh({ comments.offline }, force = true) }
-    })
     Box(Modifier.fillMaxSize()) {
-    RequestsScreen(state, widthClass, screenActions,
-        toolbar = { RequestsToolbar(state, screenActions, comments) },
+    RequestsScreen(state, widthClass, actions,
+        toolbar = { RequestsToolbar(state, actions, comments) },
         personalComment = { request ->
             val key = "${request.id}|${request.sysUpdatedAt}"
             val resolved = commentRequests[key] ?: request
@@ -94,8 +62,8 @@ private fun RequestsRouteContent(session: AppSession, repository: SimpleOneRepos
                 if (!state.isOffline && state.isAuthorized && comments.comments.isNotEmpty() && request.sysId.isNotBlank() &&
                     request.clientCommentTIN().isEmpty() && comments.commentFor(request) == null && key !in commentRequests) {
                     try {
-                        val detail = commentLookupLimit.withPermit { repository.requestDetails(session.user.id, request, force = true) }
-                        commentRequests[key] = detail
+                        val detail = commentLookupLimit.withPermit { repository.cachedRequestDetails(session.user.id, request) }
+                        if (detail != null) commentRequests[key] = detail
                     } catch (error: CancellationException) { throw error }
                     catch (_: Exception) { /* The add action remains available when SimpleOne is unavailable. */ }
                 }
@@ -111,6 +79,7 @@ private fun RequestsRouteContent(session: AppSession, repository: SimpleOneRepos
             repository, json, onOpenTerminal = { terminal = it }) })
     ClientPersonalCommentsHost(comments, Modifier.align(Alignment.BottomCenter))
     }
+    if (state.showConnection) RequestsLoginDialog(state, actions)
     terminal?.let { id -> WarehouseRequestsDialog(id, repository, session.user.id, state.isOffline, { terminal = null }) }
 }
 
@@ -136,7 +105,8 @@ private fun RequestsToolbar(state: SimpleOneUiState, actions: RequestsActions, c
     var cleanupPeriod by remember { mutableStateOf(false) }
     var pendingPeriod by remember { mutableStateOf<ClosedRequestsPeriod?>(null) }
     var confirmPeriod by remember { mutableStateOf(false) }
-    val busy = state.isLoading || state.isClosedLoading || fileBusy
+    val refreshingComments by comments.repository.isRefreshing.collectAsState()
+    val archiveBusy = state.isClosedLoading || state.isRestoringClosedArchive || fileBusy
     val import = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             fileBusy = true
@@ -182,31 +152,35 @@ private fun RequestsToolbar(state: SimpleOneUiState, actions: RequestsActions, c
     val dates = remember(state.closedArchiveItems) { state.closedArchiveItems.mapNotNull { it.day } }
     AppHeaderActions {
         Box {
-            IconButton(onClick = { expanded = true }, enabled = !busy) { Icon(Icons.Default.MoreVert, "Меню заявок", Modifier.rotate(90f)) }
+            IconButton(onClick = { expanded = true }) { Icon(Icons.Default.MoreVert, "Меню заявок", Modifier.rotate(90f)) }
             DropdownMenu(expanded, { expanded = false }) {
                 fun act(action: () -> Unit) { expanded = false; action() }
-                DropdownMenuItem({ Text("Обновить SimpleOne") }, { act { actions.onRefreshActive(); scope.launch { comments.repository.refresh({ comments.offline }, force = true) } } }, enabled = !state.isOffline)
-                DropdownMenuItem({ Text("Обновить закрытые из SimpleOne") }, { act(actions.onRefreshClosed) }, enabled = !state.isOffline)
+                DropdownMenuItem({ Text("Обновить активные из SimpleOne") }, { act(actions.onRefreshActive) }, enabled = !state.isOffline && !state.isRefreshingActive)
+                DropdownMenuItem({ Text("Обновить личные комментарии") }, { act { scope.launch { comments.repository.refresh({ comments.offline }, force = true) } } }, enabled = !state.isOffline && !refreshingComments)
+                DropdownMenuItem({ Text("Обновить закрытые из SimpleOne") }, { act(actions.onRefreshClosed) }, enabled = !state.isOffline && !archiveBusy)
                 DropdownMenuItem({ Text("Комментарий") }, { act { comments.openEditor() } }, enabled = !state.isOffline)
                 DropdownMenuItem({ Text("Выйти из SimpleOne") }, { act(actions.onSignOut) }, enabled = state.isAuthorized)
                 HorizontalDivider()
                 DropdownMenuItem({ Text(if (state.closedArchive.requests.isEmpty()) "Загрузить заявки" else "Обновить заявки") },
-                    { act { import.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) } })
-                DropdownMenuItem({ Text("Экспорт заявок XLSX") }, { act { export.launch("Инженер.xlsx") } }, enabled = state.closedArchive.requests.isNotEmpty())
+                    { act { import.launch(arrayOf("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) } }, enabled = !archiveBusy)
+                DropdownMenuItem({ Text("Экспорт заявок XLSX") }, { act { export.launch("Инженер.xlsx") } }, enabled = !archiveBusy && state.closedArchive.requests.isNotEmpty())
                 if (state.mode == RequestsMode.Closed) {
                     HorizontalDivider()
-                    DropdownMenuItem({ Text("Удалить за период…") }, { act { cleanupPeriod = true } }, enabled = dates.isNotEmpty())
-                    DropdownMenuItem({ Text("Удалить все закрытые заявки", color = MaterialTheme.colorScheme.error) }, { act { cleanupAll = true } }, enabled = state.closedArchive.requests.isNotEmpty())
+                    DropdownMenuItem({ Text("Удалить за период…") }, { act { cleanupPeriod = true } }, enabled = !archiveBusy && dates.isNotEmpty())
+                    DropdownMenuItem({ Text("Удалить все закрытые заявки", color = MaterialTheme.colorScheme.error) }, { act { cleanupAll = true } }, enabled = !archiveBusy && state.closedArchive.requests.isNotEmpty())
                 }
             }
         }
     }
     Column {
-        if (busy) Row(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding), horizontalArrangement = Arrangement.End) {
-            if (state.isClosedLoading) RequestLoadingTitle(true, text = state.archiveProgress ?: "Обновляю список заявок", style = MaterialTheme.typography.bodyMedium)
-            else CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        if (fileBusy) {
+            CircularProgressIndicator(Modifier.padding(horizontal = AppContentHorizontalPadding).size(20.dp), strokeWidth = 2.dp)
         }
-        state.errorMessage?.let { Text(it, Modifier.padding(horizontal = AppContentHorizontalPadding), color = MaterialTheme.colorScheme.error) }
+        val error = if (state.mode == RequestsMode.Active) state.errorMessage else state.closedErrorMessage
+        error?.let { Text(it, Modifier.padding(horizontal = AppContentHorizontalPadding), color = MaterialTheme.colorScheme.error) }
+        if (state.mode == RequestsMode.Closed && !state.initialArchiveReady && !archiveBusy) {
+            TextButton(onClick = actions.onRefreshClosed, enabled = !state.isOffline && state.isAuthorized) { Text("Загрузить закрытый архив") }
+        }
         message?.let { text -> Row(Modifier.padding(horizontal = AppContentHorizontalPadding), verticalAlignment = Alignment.CenterVertically) {
             Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = { message = null }) { Text("Закрыть") }
