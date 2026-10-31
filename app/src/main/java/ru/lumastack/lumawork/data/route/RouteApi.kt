@@ -37,6 +37,7 @@ import ru.lumastack.lumawork.domain.route.normalizeRouteDay
 interface RouteApi {
     suspend fun fetchDay(token: String, date: String, settings: RouteSettings, workType: RouteWorkType = RouteWorkType.Pos): RouteDayRecord?
     suspend fun fetchMonth(token: String, month: String, settings: RouteSettings): List<RouteDayRecord> = emptyList()
+    suspend fun fetchHistory(token: String, beforeDate: String, settings: RouteSettings): List<RouteDayRecord> = emptyList()
     suspend fun fetchOfficeAddresses(token: String): List<String> = emptyList()
     suspend fun suggestedOdometer(token: String, month: String): Int? = null
     suspend fun sendGsmReport(token: String, month: String): GsmReportResult = throw RouteFailure.InvalidResponse
@@ -100,6 +101,14 @@ class OkHttpRouteApi(
         return execute(request).use { response ->
             val body = requireSuccess(response)
             if (body.isBlank()) emptyList() else parser.parseMonth(json.parseToJsonElement(body), month, settings)
+        }
+    }
+
+    override suspend fun fetchHistory(token: String, beforeDate: String, settings: RouteSettings): List<RouteDayRecord> {
+        val until = java.time.LocalDate.parse(beforeDate).minusDays(1)
+        return execute(requestBuilder("/api/v2/routes?to=$until", token).get().build()).use { response ->
+            val body = requireSuccess(response)
+            if (body.isBlank()) emptyList() else parser.parseHistory(json.parseToJsonElement(body), settings)
         }
     }
 
@@ -264,6 +273,16 @@ class RoutePayloadParser {
 
     fun parseMonth(payload: JsonElement, month: String, settings: RouteSettings): List<RouteDayRecord> {
         val dates = (1..java.time.YearMonth.parse(month).lengthOfMonth()).map { java.time.YearMonth.parse(month).atDay(it).toString() }
+        return dates.flatMap { date -> RouteWorkType.entries.mapNotNull { parseDay(payload, date, settings, it) } }
+    }
+
+    fun parseHistory(payload: JsonElement, settings: RouteSettings): List<RouteDayRecord> {
+        val dates = when (payload) {
+            is JsonArray -> payload.objects().map { it.string("date") }
+            is JsonObject -> (payload["records"] as? JsonArray)?.objects()?.map { it.string("date") }
+                ?: (payload["days"] as? JsonObject ?: payload).keys.map { it.take(10) } + payload.string("date")
+            else -> emptyList()
+        }.filter { runCatching { java.time.LocalDate.parse(it) }.isSuccess }.distinct()
         return dates.flatMap { date -> RouteWorkType.entries.mapNotNull { parseDay(payload, date, settings, it) } }
     }
 

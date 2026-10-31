@@ -49,6 +49,7 @@ import ru.lumastack.lumawork.data.route.RouteRepository
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.domain.route.RouteDayRecord
 import ru.lumastack.lumawork.domain.route.hasWorkData
+import ru.lumastack.lumawork.domain.route.mergeRouteArchiveRecords
 import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppTextField
 import ru.lumastack.lumawork.ui.theme.AppSurfaces
@@ -68,6 +69,7 @@ internal fun RouteArchiveSheet(
     var monthKey by rememberSaveable { mutableStateOf(state.record.date.take(7)) }
     var selectedDay by rememberSaveable { mutableStateOf<String?>(state.record.date) }
     var records by remember { mutableStateOf(emptyList<RouteDayRecord>()) }
+    var remoteRecords by remember { mutableStateOf(emptyList<RouteDayRecord>()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableIntStateOf(0) }
@@ -81,25 +83,28 @@ internal fun RouteArchiveSheet(
     val haptics = LocalHapticFeedback.current
     val distanceFormat = remember { NumberFormat.getNumberInstance(Locale.forLanguageTag("ru")).apply { maximumFractionDigits = 1; isGroupingUsed = false } }
     val month = YearMonth.parse(monthKey)
-    LaunchedEffect(monthKey, revision, refreshRevision) {
+    LaunchedEffect(monthKey, revision, refreshRevision, state.sentReport) {
         loading = true
         error = null
         records = records.filter { it.date.startsWith(monthKey) }
+        remoteRecords = remoteRecords.filter { it.date.startsWith(monthKey) }
         try {
             val local = repository.readMonth(session, monthKey)
             records = (records + local).associateBy { it.workType.storageKey(it.date) }.values.toList()
             if (!offline) {
                 val remote = repository.refreshMonth(session, monthKey, state.settings)
-                records = (remote + repository.readMonth(session, monthKey).filter { !it.sent })
-                    .associateBy { it.workType.storageKey(it.date) }.values.toList()
+                remoteRecords = remote
+                records = mergeRouteArchiveRecords(repository.readMonth(session, monthKey).filter { !it.sent }, remote)
             }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { error = "Не удалось обновить архив. Показаны сохранённые маршруты." }
         finally { loading = false }
     }
-    val displayed = remember(records, state.record, monthKey) {
-        (records + listOf(state.record).filter { it.date.startsWith(monthKey) && (it.hasWorkData() || it.distanceKm != null || it.sent) })
-            .associateBy { it.workType.storageKey(it.date) }.values.toList()
+    val displayed = remember(records, remoteRecords, state.record, monthKey) {
+        mergeRouteArchiveRecords(
+            records + listOf(state.record).filter { it.date.startsWith(monthKey) && (it.hasWorkData() || it.distanceKm != null || it.sent) },
+            remoteRecords,
+        )
     }
     BackHandler(enabled = deleting) { }
     val archiveContent: @Composable () -> Unit = {
@@ -279,6 +284,7 @@ internal fun RouteArchiveSheet(
                     try {
                         onDeleteDay(date)
                         records = records.filter { it.date != date }
+                        remoteRecords = remoteRecords.filter { it.date != date }
                         if (selectedDay == date) selectedDay = null
                         confirmDeleteDay = null
                     } catch (cancelled: CancellationException) { throw cancelled }

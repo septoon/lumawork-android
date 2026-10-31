@@ -1,6 +1,7 @@
 package ru.lumastack.lumawork.data.route
 
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -10,6 +11,8 @@ import ru.lumastack.lumawork.domain.route.RouteDayRecord
 import ru.lumastack.lumawork.domain.route.RouteSettings
 import ru.lumastack.lumawork.domain.route.defaultRouteDay
 import ru.lumastack.lumawork.domain.route.normalizeRouteDay
+import ru.lumastack.lumawork.domain.route.previousRouteFinishKind
+import ru.lumastack.lumawork.domain.route.hasWorkData
 
 class RouteRepository(
     private val api: RouteApi,
@@ -42,6 +45,26 @@ class RouteRepository(
     }
 
     suspend fun readQueued(session: AppSession): List<RouteDayRecord> = cache.readQueued(session.user.id)
+    suspend fun newDay(session: AppSession, date: String, settings: RouteSettings,
+        workType: RouteWorkType, refreshHistory: Boolean): RouteDayRecord {
+        val revision = cacheMutex.withLock { archiveRevision }
+        val remote = if (refreshHistory) try { api.fetchHistory(session.token, date, settings) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { emptyList() } else emptyList()
+        return cacheMutex.withLock {
+            val acceptedRemote = remote.takeIf { revision == archiveRevision }.orEmpty()
+            val local = cache.readAll(session.user.id)
+            val history = (acceptedRemote + local.filter { it.hasWorkData() || it.sent || it.distanceKm != null })
+                .associateBy { it.workType.storageKey(it.date) }.values.toList()
+            val excluded = cache.excludedDates(session.user.id)
+            // Keep remote history available offline without replacing local edits.
+            acceptedRemote.filter { candidate -> candidate.date < date && candidate.date !in excluded &&
+                local.none { it.date == candidate.date && it.workType == candidate.workType &&
+                    (it.hasWorkData() || it.sent || it.distanceKm != null || it.hasManualEndpointSelection) } }
+                .forEach { cache.save(session.user.id, it) }
+            defaultRouteDay(date, settings, workType, previousRouteFinishKind(history, date, workType, settings, excluded))
+        }
+    }
     suspend fun readMonth(session: AppSession, month: String): List<RouteDayRecord> = cache.readMonth(session.user.id, month)
     suspend fun refreshMonth(session: AppSession, month: String, settings: RouteSettings): List<RouteDayRecord> {
         val revision = cacheMutex.withLock { archiveRevision }

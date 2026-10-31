@@ -36,7 +36,7 @@ import androidx.compose.ui.unit.dp
 import ru.lumastack.lumawork.R
 import ru.lumastack.lumawork.ui.shell.AppHeaderContent
 import ru.lumastack.lumawork.ui.shell.LocalAppHeader
-import ru.lumastack.lumawork.ui.theme.LocalAppAppearance
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
 import ru.lumastack.lumawork.ui.theme.LocalAppDarkTheme
 
 data class ToolsPalette(
@@ -58,18 +58,6 @@ internal object ToolsIcons {
     val system: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.tools_system)
     val folder: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_nav_folder_open)
     val book: ImageVector @Composable get() = ImageVector.vectorResource(R.drawable.ic_nav_menu_book)
-}
-
-@Composable internal fun toolsScreenBackground(): Brush {
-    val dark = LocalAppDarkTheme.current
-    val colored = LocalAppAppearance.current.backgroundEnabled
-    val plain = MaterialTheme.colorScheme.background
-    return remember(dark, colored, plain) {
-        Brush.linearGradient(if (!colored) listOf(plain, plain)
-        else if (dark) listOf(Color(0xFF111E30), Color(0xFF142B34), Color(0xFF142238))
-        else if (colored) listOf(Color(0xFFCBE9FF), Color(0xFFEAF9F6), Color(0xFFEBF5FF))
-        else listOf(Color(0xFFF2F6FC), Color(0xFFF2F6FC)))
-    }
 }
 
 @Composable internal fun ToolsTheme(content: @Composable () -> Unit) {
@@ -158,7 +146,7 @@ internal object ToolsIcons {
     val currentTitles by rememberUpdatedState(titles)
     val currentSelected by rememberUpdatedState(selected)
     val currentSelect by rememberUpdatedState(onSelect)
-    val backdrop = toolsScreenBackground()
+    val backdrop = appScreenBackground()
     DisposableEffect(header, backdrop) {
         val entry = AppHeaderContent(title = { ToolsTabs(currentTitles, currentSelected, currentSelect) }, actions = {}, background = backdrop)
         header.content = entry

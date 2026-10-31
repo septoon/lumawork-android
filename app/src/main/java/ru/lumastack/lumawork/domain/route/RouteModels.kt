@@ -52,7 +52,12 @@ data class RouteDayRecord(
     val sent: Boolean = false,
     val workType: RouteWorkType = RouteWorkType.Pos,
     val queuedForSend: Boolean = false,
+    val hasManualEndpointSelection: Boolean = false,
 )
+
+/** Archive snapshots and editor drafts are separate: a server report wins for the same day/type. */
+fun mergeRouteArchiveRecords(drafts: List<RouteDayRecord>, reports: List<RouteDayRecord>): List<RouteDayRecord> =
+    (drafts + reports).associateBy { it.workType.storageKey(it.date) }.values.toList()
 
 data class RouteSettings(
     val warehouseAddress: String,
@@ -82,13 +87,14 @@ data class RouteSettings(
 enum class RouteEndpointKind(val title: String) { Warehouse("Склад"), Home("Дом") }
 enum class RouteEndpointRole(val title: String) { Start("Старт"), Finish("Финиш") }
 
-fun defaultRouteDay(date: String, settings: RouteSettings, workType: RouteWorkType = RouteWorkType.Pos): RouteDayRecord = RouteDayRecord(
+fun defaultRouteDay(date: String, settings: RouteSettings, workType: RouteWorkType = RouteWorkType.Pos,
+    startKind: RouteEndpointKind = RouteEndpointKind.Warehouse): RouteDayRecord = RouteDayRecord(
     date = date,
     workType = workType,
     stops = listOf(
         RouteStop(
             id = "start-$date",
-            address = settings.startAddress,
+            address = settings.address(startKind).ifBlank { settings.startAddress },
             reason = "Подготовка оборудования",
             status = RouteStopStatus.Done,
         ),
@@ -101,6 +107,16 @@ fun defaultRouteDay(date: String, settings: RouteSettings, workType: RouteWorkTy
         ),
     ),
 )
+
+fun previousRouteFinishKind(records: List<RouteDayRecord>, date: String, workType: RouteWorkType,
+    settings: RouteSettings, excludedDates: Set<String> = emptySet()): RouteEndpointKind {
+    val previous = records.filter { it.date < date && it.date !in excludedDates &&
+        (it.hasWorkData() || it.sent || it.distanceKm != null) }
+        .maxWithOrNull(compareBy<RouteDayRecord> { it.date }.thenBy { it.workType == workType })
+    val finish = previous?.stops?.lastOrNull()?.address?.trim().orEmpty()
+    return if (settings.homeAddress.isNotBlank() && finish.equals(settings.homeAddress.trim(), ignoreCase = true))
+        RouteEndpointKind.Home else RouteEndpointKind.Warehouse
+}
 
 fun normalizeRouteDay(
     record: RouteDayRecord,

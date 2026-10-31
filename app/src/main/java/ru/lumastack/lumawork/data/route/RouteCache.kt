@@ -13,6 +13,7 @@ import ru.lumastack.lumawork.domain.route.RouteDayRecord
 interface RouteCache {
     suspend fun read(userId: String, date: String, workType: RouteWorkType = RouteWorkType.Pos): RouteDayRecord?
     suspend fun readQueued(userId: String): List<RouteDayRecord> = emptyList()
+    suspend fun readAll(userId: String): List<RouteDayRecord> = emptyList()
     suspend fun readMonth(userId: String, monthKey: String): List<RouteDayRecord> = emptyList()
     suspend fun hasOdometerSetting(userId: String, monthKey: String): Boolean = readOdometer(userId, monthKey) != null
     suspend fun readOdometer(userId: String, monthKey: String): Int? = readMonth(userId, monthKey).firstNotNullOfOrNull { it.periodStartOdometer }
@@ -38,10 +39,14 @@ class SharedPreferencesRouteCache(
     }
 
     override suspend fun readQueued(userId: String): List<RouteDayRecord> = withContext(Dispatchers.IO) {
+        readAll(userId).filter { it.queuedForSend }
+    }
+
+    override suspend fun readAll(userId: String): List<RouteDayRecord> = withContext(Dispatchers.IO) {
         val prefix = "day_${userId.sha256()}_"
         preferences.all.asSequence().filter { (key, _) -> key.startsWith(prefix) }
             .mapNotNull { (_, value) -> (value as? String)?.let { raw -> runCatching { json.decodeFromString<RouteDayRecord>(raw) }.getOrNull() } }
-            .filter { it.queuedForSend }.toList()
+            .toList()
     }
 
     override suspend fun readMonth(userId: String, monthKey: String): List<RouteDayRecord> = withContext(Dispatchers.IO) {

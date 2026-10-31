@@ -36,7 +36,7 @@ data class SimpleOneUiState(
     val closedAnalytics: ClosedRequestsAnalytics = ClosedRequestsAnalytics(),
     val mode: RequestsMode = RequestsMode.Active,
     val searchQuery: String = "",
-    val statusFilter: ActiveRequestsStatusFilter = ActiveRequestsStatusFilter.Available,
+    val statusFilter: ActiveRequestsStatusFilter = ActiveRequestsStatusFilter.All,
     val sortOrder: ActiveRequestsSortOrder = ActiveRequestsSortOrder.RegisteredAt,
     val selectedRequest: SimpleOneRequest? = null,
     val isInitializing: Boolean = true,
@@ -67,7 +67,7 @@ class SimpleOneViewModel(
     private val ownerUserId: String,
     private val startOffline: Boolean,
 ) : ViewModel() {
-    private val mutableState = MutableStateFlow(SimpleOneUiState(isOffline = startOffline))
+    private val mutableState = MutableStateFlow(SimpleOneUiState(isOffline = startOffline, statusFilter = repository.rememberedStatusFilter(ownerUserId)))
     val state: StateFlow<SimpleOneUiState> = mutableState.asStateFlow()
     private var activeJob: Job? = null
     private var archiveJob: Job? = null
@@ -86,7 +86,10 @@ class SimpleOneViewModel(
     fun updateUsername(value: String) { mutableState.update { it.copy(username = value, errorMessage = null) } }
     fun updatePassword(value: String) { mutableState.update { it.copy(password = value, errorMessage = null) } }
     fun updateSearchQuery(value: String) { mutableState.update { it.copy(searchQuery = value) } }
-    fun updateStatusFilter(value: ActiveRequestsStatusFilter) { mutableState.update { it.copy(statusFilter = value) } }
+    fun updateStatusFilter(value: ActiveRequestsStatusFilter) {
+        repository.saveStatusFilter(ownerUserId, value)
+        mutableState.update { it.copy(statusFilter = value) }
+    }
     fun updateSortOrder(value: ActiveRequestsSortOrder) { mutableState.update { it.copy(sortOrder = value) } }
     fun updateMode(value: RequestsMode) {
         closeRequest()

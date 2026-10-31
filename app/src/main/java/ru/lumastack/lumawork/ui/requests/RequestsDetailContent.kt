@@ -19,6 +19,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -26,7 +28,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
@@ -38,6 +42,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -45,6 +52,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
@@ -72,6 +80,8 @@ import ru.lumastack.lumawork.ui.theme.AppButton
 import ru.lumastack.lumawork.ui.theme.AppFormDialog
 import ru.lumastack.lumawork.ui.theme.AppCard
 import ru.lumastack.lumawork.ui.theme.AppSurfaces
+import ru.lumastack.lumawork.ui.theme.AppModalHeader
+import ru.lumastack.lumawork.ui.theme.AppModalSheet
 import ru.lumastack.lumawork.ui.theme.LocalAppDarkTheme
 import ru.lumastack.lumawork.ui.shell.AppHeaderActions
 
@@ -372,6 +382,8 @@ private fun EvotorDriverActions(api: RequestReferenceApi, session: AppSession, o
     val key = remember(session.user.id) { java.security.MessageDigest.getInstance("SHA-256").digest(session.user.id.toByteArray()).joinToString("") { "%02x".format(it) } }
     var links by remember(key) { mutableStateOf(cache.getString("$key-aisino", AISINO_DEFAULT).orEmpty() to cache.getString("$key-pax", PAX_DEFAULT).orEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
+    var qrTitle by rememberSaveable { mutableStateOf<String?>(null) }
+    var qrUrl by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(api, session.token, offline) {
         if (!offline) try {
             links = api.drivers(session.token)
@@ -380,21 +392,81 @@ private fun EvotorDriverActions(api: RequestReferenceApi, session: AppSession, o
         catch (_: Exception) { error = "Не удалось обновить ссылки драйверов. Показаны сохранённые." }
     }
     RequestActionsCard("Драйвер Эвотор") {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            listOf("Драйвер Aisino" to links.first, "Драйвер PAX" to links.second).forEach { (title, url) ->
-                AppButton(onClick = { open(url) }, enabled = url.isNotBlank(), modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(16.dp), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp)) {
-                    Column(Modifier.fillMaxWidth().heightIn(min = 52.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Icon(RequestDetailIcons.Download, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                            Icon(RequestDetailIcons.External, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val drivers = listOf("Драйвер Aisino" to links.first, "Драйвер PAX" to links.second)
+            val showQr: (String, String) -> Unit = { title, url -> qrTitle = title; qrUrl = url }
+            if (maxWidth < 280.dp * LocalDensity.current.fontScale) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    drivers.forEach { (title, url) ->
+                        EvotorDriverCard(title, url, open, { showQr(title, url) }, Modifier.fillMaxWidth())
+                    }
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    drivers.forEach { (title, url) ->
+                        EvotorDriverCard(title, url, open, { showQr(title, url) }, Modifier.weight(1f))
                     }
                 }
             }
         }
         error?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    }
+    qrUrl?.let { url ->
+        DriverQrSheet(qrTitle.orEmpty(), url) { qrUrl = null; qrTitle = null }
+    }
+}
+
+@Composable
+private fun EvotorDriverCard(title: String, url: String, open: (String) -> Unit, showQr: () -> Unit, modifier: Modifier) {
+    AppCard(modifier, shape = RoundedCornerShape(20.dp)) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(Triple("Открыть", RequestDetailIcons.External, { open(url) }),
+                    Triple("QR-код", RequestDetailIcons.QrCode, showQr)).forEachIndexed { index, (label, icon, action) ->
+                    AppButton(onClick = action, enabled = url.isNotBlank(), modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (index == 0) MaterialTheme.colorScheme.primary.copy(alpha = .12f) else AppSurfaces.subpanel,
+                            contentColor = if (index == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant),
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp)) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(icon, null, Modifier.size(24.dp))
+                            Text(label, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DriverQrSheet(title: String, url: String, onDismiss: () -> Unit) {
+    val qr by produceState<Result<ImageBitmap>?>(null, url) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching {
+                com.journeyapps.barcodescanner.BarcodeEncoder()
+                    .encodeBitmap(url, com.google.zxing.BarcodeFormat.QR_CODE, 768, 768).asImageBitmap()
+            }
+        }
+    }
+    AppModalSheet(onDismiss, maxWidth = 480.dp) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            AppModalHeader(title, onDismiss)
+            Text("Отсканируйте QR-код, чтобы открыть ссылку на драйвер", textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box(Modifier.widthIn(max = 320.dp).fillMaxWidth().aspectRatio(1f).background(Color.White), contentAlignment = Alignment.Center) {
+                val bitmap = qr?.getOrNull()
+                when {
+                    bitmap != null -> Image(bitmap, "QR-код: $title", Modifier.fillMaxSize(), filterQuality = FilterQuality.None)
+                    qr == null -> CircularProgressIndicator()
+                    else -> Text("Не удалось создать QR-код", Modifier.padding(16.dp), color = Color.Black, textAlign = TextAlign.Center)
+                }
+            }
+            SelectionContainer { Text(url, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center) }
+        }
     }
 }
 
@@ -466,6 +538,7 @@ internal object RequestDetailIcons {
     val External = outline("External", "M6 18L18 6 M6 6H18V18")
     val Browser = outline("Browser", "M22 12A10 10 0 1 1 2 12A10 10 0 1 1 22 12 M16 8L14 14L8 16L10 10Z")
     val Download = outline("Download", "M12 2V15 M7 10L12 15L17 10 M5 6H2V22H22V6H19")
+    val QrCode = outline("QrCode", "M3 3H9V9H3Z M15 3H21V9H15Z M3 15H9V21H3Z M6 6H6.01 M18 6H18.01 M6 18H6.01 M15 15H18V18H21V21H18 M21 15V15.01 M15 18V21")
     private fun outline(name: String, path: String) = ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply {
         addPath(androidx.compose.ui.graphics.vector.PathParser().parsePathString(path).toNodes(),
             fill = null, stroke = androidx.compose.ui.graphics.SolidColor(Color.Black), strokeLineWidth = 1.8f,

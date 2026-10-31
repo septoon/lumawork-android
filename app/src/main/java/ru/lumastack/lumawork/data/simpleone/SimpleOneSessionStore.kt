@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import ru.lumastack.lumawork.data.session.EncryptedValueStore
+import ru.lumastack.lumawork.domain.simpleone.ActiveRequestsStatusFilter
 
 @Serializable
 data class StoredSimpleOneSession(
@@ -21,6 +22,8 @@ interface SimpleOneSessionStore {
     fun clear(ownerUserId: String)
     fun readUsername(ownerUserId: String): String
     fun saveUsername(ownerUserId: String, username: String)
+    fun readStatusFilter(ownerUserId: String): ActiveRequestsStatusFilter = ActiveRequestsStatusFilter.All
+    fun saveStatusFilter(ownerUserId: String, filter: ActiveRequestsStatusFilter) {}
 }
 
 class EncryptedSimpleOneSessionStore(
@@ -57,6 +60,15 @@ class EncryptedSimpleOneSessionStore(
 
     override fun saveUsername(ownerUserId: String, username: String) {
         preferences.edit { putString(usernameKey(ownerUserId), username.trim()) }
+    }
+
+    override fun readStatusFilter(ownerUserId: String): ActiveRequestsStatusFilter {
+        val saved = preferences.getString("status_filter_${ownerUserId.sha256()}", null)
+        return ActiveRequestsStatusFilter.entries.firstOrNull { it.name == saved } ?: ActiveRequestsStatusFilter.All
+    }
+
+    override fun saveStatusFilter(ownerUserId: String, filter: ActiveRequestsStatusFilter) {
+        preferences.edit { putString("status_filter_${ownerUserId.sha256()}", filter.name) }
     }
 
     private fun usernameKey(ownerUserId: String): String = "username_${ownerUserId.sha256()}"

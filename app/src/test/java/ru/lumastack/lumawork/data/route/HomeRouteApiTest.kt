@@ -14,6 +14,21 @@ import ru.lumastack.lumawork.data.fuel.OkHttpFuelApi
 import ru.lumastack.lumawork.domain.fuel.FuelDraft
 
 class HomeRouteApiTest {
+    @Test fun `previous route history keeps endpoints and both work types across months`() = runBlocking {
+        val response = """{"records":[{"date":"2026-09-30","workType":"ARM","distanceKm":12,"stops":[{"address":"Склад"},{"address":"Клиент"},{"address":"Дом"}]}]}"""
+        val api = OkHttpRouteApi("https://api.test", client(response) { request ->
+            assertEquals("GET", request.method)
+            assertEquals("/api/v2/routes", request.url.encodedPath)
+            assertEquals("2026-09-30", request.url.queryParameter("to"))
+            assertNull(request.url.queryParameter("from"))
+        })
+        val settings = RouteSettings("Склад", "Дом")
+        val history = api.fetchHistory("token", "2026-10-01", settings)
+        assertEquals(1, history.size)
+        assertEquals(RouteWorkType.Arm, history.single().workType)
+        assertEquals("Дом", history.single().stops.last().address)
+        assertEquals(RouteEndpointKind.Home, previousRouteFinishKind(history, "2026-10-01", RouteWorkType.Pos, settings))
+    }
     private fun client(response: String, inspect: (Request) -> Unit = {}) = OkHttpClient.Builder().addInterceptor { chain ->
         val request = chain.request()
         assertEquals("Bearer token", request.header("Authorization"))

@@ -222,12 +222,12 @@ class RouteViewModel(
     fun updateEndpoint(role: RouteEndpointRole, kind: RouteEndpointKind) {
         val address = settings.address(kind)
         if (address.isBlank()) return
-        edit { record ->
+        edit(force = true) { record ->
             val index = if (role == RouteEndpointRole.Start) 0 else record.stops.lastIndex
             val stops = record.stops.toMutableList()
             val changed = stops[index].address.trim() != address.trim()
             stops[index] = stops[index].copy(address = address)
-            record.copy(stops = stops, distanceKm = record.distanceKm.takeUnless { changed })
+            record.copy(stops = stops, distanceKm = record.distanceKm.takeUnless { changed }, hasManualEndpointSelection = true)
         }
     }
 
@@ -299,15 +299,17 @@ class RouteViewModel(
                     mutableState.update { it.copy(record = defaultRouteDay(date, settings, workType).copy(periodStartOdometer = current.periodStartOdometer)) }
                 }
                 val local = persistMutex.withLock { repository.readLocal(session, date, settings, workType) }
+                val initialDay = local ?: repository.newDay(session, date, settings, workType, refreshHistory = !startOffline)
                 if (generation != requestedGeneration) return@launch
                 val odometer = repository.readOdometer(session, date.take(7))
                 val hasOdometerSetting = repository.hasOdometerSetting(session, date.take(7))
                 if (generation != requestedGeneration) return@launch
-                if (editRevision == initialRevision) mutableState.update { it.copy(record = (local ?: it.record).copy(periodStartOdometer = if (hasOdometerSetting) odometer else (local ?: it.record).periodStartOdometer)) }
+                if (editRevision == initialRevision) mutableState.update { it.copy(record = initialDay.copy(periodStartOdometer = if (hasOdometerSetting) odometer else initialDay.periodStartOdometer)) }
                 val requestedRecord = state.value.record
                 val requestedRevision = editRevision
                 if (!startOffline) {
-                    val remote = repository.refresh(session, date, settings, requestedRecord, workType)
+                    val remote = repository.refresh(session, date, settings,
+                        if (local == null && editRevision == initialRevision) null else requestedRecord, workType)
                     if (remote != null) persistMutex.withLock {
                         if (generation == requestedGeneration && editRevision == requestedRevision) {
                             val accepted = remote.copy(periodStartOdometer = if (hasOdometerSetting) odometer else remote.periodStartOdometer)
@@ -378,11 +380,11 @@ class RouteViewModel(
         edit { transform(it, normalized.toIntOrNull()) }
     }
 
-    private fun edit(transform: (RouteDayRecord) -> RouteDayRecord) {
+    private fun edit(force: Boolean = false, transform: (RouteDayRecord) -> RouteDayRecord) {
         if (state.value.isDeletingArchivedDay) return
         val previous = state.value.record
         val updated = transform(previous)
-        if (previous == updated) return
+        if (previous == updated && !force) return
         editRevision++
         val snapshot = updated.copy(sent = false, queuedForSend = false, reportedDistanceKm = null,
             reportedPeriodStartOdometer = null, routeSummary = null, requestNumbersSummary = null)

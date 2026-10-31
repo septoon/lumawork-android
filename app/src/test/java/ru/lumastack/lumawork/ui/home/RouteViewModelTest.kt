@@ -24,6 +24,7 @@ import ru.lumastack.lumawork.data.route.RouteCache
 import ru.lumastack.lumawork.data.route.RouteRepository
 import ru.lumastack.lumawork.domain.model.AppSession
 import ru.lumastack.lumawork.domain.model.AppUser
+import ru.lumastack.lumawork.domain.model.UserProfile
 import ru.lumastack.lumawork.domain.route.RouteDayRecord
 import ru.lumastack.lumawork.domain.route.RouteEndpointKind
 import ru.lumastack.lumawork.domain.route.RouteEndpointRole
@@ -43,6 +44,81 @@ class RouteViewModelTest {
 
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }
     @After fun tearDown() { Dispatchers.resetMain() }
+
+    @Test fun `new day starts at previous working day finish across a month and blank days`() = runTest(dispatcher) {
+        cache.days["2026-09-30"] = previousRoute("2026-09-30", "Дом")
+        cache.days["2026-10-15"] = defaultRouteDay("2026-10-15", settings)
+        cache.days["2026-10-17"] = previousRoute("2026-10-17", settings.startAddress)
+        val model = homeModel()
+        advanceUntilIdle()
+        assertEquals("Дом", model.state.value.record.stops.first().address)
+        assertEquals(settings.startAddress, model.state.value.record.stops.last().address)
+    }
+
+    @Test fun `latest warehouse finish takes priority over older home finish`() = runTest(dispatcher) {
+        cache.days["2026-10-14"] = previousRoute("2026-10-14", "Дом")
+        cache.days["2026-10-15"] = previousRoute("2026-10-15", settings.startAddress)
+        val model = homeModel()
+        advanceUntilIdle()
+        assertEquals(settings.startAddress, model.state.value.record.stops.first().address)
+    }
+
+    @Test fun `inherited endpoints remain editable and manual choice survives reentry`() = runTest(dispatcher) {
+        cache.days["2026-10-15"] = previousRoute("2026-10-15", "Дом")
+        val model = homeModel()
+        advanceUntilIdle()
+        assertEquals("Дом", model.state.value.record.stops.first().address)
+        model.updateEndpoint(RouteEndpointRole.Start, RouteEndpointKind.Warehouse)
+        model.updateEndpoint(RouteEndpointRole.Finish, RouteEndpointKind.Home)
+        advanceUntilIdle()
+        val reopened = homeModel()
+        advanceUntilIdle()
+        assertEquals(settings.startAddress, reopened.state.value.record.stops.first().address)
+        assertEquals("Дом", reopened.state.value.record.stops.last().address)
+    }
+
+    private fun previousRoute(date: String, finish: String) = defaultRouteDay(date, settings).let { day ->
+        day.copy(stops = day.stops.mapIndexed { index, stop -> when (index) {
+            1 -> stop.copy(address = "Клиент")
+            day.stops.lastIndex -> stop.copy(address = finish)
+            else -> stop
+        } })
+    }
+
+    private fun homeModel(offline: Boolean = true) = RouteViewModel(RouteRepository(api, cache),
+        session.copy(user = session.user.copy(profile = UserProfile(routeHomeAddress = "Дом"))), offline, today)
+
+    @Test fun `server history supplies previous finish even when a cached prior day is empty`() = runTest(dispatcher) {
+        cache.days["2026-10-15"] = defaultRouteDay("2026-10-15", settings)
+        api.history = listOf(previousRoute("2026-10-15", "Дом"))
+        api.responseFor(today).complete(null)
+        val model = homeModel(offline = false)
+        advanceUntilIdle()
+        assertEquals("Дом", model.state.value.record.stops.first().address)
+    }
+
+    @Test fun `manual selection of currently selected warehouse wins over delayed history`() = runTest(dispatcher) {
+        api.historyGate = CompletableDeferred()
+        val model = homeModel(offline = false)
+        runCurrent()
+        model.updateEndpoint(RouteEndpointRole.Start, RouteEndpointKind.Warehouse)
+        api.historyGate!!.complete(listOf(previousRoute("2026-10-15", "Дом")))
+        advanceUntilIdle()
+        assertEquals(settings.startAddress, model.state.value.record.stops.first().address)
+    }
+
+    @Test fun `manual warehouse selection survives reentry with an older server report`() = runTest(dispatcher) {
+        val model = homeModel()
+        advanceUntilIdle()
+        model.updateEndpoint(RouteEndpointRole.Start, RouteEndpointKind.Warehouse)
+        advanceUntilIdle()
+        api.responseFor(today).complete(defaultRouteDay(today.toString(), settings).let { day ->
+            day.copy(stops = day.stops.mapIndexed { i, stop -> if (i == 0) stop.copy(address = "Дом") else stop })
+        })
+        val reopened = homeModel(offline = false)
+        advanceUntilIdle()
+        assertEquals(settings.startAddress, reopened.state.value.record.stops.first().address)
+    }
 
     @Test fun `refresh cannot replace an edit made while request was in flight`() = runTest(dispatcher) {
         val model = model()
@@ -430,12 +506,16 @@ private class MemoryRouteCache : RouteCache {
     override suspend fun saveOdometer(userId: String, monthKey: String, value: Int?) { odometers[monthKey] = value }
     override suspend fun read(userId: String, date: String, workType: RouteWorkType) = days[workType.storageKey(date)]
     override suspend fun readQueued(userId: String) = days.values.filter { it.queuedForSend }
+    override suspend fun readAll(userId: String) = days.values.toList()
     override suspend fun readMonth(userId: String, monthKey: String) = days.values.filter { it.date.startsWith("$monthKey-") }
     override suspend fun save(userId: String, record: RouteDayRecord) { days[record.workType.storageKey(record.date)] = record }
     override suspend fun deleteDay(userId: String, date: String) { days.entries.removeAll { it.value.date == date }; excluded = excluded + date }
 }
 
 private class DeferredRouteApi : RouteApi {
+    var history: List<RouteDayRecord> = emptyList()
+    var historyGate: CompletableDeferred<List<RouteDayRecord>>? = null
+    override suspend fun fetchHistory(token: String, beforeDate: String, settings: RouteSettings) = historyGate?.await() ?: history
     private val responses = mutableMapOf<String, CompletableDeferred<RouteDayRecord?>>()
     fun responseFor(date: LocalDate, workType: RouteWorkType = RouteWorkType.Pos) = responses.getOrPut(workType.storageKey(date.toString())) { CompletableDeferred() }
     var suggestedValue: Int? = null

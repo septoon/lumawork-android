@@ -19,6 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.Channel
 import ru.lumastack.lumawork.domain.simpleone.ClosedArchiveSource
+import ru.lumastack.lumawork.domain.simpleone.ActiveRequestsStatusFilter
 import ru.lumastack.lumawork.domain.simpleone.ClosedSimpleOneArchive
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneSnapshot
@@ -48,6 +49,9 @@ class SimpleOneRepository(
     private val detailScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private data class DetailKey(val owner: String, val fingerprint: String, val request: SimpleOneRequest, val unknownVersionRequired: Boolean)
     private val detailTasks = mutableMapOf<DetailKey, Deferred<SimpleOneRequest>>()
+
+    fun rememberedStatusFilter(ownerUserId: String): ActiveRequestsStatusFilter = sessionStore.readStatusFilter(ownerUserId)
+    fun saveStatusFilter(ownerUserId: String, filter: ActiveRequestsStatusFilter) = sessionStore.saveStatusFilter(ownerUserId, filter)
 
     suspend fun storedSession(ownerUserId: String): StoredSimpleOneSession? = withContext(Dispatchers.IO) {
         sessionStore.read(ownerUserId)

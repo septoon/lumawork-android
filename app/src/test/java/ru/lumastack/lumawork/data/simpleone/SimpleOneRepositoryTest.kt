@@ -26,6 +26,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import ru.lumastack.lumawork.domain.simpleone.ClosedArchiveSource
+import ru.lumastack.lumawork.domain.simpleone.ActiveRequestsStatusFilter
 import ru.lumastack.lumawork.domain.coordination.CoordinationRegion
 import ru.lumastack.lumawork.domain.simpleone.ClosedSimpleOneArchive
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
@@ -40,6 +41,9 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.backpack.BackpackItem
 
 class SimpleOneRepositoryTest {
+    @Test fun `request filter defaults to all when no local choice exists`() {
+        assertEquals(ru.lumastack.lumawork.domain.simpleone.ActiveRequestsStatusFilter.All, SimpleOneUiState().statusFilter)
+    }
     @Test fun `successful empty XLSX baseline without heads does not export again on manual refresh`() = runBlocking {
         val cache = FakeSimpleOneSupplementalCache()
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
@@ -683,6 +687,9 @@ private class FakeSimpleOneApi(
 private class FakeSimpleOneSessionStore : SimpleOneSessionStore {
     private var value: StoredSimpleOneSession? = null
     private val usernames = mutableMapOf<String, String>()
+    private val statusFilters = mutableMapOf<String, ActiveRequestsStatusFilter>()
+    override fun readStatusFilter(ownerUserId: String) = statusFilters[ownerUserId] ?: ActiveRequestsStatusFilter.All
+    override fun saveStatusFilter(ownerUserId: String, filter: ActiveRequestsStatusFilter) { statusFilters[ownerUserId] = filter }
 
     override fun read(ownerUserId: String): StoredSimpleOneSession? = value?.takeIf { it.ownerUserId == ownerUserId }
 
@@ -739,6 +746,24 @@ private fun request() = SimpleOneRequest(
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RequestsBootstrapTest {
+    @Test fun `request filter survives view model and repository recreation per owner`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val store = session()
+            fun repository() = SimpleOneRepository(FakeSimpleOneApi(), store, FakeSimpleOneCache())
+            val first = model(repository(), offline = true)
+            first.updateStatusFilter(ActiveRequestsStatusFilter.Waiting)
+
+            val restored = model(repository(), offline = true)
+            assertEquals(ActiveRequestsStatusFilter.Waiting, restored.state.value.statusFilter)
+            restored.updateStatusFilter(ActiveRequestsStatusFilter.All)
+            assertEquals(ActiveRequestsStatusFilter.All, model(repository(), offline = true).state.value.statusFilter)
+            val otherOwner = SimpleOneViewModel(repository(), "other-owner", true).also(models::add)
+            assertEquals(ActiveRequestsStatusFilter.All, otherOwner.state.value.statusFilter)
+        } finally {
+            models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }; models.clear(); Dispatchers.resetMain()
+        }
+    }
     private val models = mutableListOf<SimpleOneViewModel>()
     private fun model(repository: SimpleOneRepository, offline: Boolean = false) =
         SimpleOneViewModel(repository, "owner", offline).also(models::add)

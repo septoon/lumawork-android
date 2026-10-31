@@ -41,6 +41,7 @@ import java.time.format.DateTimeFormatter
 import ru.lumastack.lumawork.ui.shell.AppHeaderSegments
 import ru.lumastack.lumawork.ui.theme.appScreenBackground
 import androidx.compose.foundation.background
+import ru.lumastack.lumawork.ui.theme.appScreenBackground
 import ru.lumastack.lumawork.ui.theme.AppCard
 
 private enum class ToolsSection(val title: String) { Pax("PAX"), P8("UniTodi P8"), Morefun("Morefun"), History("История") }
@@ -114,7 +115,7 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
     LaunchedEffect(state.notice) { state.notice?.let { snackbar.showSnackbar(it); model.notice(null) } }
     ToolsHeaderSegments(ToolsSection.entries.map { it.title }, section.ordinal, { section = ToolsSection.entries[it] })
     ToolsTheme {
-    Scaffold(modifier = Modifier.background(toolsScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
+    Scaffold(modifier = Modifier.background(appScreenBackground()), containerColor = androidx.compose.ui.graphics.Color.Transparent, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
             AppRefreshContainer(Modifier.widthIn(max = if (widthClass == AppWidthClass.Expanded) 1180.dp else 768.dp).fillMaxSize(), isRefreshing = state.loading, onRefresh = { model.usb.scan(); model.refresh() }) {
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
