@@ -42,7 +42,7 @@ class RoutePayloadParserTest {
     }
 
     @Test
-    fun `keyed days response is normalized to at least three stops`() {
+    fun `keyed days response preserves a route with only endpoints`() {
         val payload = Json.parseToJsonElement(
             """
             {"days":{"2026-08-11":{"stops":[
@@ -54,9 +54,8 @@ class RoutePayloadParserTest {
 
         val day = parser.parseDay(payload, "2026-08-11", settings)!!
 
-        assertEquals(3, day.stops.size)
+        assertEquals(2, day.stops.size)
         assertEquals(RouteStopStatus.Done, day.stops.first().status)
-        assertEquals(RouteStopStatus.Pending, day.stops[1].status)
         assertEquals(RouteStopStatus.Done, day.stops.last().status)
         assertFalse(day.sent)
     }

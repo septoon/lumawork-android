@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import ru.lumastack.lumawork.domain.model.AppSession
+import ru.lumastack.lumawork.domain.route.excludesRoute
+import ru.lumastack.lumawork.domain.route.exclusionKey
+import ru.lumastack.lumawork.domain.route.restoringRoute
 import ru.lumastack.lumawork.domain.route.RouteWorkType
 import ru.lumastack.lumawork.domain.route.RouteDayRecord
 import ru.lumastack.lumawork.domain.route.RouteSettings
@@ -41,14 +44,23 @@ class RouteRepository(
         settings: RouteSettings,
         workType: RouteWorkType = RouteWorkType.Pos,
     ): RouteDayRecord? = cache.read(session.user.id, date, workType)?.let {
-        normalizeRouteDay(it, date, settings).copy(periodStartOdometer = if (cache.hasOdometerSetting(session.user.id, date.take(7))) cache.readOdometer(session.user.id, date.take(7)) else it.periodStartOdometer)
+        var record = normalizeRouteDay(it, date, settings)
+        if (!record.sent && !record.queuedForSend && !record.hasManualEndpointSelection) {
+            val inherited = newDay(session, date, settings, workType, refreshHistory = false)
+            if (record.stops.first().address != inherited.stops.first().address) {
+                record = record.copy(stops = record.stops.mapIndexed { index, stop ->
+                    if (index == 0) stop.copy(address = inherited.stops.first().address) else stop
+                }, distanceKm = null)
+            }
+        }
+        record.copy(periodStartOdometer = if (cache.hasOdometerSetting(session.user.id, date.take(7))) cache.readOdometer(session.user.id, date.take(7)) else it.periodStartOdometer)
     }
 
     suspend fun readQueued(session: AppSession): List<RouteDayRecord> = cache.readQueued(session.user.id)
     suspend fun newDay(session: AppSession, date: String, settings: RouteSettings,
         workType: RouteWorkType, refreshHistory: Boolean): RouteDayRecord {
         val revision = cacheMutex.withLock { archiveRevision }
-        val remote = if (refreshHistory) try { api.fetchHistory(session.token, date, settings) }
+        val remote = if (refreshHistory) try { api.fetchHistory(session.token, date, settings).map { it.copy(sent = true) } }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { emptyList() } else emptyList()
         return cacheMutex.withLock {
@@ -58,25 +70,25 @@ class RouteRepository(
                 .associateBy { it.workType.storageKey(it.date) }.values.toList()
             val excluded = cache.excludedDates(session.user.id)
             // Keep remote history available offline without replacing local edits.
-            acceptedRemote.filter { candidate -> candidate.date < date && candidate.date !in excluded &&
+            acceptedRemote.filter { candidate -> (candidate.date < date || candidate.date == date && candidate.workType != workType && candidate.sent) && !excluded.excludesRoute(candidate.date, candidate.workType) &&
                 local.none { it.date == candidate.date && it.workType == candidate.workType &&
                     (it.hasWorkData() || it.sent || it.distanceKm != null || it.hasManualEndpointSelection) } }
                 .forEach { cache.save(session.user.id, it) }
-            defaultRouteDay(date, settings, workType, previousRouteFinishKind(history, date, workType, settings, excluded))
+            defaultRouteDay(date, settings, workType, previousRouteFinishKind(history + acceptedRemote.filter { it.date == date && it.sent }, date, workType, settings, excluded))
         }
     }
     suspend fun readMonth(session: AppSession, month: String): List<RouteDayRecord> = cache.readMonth(session.user.id, month)
     suspend fun refreshMonth(session: AppSession, month: String, settings: RouteSettings): List<RouteDayRecord> {
         val revision = cacheMutex.withLock { archiveRevision }
-        val remote = api.fetchMonth(session.token, month, settings)
+        val remote = api.fetchMonth(session.token, month, settings).map { it.copy(sent = true) }
         return cacheMutex.withLock {
             if (revision != archiveRevision) return@withLock cache.readMonth(session.user.id, month)
             val excluded = cache.excludedDates(session.user.id)
-            remote.filterNot { it.date in excluded }.forEach { candidate ->
+            remote.filterNot { excluded.excludesRoute(it.date, it.workType) }.forEach { candidate ->
                 val local = cache.read(session.user.id, candidate.date, candidate.workType)
                 if (local == null || local.sent) cache.save(session.user.id, candidate)
             }
-            remote.filterNot { it.date in excluded }
+            remote.filterNot { excluded.excludesRoute(it.date, it.workType) }
         }
     }
     suspend fun pendingRestores(session: AppSession): Set<String> = cache.pendingRestores(session.user.id)
@@ -99,6 +111,14 @@ class RouteRepository(
         }
     }
 
+    suspend fun deleteRoute(session: AppSession, date: String, workType: RouteWorkType) {
+        cacheMutex.withLock {
+            api.deleteRoute(session.token, date, workType)
+            cache.deleteRoute(session.user.id, date, workType)
+            archiveRevision++
+        }
+    }
+
     suspend fun suggestedOdometer(session: AppSession, month: String): Int? = api.suggestedOdometer(session.token, month)
     suspend fun sendGsmReport(session: AppSession, month: String): GsmReportResult = api.sendGsmReport(session.token, month)
     suspend fun officeAddresses(session: AppSession): List<String> = api.fetchOfficeAddresses(session.token)
@@ -115,7 +135,7 @@ class RouteRepository(
     ): RouteDayRecord? {
         if (local != null && !local.sent && local.copy(periodStartOdometer = null) != defaultRouteDay(date, settings, workType)) return null
         // The caller accepts and caches this candidate only if the selected day has not been edited.
-        return api.fetchDay(session.token, date, settings, workType)
+        return api.fetchDay(session.token, date, settings, workType)?.copy(sent = true)
     }
 
     suspend fun saveLocal(session: AppSession, record: RouteDayRecord) {
@@ -127,15 +147,15 @@ class RouteRepository(
         record: RouteDayRecord,
     ): RouteDayRecord {
         cacheMutex.withLock {
-            if (record.date in cache.excludedDates(session.user.id)) {
-                cache.savePendingRestores(session.user.id, cache.pendingRestores(session.user.id) + record.date)
+            if (cache.excludedDates(session.user.id).excludesRoute(record.date, record.workType)) {
+                cache.savePendingRestores(session.user.id, cache.pendingRestores(session.user.id) + record.workType.exclusionKey(record.date))
                 archiveRevision++
             }
         }
         api.sendDay(session.token, record)
         cacheMutex.withLock {
-            cache.savePendingRestores(session.user.id, cache.pendingRestores(session.user.id) - record.date)
-            cache.saveExcludedDates(session.user.id, cache.excludedDates(session.user.id) - record.date)
+            cache.savePendingRestores(session.user.id, cache.pendingRestores(session.user.id) - record.date - record.workType.exclusionKey(record.date))
+            cache.saveExcludedDates(session.user.id, cache.excludedDates(session.user.id).restoringRoute(record.date, record.workType))
             archiveRevision++
         }
         return record.copy(sent = true, queuedForSend = false)

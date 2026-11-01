@@ -28,6 +28,8 @@ import ru.lumastack.lumawork.domain.model.UserProfile
 import ru.lumastack.lumawork.domain.route.RouteDayRecord
 import ru.lumastack.lumawork.domain.route.RouteEndpointKind
 import ru.lumastack.lumawork.domain.route.RouteEndpointRole
+import ru.lumastack.lumawork.domain.route.exclusionKey
+import ru.lumastack.lumawork.domain.route.excludesRoute
 import ru.lumastack.lumawork.domain.route.RouteWorkType
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 import ru.lumastack.lumawork.domain.route.RouteSettings
@@ -53,6 +55,40 @@ class RouteViewModelTest {
         advanceUntilIdle()
         assertEquals("Дом", model.state.value.record.stops.first().address)
         assertEquals(settings.startAddress, model.state.value.record.stops.last().address)
+    }
+
+    @Test fun `sent other work type on the same day supplies both home and warehouse starts`() = runTest(dispatcher) {
+        for (sourceType in RouteWorkType.entries) for (finish in listOf("Дом", settings.startAddress)) {
+            cache.days.clear()
+            val oppositeFinish = if (finish == "Дом") settings.startAddress else "Дом"
+            cache.days["2026-10-15"] = previousRoute("2026-10-15", oppositeFinish)
+            val source = previousRoute(today.toString(), finish).copy(workType = sourceType, sent = true)
+            cache.days[sourceType.storageKey(source.date)] = source
+            val targetType = RouteWorkType.entries.first { it != sourceType }
+            // An already-viewed draft must inherit too, not only a never-opened route.
+            cache.days[targetType.storageKey(source.date)] = defaultRouteDay(source.date, settings, targetType)
+            val model = homeModel()
+            advanceUntilIdle()
+            model.selectWorkType(targetType)
+            advanceUntilIdle()
+            assertEquals(finish, model.state.value.record.stops.first().address)
+        }
+    }
+
+    @Test fun `server history recognizes a submitted same day route with a legacy false sent flag`() = runTest(dispatcher) {
+        api.history = listOf(previousRoute(today.toString(), "Дом").copy(workType = RouteWorkType.Arm, sent = false))
+        api.responseFor(today).complete(null)
+        val model = homeModel(offline = false)
+        advanceUntilIdle()
+        assertEquals("Дом", model.state.value.record.stops.first().address)
+    }
+
+    @Test fun `unsent same day route does not replace previous day start`() = runTest(dispatcher) {
+        cache.days["2026-10-15"] = previousRoute("2026-10-15", settings.startAddress)
+        cache.days[RouteWorkType.Arm.storageKey(today.toString())] = previousRoute(today.toString(), "Дом").copy(workType = RouteWorkType.Arm)
+        val model = homeModel()
+        advanceUntilIdle()
+        assertEquals(settings.startAddress, model.state.value.record.stops.first().address)
     }
 
     @Test fun `latest warehouse finish takes priority over older home finish`() = runTest(dispatcher) {
@@ -189,11 +225,10 @@ class RouteViewModelTest {
         assertEquals(22, cache.days[today.minusDays(1).toString()]?.distanceKm)
     }
 
-    @Test fun `route edits preserve endpoint and one middle point invariants`() = runTest(dispatcher) {
+    @Test fun `route edits preserve endpoints and allow removing the last middle point`() = runTest(dispatcher) {
         val model = model(offline = true)
         advanceUntilIdle()
         val base = model.state.value.record
-        model.removeStop(base.stops[1].id)
         model.removeStop(base.stops.first().id)
         assertEquals(base, model.state.value.record)
         model.addStop()
@@ -207,8 +242,11 @@ class RouteViewModelTest {
         assertEquals(base.stops.last(), model.state.value.record.stops.last())
         model.removeStop(added.id)
         assertEquals(3, model.state.value.record.stops.size)
+        model.removeStop(base.stops[1].id)
+        assertEquals(listOf(base.stops.first(), base.stops.last()), model.state.value.record.stops)
         advanceUntilIdle()
         assertEquals(model.state.value.record, cache.days[today.toString()])
+        assertEquals(model.state.value.record.stops, model(offline = true).also { advanceUntilIdle() }.state.value.record.stops)
     }
 
     @Test fun `only an address change invalidates mileage when editing a point`() = runTest(dispatcher) {
@@ -426,6 +464,23 @@ class RouteViewModelTest {
         assertEquals(listOf(today.toString()), api.deleted)
     }
 
+    @Test fun `deleting ARM preserves current POS and deleting POS resets only its draft`() = runTest(dispatcher) {
+        val saved = defaultRouteDay(today.toString(), settings).copy(distanceKm = 20, sent = true)
+        api.responseFor(today).complete(saved)
+        val model = model()
+        advanceUntilIdle()
+        cache.days[RouteWorkType.Arm.storageKey(today.toString())] = defaultRouteDay(today.toString(), settings, RouteWorkType.Arm).copy(queuedForSend = true)
+        model.deleteArchivedRoute(today.toString(), RouteWorkType.Arm)
+        assertEquals(saved, model.state.value.record)
+        assertEquals(saved, cache.days[today.toString()])
+        assertNull(cache.days[RouteWorkType.Arm.storageKey(today.toString())])
+        model.deleteArchivedRoute(today.toString(), RouteWorkType.Pos)
+        assertNull(model.state.value.record.distanceKm)
+        model.autoImportClosedRequests(listOf(SimpleOneRequest(sysId = "closed", number = "REQ", address = "Клиент", closedAt = "16.10.2026 12:00:00")))
+        assertFalse(model.state.value.record.hasWorkDataForTest())
+        assertEquals(setOf("2026-10-16|ARM", "2026-10-16|POS"), cache.excludedDates(session.user.id))
+    }
+
     @Test fun `failed deletion preserves saved day and active state`() = runTest(dispatcher) {
         val saved = defaultRouteDay(today.toString(), settings).copy(distanceKm = 20, sent = true)
         api.responseFor(today).complete(saved)
@@ -500,7 +555,7 @@ private class MemoryRouteCache : RouteCache {
     override suspend fun pendingRestores(userId: String) = pending
     override suspend fun savePendingRestores(userId: String, dates: Set<String>) { pending = dates }
     override suspend fun excludedDates(userId: String) = excluded
-    override suspend fun saveExcludedDates(userId: String, dates: Set<String>) { excluded = dates; days.entries.removeAll { it.value.date in dates && it.value.date !in pending && (it.value.sent || it.value.queuedForSend) } }
+    override suspend fun saveExcludedDates(userId: String, dates: Set<String>) { excluded = dates; days.entries.removeAll { dates.excludesRoute(it.value.date, it.value.workType) && !pending.excludesRoute(it.value.date, it.value.workType) && (it.value.sent || it.value.queuedForSend) } }
     override suspend fun hasOdometerSetting(userId: String, monthKey: String) = odometers.containsKey(monthKey) || readOdometer(userId, monthKey) != null
     override suspend fun readOdometer(userId: String, monthKey: String) = if (odometers.containsKey(monthKey)) odometers[monthKey] else days.values.firstNotNullOfOrNull { it.periodStartOdometer.takeIf { _ -> it.date.startsWith(monthKey) } }
     override suspend fun saveOdometer(userId: String, monthKey: String, value: Int?) { odometers[monthKey] = value }
@@ -510,6 +565,7 @@ private class MemoryRouteCache : RouteCache {
     override suspend fun readMonth(userId: String, monthKey: String) = days.values.filter { it.date.startsWith("$monthKey-") }
     override suspend fun save(userId: String, record: RouteDayRecord) { days[record.workType.storageKey(record.date)] = record }
     override suspend fun deleteDay(userId: String, date: String) { days.entries.removeAll { it.value.date == date }; excluded = excluded + date }
+    override suspend fun deleteRoute(userId: String, date: String, workType: RouteWorkType) { days.remove(workType.storageKey(date)); excluded = excluded + workType.exclusionKey(date) }
 }
 
 private class DeferredRouteApi : RouteApi {
@@ -524,6 +580,7 @@ private class DeferredRouteApi : RouteApi {
     override suspend fun excludedDates(token: String) = deleted.toSet()
     var deleteFailure: Exception? = null
     override suspend fun deleteDay(token: String, date: String) { deleteFailure?.let { throw it }; deleted += date }
+    override suspend fun deleteRoute(token: String, date: String, workType: RouteWorkType) { deleteFailure?.let { throw it }; deleted += workType.exclusionKey(date) }
     var sendGate: CompletableDeferred<Unit>? = null
     var sendFailure: Exception? = null
     val sent = mutableListOf<RouteDayRecord>()

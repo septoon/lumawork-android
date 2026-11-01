@@ -21,6 +21,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.foundation.background
+import androidx.compose.ui.res.painterResource
+import ru.lumastack.lumawork.R
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import ru.lumastack.lumawork.domain.route.RouteWorkType
+import ru.lumastack.lumawork.domain.route.RouteStopStatus
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -60,11 +69,14 @@ import ru.lumastack.lumawork.ui.theme.AppCard
 internal fun RouteArchiveSheet(
     state: RouteUiState, session: AppSession, offline: Boolean, repository: RouteRepository,
     onDismiss: () -> Unit, onOdometerChange: (String) -> Unit, onDeleteDay: suspend (String) -> Unit,
+    onDeleteRoute: suspend (String, RouteWorkType) -> Unit,
     embedded: Boolean = false, modifier: Modifier = Modifier, refreshRevision: Int = 0,
     onReportMessage: (String) -> Unit = {},
 ) {
     var contextDay by remember { mutableStateOf<String?>(null) }
     var confirmDeleteDay by rememberSaveable { mutableStateOf<String?>(null) }
+    var contextRoute by remember { mutableStateOf<String?>(null) }
+    var confirmDeleteRoute by remember { mutableStateOf<RouteDayRecord?>(null) }
     var deleting by remember { mutableStateOf(false) }
     var monthKey by rememberSaveable { mutableStateOf(state.record.date.take(7)) }
     var selectedDay by rememberSaveable { mutableStateOf<String?>(state.record.date) }
@@ -230,10 +242,18 @@ internal fun RouteArchiveSheet(
             item {
                 val editable = monthKey == state.record.date.take(7)
                 AppCard(Modifier.fillMaxWidth().clickable(enabled = editable) { odometerOpen = true }) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Одометр на начало месяца", fontWeight = FontWeight.SemiBold)
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = .12f)) {
+                            Icon(painterResource(R.drawable.ic_route_speed), null, Modifier.padding(12.dp).size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Одометр месяца", fontWeight = FontWeight.SemiBold)
+                            Text(month.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale.forLanguageTag("ru"))).replaceFirstChar(Char::titlecase),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         val value = if (editable) state.record.periodStartOdometer else displayed.firstNotNullOfOrNull { it.reportedPeriodStartOdometer ?: it.periodStartOdometer }
-                        Text(value?.let { "$it км" } ?: "Не задан", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(value?.let { "$it км" } ?: "Не задан", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        if (editable) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -243,16 +263,25 @@ internal fun RouteArchiveSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(selected, key = { it.workType.storageKey(it.date) }) { record ->
-                AppCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("${record.workType.title} · ${LocalDate.parse(record.date).format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}", style = MaterialTheme.typography.titleMedium)
-                        Text(if (record.sent) "Отправлен" else "Черновик", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Пробег дня: ${record.reportedDistanceKm ?: record.distanceKm ?: "—"} км")
-                        Text(record.routeSummary?.takeIf(String::isNotBlank) ?: record.stops.map { it.address }.filter(String::isNotBlank).joinToString(" → "))
-                        val numbers = record.requestNumbersSummary?.takeIf(String::isNotBlank)
-                            ?: record.stops.map { it.requestNumber }.filter(String::isNotBlank).joinToString(", ")
-                        if (numbers.isNotBlank()) Text("Заявки: $numbers")
-                        record.fuelLiters?.let { Text("Заправка: $it л · ${record.fuelCostRub ?: "—"} ₽") }
+                val key = record.workType.storageKey(record.date)
+                val canDelete = !loading && !deleting && !offline && !state.isSending && !state.isDeletingArchivedDay
+                Box {
+                    RouteArchiveDayCard(record, distanceFormat, Modifier.combinedClickable(
+                        onClick = {}, onLongClickLabel = "Удалить ${record.workType.title}",
+                        onLongClick = {
+                            if (canDelete) {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                contextRoute = key
+                            }
+                        }
+                    ).semantics {
+                        if (canDelete) customActions = listOf(CustomAccessibilityAction("Удалить ${record.workType.title}") {
+                            confirmDeleteRoute = record; true
+                        })
+                    })
+                    DropdownMenu(expanded = contextRoute == key, onDismissRequest = { contextRoute = null }) {
+                        DropdownMenuItem(text = { Text("Удалить ${record.workType.title}", color = MaterialTheme.colorScheme.error) },
+                            enabled = canDelete, onClick = { contextRoute = null; confirmDeleteRoute = record })
                     }
                 }
             }
@@ -294,6 +323,25 @@ internal fun RouteArchiveSheet(
             }) { Text("Удалить", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(enabled = !deleting, onClick = { confirmDeleteDay = null }) { Text("Отмена") } })
     }
+    confirmDeleteRoute?.let { record ->
+        AlertDialog(onDismissRequest = { if (!deleting) confirmDeleteRoute = null },
+            title = { Text("Удалить ${record.workType.title} из архива?") },
+            text = { Text("Будет удалён только маршрут ${record.workType.title} за ${record.date}. Второй тип маршрута за этот день сохранится. Уже отправленные ГСМ-отчёты не изменятся.") },
+            confirmButton = { TextButton(enabled = !deleting && !loading && !offline && !state.isSending, onClick = {
+                deleting = true
+                scope.launch {
+                    try {
+                        onDeleteRoute(record.date, record.workType)
+                        records = records.filterNot { it.date == record.date && it.workType == record.workType }
+                        remoteRecords = remoteRecords.filterNot { it.date == record.date && it.workType == record.workType }
+                        confirmDeleteRoute = null
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { error = failure.message ?: "Не удалось удалить маршрут из архива."; confirmDeleteRoute = null }
+                    finally { deleting = false }
+                }
+            }) { Text("Удалить", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton(enabled = !deleting, onClick = { confirmDeleteRoute = null }) { Text("Отмена") } })
+    }
     if (odometerOpen) {
         var draft by rememberSaveable { mutableStateOf(state.odometerText) }
         AlertDialog(onDismissRequest = { odometerOpen = false }, title = { Text("Одометр на начало месяца") },
@@ -330,6 +378,105 @@ internal fun RouteArchiveSheet(
         if (selectingMonth) RouteMonthPicker(reportMonth, onDismiss = { selectingMonth = false }, onSelect = {
             reportMonth = it; selectingMonth = false
         })
+    }
+}
+
+@Composable
+private fun RouteArchiveDayCard(record: RouteDayRecord, distanceFormat: NumberFormat, modifier: Modifier = Modifier) {
+    val requestNumbers = remember(record) {
+        record.requestNumbersSummary?.trim()?.takeIf(String::isNotBlank)?.split(Regex("\\s+"))
+            ?: record.stops.map { it.requestNumber.trim() }.filter(String::isNotBlank)
+    }
+    val stops = remember(record, requestNumbers) {
+        val addresses = record.routeSummary.orEmpty().split(" - ").map(String::trim).filter(String::isNotBlank)
+        if (addresses.isEmpty()) record.stops.filter { it.address.isNotBlank() } else addresses.mapIndexed { index, address ->
+            val matching = record.stops.firstOrNull { it.address.trim() == address }
+            (matching ?: ru.lumastack.lumawork.domain.route.RouteStop(id = "summary-$index")).copy(
+                address = address, requestNumber = requestNumbers.getOrNull(index) ?: matching?.requestNumber.orEmpty())
+        }
+    }
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val border = AppSurfaces.border
+    AppCard(modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(LocalDate.parse(record.date).format(DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.forLanguageTag("ru"))),
+                        style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Маршрут за день", style = MaterialTheme.typography.bodySmall, color = muted)
+                }
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    RouteArchiveBadge(record.workType.title, primary)
+                    Text((record.reportedDistanceKm ?: record.distanceKm?.toDouble())?.let { "${distanceFormat.format(it)} км" } ?: "—",
+                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = primary)
+                    if (requestNumbers.isNotEmpty()) RouteArchiveBadge("${requestNumbers.size} заявок", secondary)
+                }
+            }
+            HorizontalDivider(color = border)
+            Column {
+                stops.forEachIndexed { index, stop ->
+                    val isFirst = index == 0
+                    val isLast = index == stops.lastIndex
+                    val tint = when {
+                        stop.status == RouteStopStatus.Declined -> MaterialTheme.colorScheme.error
+                        stop.status == RouteStopStatus.Done || isFirst || isLast -> primary
+                        else -> muted
+                    }
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.width(30.dp).fillMaxHeight().drawBehind {
+                            if (!isLast) drawLine(border, Offset(size.width / 2, 28.dp.toPx()), Offset(size.width / 2, size.height), 1.dp.toPx())
+                        }, contentAlignment = Alignment.TopCenter) {
+                            Surface(shape = CircleShape, color = tint.copy(alpha = .12f)) {
+                                if (isFirst || isLast) {
+                                    Icon(painterResource(if (isFirst) R.drawable.ic_route_navigation else R.drawable.ic_route_flag), null,
+                                        Modifier.size(28.dp).padding(7.dp), tint = tint)
+                                } else {
+                                    Box(Modifier.size(28.dp).padding(8.dp).background(tint, CircleShape))
+                                }
+                            }
+                        }
+                        Column(Modifier.weight(1f).padding(bottom = if (isLast) 2.dp else 16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(stop.address.trim(), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            if (stop.org.isNotBlank()) Text(stop.org.trim(), style = MaterialTheme.typography.bodySmall, color = muted)
+                            if (stop.requestNumber.isNotBlank()) Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(painterResource(R.drawable.ic_route_document), null, Modifier.size(16.dp), tint = secondary)
+                                Text(stop.requestNumber.trim(), style = MaterialTheme.typography.labelMedium, color = secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            if (requestNumbers.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(painterResource(R.drawable.ic_route_document), null, Modifier.size(18.dp), tint = muted)
+                    Text("ЗАЯВКИ", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = muted)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    requestNumbers.chunked(2).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { number ->
+                                Surface(Modifier.weight(1f), shape = RoundedCornerShape(10.dp), color = secondary.copy(alpha = .1f)) {
+                                    Text(number, Modifier.padding(horizontal = 10.dp, vertical = 8.dp), color = secondary,
+                                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+            record.fuelLiters?.let { Text("Заправка: $it л · ${record.fuelCostRub ?: "—"} ₽", style = MaterialTheme.typography.bodySmall, color = muted) }
+        }
+    }
+}
+
+@Composable
+private fun RouteArchiveBadge(text: String, tint: Color) {
+    Surface(shape = RoundedCornerShape(50), color = tint.copy(alpha = .12f)) {
+        Text(text, Modifier.padding(horizontal = 10.dp, vertical = 5.dp), color = tint,
+            style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
     }
 }
 

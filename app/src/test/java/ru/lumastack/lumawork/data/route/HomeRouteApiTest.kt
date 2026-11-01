@@ -19,7 +19,7 @@ class HomeRouteApiTest {
         val api = OkHttpRouteApi("https://api.test", client(response) { request ->
             assertEquals("GET", request.method)
             assertEquals("/api/v2/routes", request.url.encodedPath)
-            assertEquals("2026-09-30", request.url.queryParameter("to"))
+            assertEquals("2026-10-01", request.url.queryParameter("to"))
             assertNull(request.url.queryParameter("from"))
         })
         val settings = RouteSettings("Склад", "Дом")
@@ -70,6 +70,14 @@ class HomeRouteApiTest {
         api.deleteDay("token", "2026-10-23")
     }
 
+    @Test fun `scoped delete uses a separate endpoint so older servers cannot delete the whole day`() = runBlocking {
+        val api = OkHttpRouteApi("https://api.test", client("") { request ->
+            assertEquals("DELETE", request.method)
+            assertEquals("/api/v2/routes/2026-10-23/work-types/ARM", request.url.encodedPath)
+        })
+        api.deleteRoute("token", "2026-10-23", RouteWorkType.Arm)
+    }
+
     @Test fun `ARM query and report payload match iOS work type contract`() = runBlocking {
         val settings = RouteSettings("Склад", "Дом")
         val api = OkHttpRouteApi("https://api.test", client("""{"records":[{"date":"2026-10-16","workType":"ARM","distanceKm":22}]}""") { request ->
@@ -77,6 +85,7 @@ class HomeRouteApiTest {
             else {
                 val payload = Json.parseToJsonElement(Buffer().also { request.body!!.writeTo(it) }.readUtf8()).jsonObject
                 assertEquals("ARM", payload["workType"]!!.jsonPrimitive.content)
+                assertEquals("true", payload["sent"]!!.jsonPrimitive.content)
             }
         })
         val day = api.fetchDay("token", "2026-10-16", settings, RouteWorkType.Arm)!!

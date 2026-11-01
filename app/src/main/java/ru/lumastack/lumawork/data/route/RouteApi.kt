@@ -43,6 +43,7 @@ interface RouteApi {
     suspend fun sendGsmReport(token: String, month: String): GsmReportResult = throw RouteFailure.InvalidResponse
     suspend fun excludedDates(token: String): Set<String> = emptySet()
     suspend fun deleteDay(token: String, date: String) { throw RouteFailure.InvalidResponse }
+    suspend fun deleteRoute(token: String, date: String, workType: RouteWorkType) { throw RouteFailure.InvalidResponse }
     suspend fun deliverySettings(token: String): GsmDeliverySettings { throw RouteFailure.InvalidResponse }
     suspend fun saveDeliverySettings(token: String, settings: GsmDeliverySettings): GsmDeliverySettings { throw RouteFailure.InvalidResponse }
     suspend fun sendDay(token: String, record: RouteDayRecord)
@@ -105,7 +106,7 @@ class OkHttpRouteApi(
     }
 
     override suspend fun fetchHistory(token: String, beforeDate: String, settings: RouteSettings): List<RouteDayRecord> {
-        val until = java.time.LocalDate.parse(beforeDate).minusDays(1)
+        val until = java.time.LocalDate.parse(beforeDate)
         return execute(requestBuilder("/api/v2/routes?to=$until", token).get().build()).use { response ->
             val body = requireSuccess(response)
             if (body.isBlank()) emptyList() else parser.parseHistory(json.parseToJsonElement(body), settings)
@@ -153,6 +154,11 @@ class OkHttpRouteApi(
     override suspend fun deleteDay(token: String, date: String) {
         java.time.LocalDate.parse(date)
         execute(requestBuilder("/api/v2/routes/$date", token).delete().build()).use(::requireSuccess)
+    }
+
+    override suspend fun deleteRoute(token: String, date: String, workType: RouteWorkType) {
+        java.time.LocalDate.parse(date)
+        execute(requestBuilder("/api/v2/routes/$date/work-types/${workType.wireValue}", token).delete().build()).use(::requireSuccess)
     }
 
     override suspend fun deliverySettings(token: String): GsmDeliverySettings =
@@ -212,7 +218,7 @@ class OkHttpRouteApi(
         put("workType", record.workType.wireValue)
         putNullable("distanceKm", record.distanceKm)
         putNullable("periodStartOdometer", record.periodStartOdometer)
-        put("sent", record.sent)
+        put("sent", true)
         put("stops", buildJsonArray {
             record.stops.forEach { stop ->
                 add(buildJsonObject {

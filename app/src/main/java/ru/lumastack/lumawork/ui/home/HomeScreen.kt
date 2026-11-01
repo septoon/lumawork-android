@@ -162,7 +162,7 @@ fun HomeScreen(
     val archiveCard: @Composable (Modifier) -> Unit = { archiveModifier ->
         AppCard(archiveModifier, shape = RoundedCornerShape(20.dp)) {
             RouteArchiveSheet(state, session, isOffline, routeRepository,
-                onDismiss = {}, onOdometerChange = model::updateOdometer, onDeleteDay = model::deleteArchivedDay,
+                onDismiss = {}, onOdometerChange = model::updateOdometer, onDeleteDay = model::deleteArchivedDay, onDeleteRoute = model::deleteArchivedRoute,
                 embedded = true, modifier = Modifier.fillMaxWidth(), refreshRevision = archiveRefreshRevision,
                 onReportMessage = { archiveMessage = it })
         }
@@ -260,7 +260,7 @@ fun HomeScreen(
         }
     }
     if (archiveOpen) RouteArchiveSheet(state, session, isOffline, routeRepository,
-        onDismiss = { archiveOpen = false }, onOdometerChange = model::updateOdometer, onDeleteDay = model::deleteArchivedDay)
+        onDismiss = { archiveOpen = false }, onOdometerChange = model::updateOdometer, onDeleteDay = model::deleteArchivedDay, onDeleteRoute = model::deleteArchivedRoute)
     if (fuelOpen) HomeFuelEntry(session, isOffline, fuelRepository, onDismiss = { fuelOpen = false })
     if (detailOpen) AppModalSheet(onDismiss = { detailOpen = false; requestsActions.onCloseRequest() }, maxWidth = 980.dp) {
         simpleOneState.selectedRequest?.let { request ->

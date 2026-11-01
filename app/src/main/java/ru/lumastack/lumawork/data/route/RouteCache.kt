@@ -7,6 +7,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import ru.lumastack.lumawork.domain.route.excludesRoute
+import ru.lumastack.lumawork.domain.route.exclusionKey
 import ru.lumastack.lumawork.domain.route.RouteWorkType
 import ru.lumastack.lumawork.domain.route.RouteDayRecord
 
@@ -23,6 +25,7 @@ interface RouteCache {
     suspend fun excludedDates(userId: String): Set<String> = emptySet()
     suspend fun saveExcludedDates(userId: String, dates: Set<String>) {}
     suspend fun deleteDay(userId: String, date: String) { throw UnsupportedOperationException("Удаление маршрута недоступно.") }
+    suspend fun deleteRoute(userId: String, date: String, workType: RouteWorkType) { throw UnsupportedOperationException("Удаление маршрута недоступно.") }
     suspend fun save(userId: String, record: RouteDayRecord)
 }
 
@@ -86,8 +89,8 @@ class SharedPreferencesRouteCache(
         val prefix = "day_${userId.sha256()}_"
         val obsolete = preferences.all.filterKeys { it.startsWith(prefix) }.mapNotNull { (_, value) ->
             (value as? String)?.let { runCatching { json.decodeFromString<RouteDayRecord>(it) }.getOrNull() }
-        }.filter { it.date in dates && it.date !in pending && (it.sent || it.queuedForSend) }
-        obsolete.forEach { deleteDay(userId, it.date) }
+        }.filter { dates.excludesRoute(it.date, it.workType) && !pending.excludesRoute(it.date, it.workType) && (it.sent || it.queuedForSend) }
+        obsolete.forEach { deleteRoute(userId, it.date, it.workType) }
     }
 
     override suspend fun deleteDay(userId: String, date: String) = withContext(Dispatchers.IO) {
@@ -96,6 +99,16 @@ class SharedPreferencesRouteCache(
         preferences.edit(commit = true) {
             putStringSet("excluded_${userId.sha256()}", excluded)
             RouteWorkType.entries.forEach { remove(key(userId, it.storageKey(date))) }
+        }
+        Unit
+    }
+
+    override suspend fun deleteRoute(userId: String, date: String, workType: RouteWorkType) = withContext(Dispatchers.IO) {
+        val excluded = excludedDates(userId) + workType.exclusionKey(date)
+        savePendingRestores(userId, pendingRestores(userId) - workType.exclusionKey(date))
+        preferences.edit(commit = true) {
+            putStringSet("excluded_${userId.sha256()}", excluded)
+            remove(key(userId, workType.storageKey(date)))
         }
         Unit
     }

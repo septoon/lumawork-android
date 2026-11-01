@@ -129,7 +129,7 @@ internal fun RouteTimelineCard(
                             .semantics(mergeDescendants = true) {
                                 customActions = buildList {
                                     add(CustomAccessibilityAction("Редактировать") { onEditStop(stop.id); true })
-                                    if (middleStops.size > 1) add(CustomAccessibilityAction("Удалить") { pendingDelete = stop.id; true })
+                                    add(CustomAccessibilityAction("Удалить") { pendingDelete = stop.id; true })
                                     if (index > 0) add(CustomAccessibilityAction("Выше") { onReorderStop(stop.id, middleStops[index - 1].id); true })
                                     if (index < middleStops.lastIndex) add(CustomAccessibilityAction("Ниже") { onReorderStop(stop.id, middleStops[index + 1].id); true })
                                 }
@@ -171,7 +171,7 @@ internal fun RouteTimelineCard(
                         }
                         DropdownMenu(menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(text = { Text("Редактировать") }, onClick = { menuOpen = false; onEditStop(stop.id) })
-                            if (middleStops.size > 1) DropdownMenuItem(text = { Text("Удалить", color = MaterialTheme.colorScheme.error) },
+                            DropdownMenuItem(text = { Text("Удалить", color = MaterialTheme.colorScheme.error) },
                                 onClick = { menuOpen = false; pendingDelete = stop.id })
                         }
                     }

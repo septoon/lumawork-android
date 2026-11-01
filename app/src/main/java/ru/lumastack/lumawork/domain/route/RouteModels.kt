@@ -108,9 +108,21 @@ fun defaultRouteDay(date: String, settings: RouteSettings, workType: RouteWorkTy
     ),
 )
 
+fun RouteWorkType.exclusionKey(date: String): String = "$date|$wireValue"
+
+fun Set<String>.excludesRoute(date: String, workType: RouteWorkType): Boolean =
+    date in this || workType.exclusionKey(date) in this
+
+fun Set<String>.restoringRoute(date: String, workType: RouteWorkType): Set<String> {
+    val remaining = this - date - workType.exclusionKey(date)
+    return if (date in this) remaining + RouteWorkType.entries.filter { it != workType }.map { it.exclusionKey(date) } else remaining
+}
+
 fun previousRouteFinishKind(records: List<RouteDayRecord>, date: String, workType: RouteWorkType,
     settings: RouteSettings, excludedDates: Set<String> = emptySet()): RouteEndpointKind {
-    val previous = records.filter { it.date < date && it.date !in excludedDates &&
+    val sameDay = records.lastOrNull { it.date == date && it.workType != workType && it.sent &&
+        !excludedDates.excludesRoute(it.date, it.workType) }
+    val previous = sameDay ?: records.filter { it.date < date && !excludedDates.excludesRoute(it.date, it.workType) &&
         (it.hasWorkData() || it.sent || it.distanceKm != null) }
         .maxWithOrNull(compareBy<RouteDayRecord> { it.date }.thenBy { it.workType == workType })
     val finish = previous?.stops?.lastOrNull()?.address?.trim().orEmpty()
@@ -127,7 +139,6 @@ fun normalizeRouteDay(
     val hydrated = when {
         record.stops.isEmpty() -> base.stops
         record.stops.size == 1 -> base.stops
-        record.stops.size == 2 -> listOf(record.stops.first(), base.stops[1], record.stops.last())
         else -> record.stops
     }.mapIndexed { index, stop ->
         when (index) {
@@ -136,7 +147,7 @@ fun normalizeRouteDay(
                 reason = stop.reason.ifBlank { base.stops.first().reason },
                 status = RouteStopStatus.Done,
             )
-            (if (record.stops.size == 2) 2 else record.stops.lastIndex) -> stop.copy(
+            record.stops.lastIndex -> stop.copy(
                 id = stop.id.ifBlank { base.stops.last().id },
                 reason = stop.reason.ifBlank { base.stops.last().reason },
                 status = RouteStopStatus.Done,
