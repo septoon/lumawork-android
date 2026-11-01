@@ -141,7 +141,7 @@ class RouteViewModel(
 
     fun autoImportClosedRequests(requests: List<SimpleOneRequest>) {
         val current = state.value
-        if (excludedDates.excludesRoute(current.record.date, current.record.workType) || current.isDeletingArchivedDay || current.isRefreshing || current.record.workType != RouteWorkType.Pos || current.record.hasWorkData()) return
+        if (current.isDeletingArchivedDay || current.isRefreshing || current.record.workType != RouteWorkType.Pos || current.record.hasWorkData()) return
         val template = closedRouteTemplate(requests, current.record.date, settings.startAddress)
         if (template.isEmpty()) return
         edit { record -> record.copy(stops = listOf(record.stops.first()) + template.map { request ->

@@ -123,8 +123,9 @@ fun HomeScreen(
     LaunchedEffect(state.record.date.take(7)) {
         savedAddresses = routeRepository.readMonth(session, state.record.date.take(7)).flatMap { it.stops }.map { it.address }.filter(String::isNotBlank).distinct()
     }
-    LaunchedEffect(state.record.date, state.record.workType, state.isRefreshing, cachedClosed, simpleOneState.closedArchive) {
-        model.autoImportClosedRequests(simpleOneState.closedArchive.requests.ifEmpty { cachedClosed })
+    LaunchedEffect(state.record.date, state.record.workType, state.isDeletingArchivedDay,
+        state.isRefreshing, archiveOpen, cachedClosed, simpleOneState.closedArchive) {
+        if (!archiveOpen) model.autoImportClosedRequests(simpleOneState.closedArchive.requests.ifEmpty { cachedClosed })
     }
     LaunchedEffect(state.notice, state.errorMessage) {
         if (state.notice != null || state.errorMessage != null) { delay(5000); model.dismissMessage() }

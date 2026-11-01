@@ -477,7 +477,9 @@ class RouteViewModelTest {
         model.deleteArchivedRoute(today.toString(), RouteWorkType.Pos)
         assertNull(model.state.value.record.distanceKm)
         model.autoImportClosedRequests(listOf(SimpleOneRequest(sysId = "closed", number = "REQ", address = "Клиент", closedAt = "16.10.2026 12:00:00")))
-        assertFalse(model.state.value.record.hasWorkDataForTest())
+        assertEquals("Клиент", model.state.value.record.stops[1].address)
+        assertEquals("REQ", model.state.value.record.stops[1].requestNumber)
+        assertFalse(model.state.value.record.sent)
         assertEquals(setOf("2026-10-16|ARM", "2026-10-16|POS"), cache.excludedDates(session.user.id))
     }
 
@@ -505,19 +507,24 @@ class RouteViewModelTest {
         assertFalse(model.state.value.record.sent)
     }
 
-    @Test fun `deleted date cannot be automatically repopulated by closed requests after reentry`() = runTest(dispatcher) {
+    @Test fun `deleted date imports closed request addresses and numbers again after reentry`() = runTest(dispatcher) {
         api.responseFor(today).complete(null)
         val model = model()
         advanceUntilIdle()
         model.deleteArchivedDay(today.toString())
-        // Explicit editing is allowed, automatic closed-request import is suppressed even after a new ViewModel.
         val reopened = model()
         advanceUntilIdle()
         reopened.autoImportClosedRequests(listOf(SimpleOneRequest(sysId = "closed", number = "REQ", address = "Клиент", closedAt = "16.10.2026 12:00:00")))
-        assertFalse(reopened.state.value.record.hasWorkDataForTest())
-        reopened.updateStop(reopened.state.value.record.stops[1].id, "Добавлено вручную", "REQ")
+        assertEquals("Клиент", reopened.state.value.record.stops[1].address)
+        assertEquals("REQ", reopened.state.value.record.stops[1].requestNumber)
+        assertFalse(reopened.state.value.record.sent)
+        assertNull(reopened.state.value.record.distanceKm)
         advanceUntilIdle()
-        assertTrue(reopened.state.value.record.hasWorkDataForTest())
+        val restored = reopened.state.value.record
+        reopened.autoImportClosedRequests(listOf(SimpleOneRequest(sysId = "closed", number = "REQ", address = "Клиент", closedAt = "16.10.2026 12:00:00")))
+        assertEquals(restored, reopened.state.value.record)
+        assertTrue(cache.excludedDates(session.user.id).contains(today.toString()))
+        assertEquals(restored, model().also { advanceUntilIdle() }.state.value.record)
     }
 
     @Test fun `explicit readd survives network failure exclusions sync and queued retry`() = runTest(dispatcher) {
