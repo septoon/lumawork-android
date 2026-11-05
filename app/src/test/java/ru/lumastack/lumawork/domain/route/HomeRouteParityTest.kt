@@ -10,6 +10,14 @@ import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
 
 class HomeRouteParityTest {
     private val settings = RouteSettings("Склад", "Дом")
+    @Test fun `new account has no warehouse until server resolves its city`() {
+        assertEquals("", RouteSettings.from(null).startAddress)
+        assertEquals("", defaultRouteDay("2026-11-05", RouteSettings.from(null)).stops.first().address)
+    }
+    @Test fun `yandex route keeps cities outside Crimea`() {
+        val url = makeYandexRouteUrl(listOf("Ярославль, ул. Республиканская, д. 3, стр. 2", "Ярославль, ул. Свободы, 1"))!!
+        assertFalse(URLDecoder.decode(URI(url).rawQuery, "UTF-8").contains("Алушта"))
+    }
     @Test fun `server report from iOS stays visible over an unsent Android draft`() {
         val draft = defaultRouteDay("2026-10-29", settings).copy(periodStartOdometer = 212996)
         // The API stores sent=false even after a successful iOS submission.

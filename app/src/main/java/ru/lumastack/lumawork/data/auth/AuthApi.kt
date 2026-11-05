@@ -26,6 +26,7 @@ interface AuthApi {
     suspend fun requestCode(email: String)
     suspend fun verifyCode(email: String, code: String): AppSession
     suspend fun currentUser(token: String): AppUser
+    suspend fun syncRouteAddresses(token: String, simpleOneAuth: String?): AppUser = currentUser(token)
     suspend fun logout(token: String)
     suspend fun updateProfile(token: String, profile: UserProfile): AppUser
     suspend fun uploadAvatar(token: String, bytes: ByteArray): AppUser
@@ -76,6 +77,16 @@ class OkHttpAuthApi(
             .post(ByteArray(0).toRequestBody(null))
             .build()
         execute(request).use(::requireSuccess)
+    }
+
+    override suspend fun syncRouteAddresses(token: String, simpleOneAuth: String?): AppUser {
+        val request = requestBuilder("/api/v2/profile/route-addresses/sync", token)
+            .apply { if (simpleOneAuth != null) header("X-SimpleOne-Auth", simpleOneAuth) }
+            .post(ByteArray(0).toRequestBody(null)).build()
+        return execute(request).use {
+            if (it.code == 403 && it.header("X-SimpleOne-Access") == "denied") throw IOException("Требуется авторизация SimpleOne.")
+            decode<CurrentUserResponse>(requireSuccess(it)).user
+        }
     }
 
     override suspend fun updateProfile(token: String, profile: UserProfile): AppUser = withContext(Dispatchers.IO) {

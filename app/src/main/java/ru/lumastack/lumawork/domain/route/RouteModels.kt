@@ -75,7 +75,7 @@ data class RouteSettings(
     }
 
     companion object {
-        const val OFFICE_ADDRESS = "Алушта, ул. В. Хромых, 11"
+        const val OFFICE_ADDRESS = ""
 
         fun from(profile: UserProfile?): RouteSettings = RouteSettings(
             warehouseAddress = profile?.routeWarehouseAddress.clean() ?: OFFICE_ADDRESS,
@@ -250,10 +250,16 @@ private val ROUTE_COMMA_SPACING = Regex("\\s*,\\s*")
 
 fun makeYandexRouteUrl(addresses: List<String>): String? {
     val points = addresses.map { it.trim().replace(ROUTE_COMMA_SPACING, ", ") }.filter(String::isNotBlank)
-        .map { address -> if (ROUTE_CITIES.any { address.contains(it, ignoreCase = true) }) address else "Алушта, $address" }
+        .map { address -> if (ROUTE_CITIES.any { address.contains(it, ignoreCase = true) } || hasRouteCity(address)) address else "Алушта, $address" }
     if (points.size < 2) return null
     fun encode(value: String) = java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
     return "https://yandex.ru/maps/?rtext=${encode(points.joinToString("~"))}&rtt=auto&routes%5Bavoid%5D=unpaved%2Cpoor_condition"
+}
+
+private fun hasRouteCity(address: String): Boolean {
+    val first = address.substringBefore(',').trim()
+    return ',' in address && first.matches(Regex("[\\p{L} .'-]+")) &&
+        !first.contains(Regex("(?i)(?:^|\\s)(?:ул\\.?|улица|проспект|пр-кт|пр-т|переулок|пер\\.?|шоссе|набережная|наб\\.?|площадь|пл\\.?)(?:\\s|$)"))
 }
 
 fun closedRouteTemplate(requests: List<SimpleOneRequest>, date: String, warehouse: String): List<SimpleOneRequest> {
@@ -267,7 +273,7 @@ fun closedRouteTemplate(requests: List<SimpleOneRequest>, date: String, warehous
         val dates = if (isReturn(request)) listOf(request.registeredAt, request.closedAt) else listOf(request.closedAt)
         val closed = dates.mapNotNull(::parseSimpleOneDate)
             .firstOrNull { it.toLocalDate().toString() == date } ?: return@mapNotNull null
-        val address = if (isReturn(request)) RouteSettings.OFFICE_ADDRESS else normalizeRouteAddress(request.address)
+        val address = if (isReturn(request)) warehouse else normalizeRouteAddress(request.address)
         if (address.isBlank()) return@mapNotNull null
         request.copy(address = address) to closed
     }.sortedWith(compareBy({ it.second }, { it.first.number }))

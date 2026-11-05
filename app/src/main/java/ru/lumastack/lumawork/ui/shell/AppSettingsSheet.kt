@@ -301,6 +301,13 @@ private fun RouteSettingsPage(session: AppSession, offline: Boolean, auth: AuthR
     val initial = remember(session.user.id) { RouteSettings.from(session.user.profile) }
     var warehouse by rememberSaveable(session.user.id) { mutableStateOf(initial.warehouseAddress) }
     var home by rememberSaveable(session.user.id) { mutableStateOf(initial.homeAddress) }
+    var lastSettings by remember(session.user.id) { mutableStateOf(initial) }
+    LaunchedEffect(session.user.profile) {
+        val updated = RouteSettings.from(session.user.profile)
+        if (warehouse == lastSettings.warehouseAddress) warehouse = updated.warehouseAddress
+        if (home == lastSettings.homeAddress) home = updated.homeAddress
+        lastSettings = updated
+    }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val snackbars = remember { SnackbarHostState() }

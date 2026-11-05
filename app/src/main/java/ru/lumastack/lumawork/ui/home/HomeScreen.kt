@@ -116,12 +116,8 @@ fun HomeScreen(
     var routeUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var mapError by remember { mutableStateOf<String?>(null) }
     var cachedClosed by remember(session.user.id) { mutableStateOf(emptyList<SimpleOneRequest>()) }
-    var savedAddresses by remember(session.user.id) { mutableStateOf(emptyList<String>()) }
     LaunchedEffect(session.user.id) {
         cachedClosed = simpleOneRepository.readClosedArchive(session.user.id)?.requests.orEmpty()
-    }
-    LaunchedEffect(state.record.date.take(7)) {
-        savedAddresses = routeRepository.readMonth(session, state.record.date.take(7)).flatMap { it.stops }.map { it.address }.filter(String::isNotBlank).distinct()
     }
     LaunchedEffect(state.record.date, state.record.workType, state.isDeletingArchivedDay,
         state.isRefreshing, archiveOpen, cachedClosed, simpleOneState.closedArchive) {
@@ -238,7 +234,7 @@ fun HomeScreen(
         RouteStopEditor(stop, index, state.record.date, onDismiss = { editorId = null },
             onSave = { address, number -> model.updateStop(stop.id, address, number); editorId = null },
             workType = state.record.workType,
-            suggestions = (savedAddresses + state.record.stops.map { it.address } + listOf(state.settings.startAddress, state.settings.homeAddress)).filter(String::isNotBlank).distinct(),
+            suggestions = listOf(state.settings.warehouseAddress.trim()).filter(String::isNotBlank),
             offices = state.officeAddresses, isLoadingOffices = state.isLoadingOffices, onRefreshOffices = model::refreshOfficeAddresses)
     }
     if (sendConfirmation) AlertDialog(onDismissRequest = { sendConfirmation = false },

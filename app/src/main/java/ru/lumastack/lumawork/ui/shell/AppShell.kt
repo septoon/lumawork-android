@@ -174,6 +174,14 @@ fun AppShell(
     )
     val simpleOneState by simpleOneViewModel.state.collectAsStateWithLifecycle()
     val protectedRevision by ftpRepository.access.changes.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(session.user.id, session.user.profile?.city, simpleOneState.isAuthorized, protectedRevision, isOffline) {
+        if (!isOffline) {
+            val key = if (simpleOneState.isAuthorized) runCatching { ftpRepository.access.require(session.user.id).authKey }.getOrNull() else null
+            try { authRepository.syncRouteAddresses(key) }
+            catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (_: Exception) { /* Keep saved addresses; retry on the next sign-in or city/session change. */ }
+        }
+    }
     androidx.compose.runtime.LaunchedEffect(protectedRevision) {
         if (simpleOneState.isAuthorized && !ftpRepository.access.isAuthorized(session.user.id)) simpleOneViewModel.signOut()
     }

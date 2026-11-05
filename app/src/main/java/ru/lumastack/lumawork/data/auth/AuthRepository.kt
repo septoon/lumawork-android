@@ -61,6 +61,7 @@ class AuthRepository(
     }
 
     suspend fun updateProfile(profile: UserProfile) = updateUser { api.updateProfile(it, profile) }
+    suspend fun syncRouteAddresses(simpleOneAuth: String? = null) = updateUser { api.syncRouteAddresses(it, simpleOneAuth) }
     /** Runs only from the explicit Save of an imported GSM draft. */
     suspend fun fillProfileFromGsm(profile: GsmProfile, owner: String) = updateUser { token ->
         val current = api.currentUser(token)

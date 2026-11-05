@@ -39,8 +39,8 @@ import ru.lumastack.lumawork.domain.route.defaultRouteDay
 class RouteViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val today = LocalDate.of(2026, 10, 16)
-    private val session = AppSession("token", AppUser("owner", "user@example.com", "user"))
-    private val settings = RouteSettings.from(null)
+    private val session = AppSession("token", AppUser("owner", "user@example.com", "user", profile = UserProfile(routeWarehouseAddress = "Склад из профиля")))
+    private val settings = RouteSettings("Склад из профиля", "Дом")
     private val cache = MemoryRouteCache()
     private val api = DeferredRouteApi()
 
@@ -122,7 +122,7 @@ class RouteViewModelTest {
     }
 
     private fun homeModel(offline: Boolean = true) = RouteViewModel(RouteRepository(api, cache),
-        session.copy(user = session.user.copy(profile = UserProfile(routeHomeAddress = "Дом"))), offline, today)
+        session.copy(user = session.user.copy(profile = UserProfile(routeWarehouseAddress = settings.warehouseAddress, routeHomeAddress = "Дом"))), offline, today)
 
     @Test fun `server history supplies previous finish even when a cached prior day is empty`() = runTest(dispatcher) {
         cache.days["2026-10-15"] = defaultRouteDay("2026-10-15", settings)

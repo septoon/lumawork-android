@@ -15,6 +15,21 @@ import ru.lumastack.lumawork.domain.model.UserProfile
 
 class ProfileApiTest {
     @Test
+    fun `route sync sends separate SimpleOne auth and reads persisted profile`() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            assertEquals("POST", request.method)
+            assertEquals("/api/v2/profile/route-addresses/sync", request.url.encodedPath)
+            assertEquals("Bearer app-token", request.header("Authorization"))
+            assertEquals("so-key", request.header("X-SimpleOne-Auth"))
+            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"user":{"id":"1","email":"user@example.test","role":"user","profile":{"routeWarehouseAddress":"Ярославль, Республиканская, 3","routeHomeAddress":"Дом из ГСМ"}}}""".toResponseBody()).build()
+        }.build()
+        val profile = OkHttpAuthApi("https://api.test", client).syncRouteAddresses("app-token", "so-key").profile
+        assertEquals("Ярославль, Республиканская, 3", profile?.routeWarehouseAddress)
+        assertEquals("Дом из ГСМ", profile?.routeHomeAddress)
+    }
+    @Test
     fun `authenticated startup sends device and version headers`() = runBlocking {
         val headers = mapOf("X-LumaWork-Device-ID" to "11111111-2222-3333-4444-555555555555", "X-LumaWork-Device-Model" to "Samsung SM-G998B", "X-LumaWork-Version" to "0.1.24")
         val client = OkHttpClient.Builder().addInterceptor { chain ->

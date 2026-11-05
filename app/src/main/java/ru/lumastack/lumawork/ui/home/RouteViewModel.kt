@@ -89,6 +89,10 @@ class RouteViewModel(
         if (settings == updated) return
         val previous = settings
         settings = updated
+        if (state.value.record.sent || state.value.record.queuedForSend) {
+            mutableState.update { it.copy(settings = updated) }
+            return
+        }
         edit { record ->
             val stops = record.stops.mapIndexed { index, stop ->
                 if (index != 0 && index != record.stops.lastIndex) return@mapIndexed stop

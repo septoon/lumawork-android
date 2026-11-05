@@ -202,6 +202,7 @@ fun GsmProfileSettingsScreen(
                                     }
                                 }
                                 editor = editor.saved(saved, submittedRevision)
+                                auth.syncRouteAddresses()
                                 drafts.edit().remove(owner).apply()
                                 // Consumers can update their local allowed-fuel list from the confirmed profile.
                                 currentOnSaved(saved.profile)
