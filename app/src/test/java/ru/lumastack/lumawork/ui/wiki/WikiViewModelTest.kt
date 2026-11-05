@@ -17,8 +17,9 @@ class WikiViewModelTest {
             val api = WikiTestApi()
             val model = WikiViewModel(WikiRepository(api, WikiTestCache("20261022T234850Z"), access = testSimpleOneAccess()), "owner", true)
             advanceUntilIdle()
-            model.refreshCatalogVersion(); advanceUntilIdle()
+            model.refreshCatalogInfo(); advanceUntilIdle()
             assertEquals("20261022T234850Z", model.state.value.snapshotId)
+            assertEquals("2026-10-23T11:34:59Z", model.state.value.catalogUpdatedAt)
             assertEquals(0, api.calls)
         } finally { Dispatchers.resetMain() }
     }
@@ -29,6 +30,7 @@ class WikiViewModelTest {
             val model = WikiViewModel(WikiRepository(WikiTestApi("20261022T234850Z"), WikiTestCache(), access = testSimpleOneAccess()), "owner", false)
             advanceUntilIdle()
             assertEquals("20261022T234850Z", model.state.value.snapshotId)
+            assertEquals("2026-10-23T11:34:59Z", model.state.value.catalogUpdatedAt)
             assertTrue(model.state.value.results.isNotEmpty())
         } finally { Dispatchers.resetMain() }
     }
@@ -39,6 +41,7 @@ class WikiViewModelTest {
             val model = WikiViewModel(WikiRepository(WikiTestApi(), WikiTestCache("20261022T234850Z"), access = testSimpleOneAccess()), "owner", false)
             advanceUntilIdle()
             assertEquals("20261022T234850Z", model.state.value.snapshotId)
+            assertEquals("2026-10-23T11:34:59Z", model.state.value.catalogUpdatedAt)
         } finally { Dispatchers.resetMain() }
     }
 
@@ -66,7 +69,7 @@ class WikiViewModelTest {
 }
 private class WikiTestApi(private val version: String? = null) : WikiApi {
     var calls = 0
-    override suspend fun catalogVersion(): String? { calls++; return version ?: throw WikiFailure.InvalidResponse }
+    override suspend fun catalogInfo(): WikiCatalogInfo { calls++; return WikiCatalogInfo(version ?: throw WikiFailure.InvalidResponse, "2026-10-23T11:34:59Z") }
     override suspend fun search(query: String, limit: Int): List<WikiSearchResult> { calls++; throw WikiFailure.InvalidResponse }
     override suspend fun article(id: String, maxChars: Int): WikiArticle { calls++; throw WikiFailure.InvalidResponse }
     override suspend fun isPdfAvailable(id: String): Boolean { calls++; return false }
@@ -74,7 +77,7 @@ private class WikiTestApi(private val version: String? = null) : WikiApi {
 }
 private class WikiTestCache(private val version: String? = null) : WikiCache {
     val result = WikiSearchResult("article", "Title", "Section", "https://example.com", 1, "excerpt")
-    override suspend fun readSearch(ownerUserId: String) = WikiSearchSnapshot("инструкция", listOf(result), snapshotId = version)
+    override suspend fun readSearch(ownerUserId: String) = WikiSearchSnapshot("инструкция", listOf(result), snapshotId = version, catalogUpdatedAt = "2026-10-23T11:34:59Z")
     override suspend fun saveSearch(ownerUserId: String, snapshot: WikiSearchSnapshot) {}
     override suspend fun readArticle(articleId: String) = WikiArticle(articleId, "Title", "Section", "https://example.com", content = "Cached content")
     override suspend fun saveArticle(article: WikiArticle) {}

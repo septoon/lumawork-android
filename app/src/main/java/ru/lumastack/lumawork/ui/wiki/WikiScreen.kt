@@ -82,10 +82,10 @@ internal fun WikiCatalogInfoAction(model: WikiViewModel) {
         IconButton(onClick = {
             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             expanded = true
-            model.refreshCatalogVersion()
+            model.refreshCatalogInfo()
         }) { Icon(Icons.Outlined.Info, contentDescription = "Информация о каталоге") }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            Text(wikiCatalogUpdateMessage(state.snapshotId), Modifier.widthIn(max = 280.dp).padding(16.dp),
+            Text(wikiCatalogUpdateMessage(state.catalogUpdatedAt), Modifier.widthIn(max = 280.dp).padding(16.dp),
                 style = MaterialTheme.typography.bodyMedium)
         }
     }

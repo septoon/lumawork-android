@@ -32,6 +32,7 @@ data class WikiUiState(
     val notice: String? = null,
     val offline: Boolean = false,
     val snapshotId: String? = null,
+    val catalogUpdatedAt: String? = null,
 )
 
 class WikiViewModel(
@@ -53,11 +54,11 @@ class WikiViewModel(
                 val cached = repository.readSearch(ownerUserId)
                 if (cached != null) {
                     offlineResults = cached.results; offlineQuery = cached.query
-                    mutableState.update { it.copy(query = cached.query, results = cached.results, snapshotId = cached.snapshotId) }
+                    mutableState.update { it.copy(query = cached.query, results = cached.results, snapshotId = cached.snapshotId, catalogUpdatedAt = cached.catalogUpdatedAt) }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { notice("Не удалось прочитать сохранённый поиск Вики.") }
-            if (!startOffline) { scheduleSearch(immediate = true); refreshCatalogVersion() }
+            if (!startOffline) { scheduleSearch(immediate = true); refreshCatalogInfo() }
         }
     }
 
@@ -66,13 +67,13 @@ class WikiViewModel(
         scheduleSearch(immediate = false)
     }
 
-    fun refresh() { scheduleSearch(immediate = true); refreshCatalogVersion() }
-    fun refreshCatalogVersion() {
+    fun refresh() { scheduleSearch(immediate = true); refreshCatalogInfo() }
+    fun refreshCatalogInfo() {
         if (startOffline) return
         catalogJob?.cancel()
         catalogJob = viewModelScope.launch {
             try {
-                repository.refreshCatalogVersion(ownerUserId)?.let { version -> mutableState.update { it.copy(snapshotId = version) } }
+                repository.refreshCatalogInfo(ownerUserId)?.let { info -> mutableState.update { it.copy(snapshotId = info.snapshotId, catalogUpdatedAt = info.updatedAt) } }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { /* Keep the last known catalog version, like iOS. */ }
         }

@@ -8,20 +8,30 @@ import kotlinx.serialization.json.Json
 
 class WikiModelsTest {
     @Test
+    fun `catalog shows publication time rather than export start time`() {
+        assertEquals("Каталог обновлен 04.11.2026 в 20:24", wikiCatalogUpdateMessage("2026-11-04T17:24:31.096Z", ZoneId.of("Europe/Simferopol")))
+    }
+
+    @Test
     fun `legacy cached search time is not displayed as the catalog update date`() {
         val snapshot = Json.decodeFromString<WikiSearchSnapshot>("""{"query":"VPN","results":[],"updatedAtEpochMillis":1792712930000}""")
-        assertEquals("Дата обновления каталога неизвестна.", wikiCatalogUpdateMessage(snapshot.snapshotId))
+        assertEquals("Дата обновления каталога неизвестна.", wikiCatalogUpdateMessage(snapshot.catalogUpdatedAt))
     }
 
     @Test
     fun `catalog timestamp is interpreted as UTC and shown in the device zone`() {
-        assertEquals("Каталог обновлен 23.10.2026 в 02:48", wikiCatalogUpdateMessage("20261022T234850Z", ZoneId.of("Europe/Simferopol")))
-        assertEquals("Каталог обновлен 22.10.2026 в 23:48", wikiCatalogUpdateMessage("20261022T234850Z", ZoneId.of("UTC")))
+        assertEquals("Каталог обновлен 23.10.2026 в 02:48", wikiCatalogUpdateMessage("2026-10-22T23:48:50Z", ZoneId.of("Europe/Simferopol")))
+        assertEquals("Каталог обновлен 22.10.2026 в 23:48", wikiCatalogUpdateMessage("2026-10-22T23:48:50Z", ZoneId.of("UTC")))
+    }
+
+    @Test
+    fun `publication timestamps with an offset describe the same instant`() {
+        assertEquals("Каталог обновлен 04.11.2026 в 20:24", wikiCatalogUpdateMessage("2026-11-04T20:24:31+03:00", ZoneId.of("Europe/Simferopol")))
     }
 
     @Test
     fun `missing malformed and impossible catalog dates stay unknown`() {
-        listOf(null, "", "legacy", "2026-10-22T23:48:50Z", "20260230T120000Z", "20261022T250000Z").forEach {
+        listOf(null, "", "legacy", "20261022T234850Z", "2026-02-30T12:00:00Z", "2026-10-22T25:00:00Z").forEach {
             assertEquals("Дата обновления каталога неизвестна.", wikiCatalogUpdateMessage(it, ZoneId.of("UTC")))
         }
     }

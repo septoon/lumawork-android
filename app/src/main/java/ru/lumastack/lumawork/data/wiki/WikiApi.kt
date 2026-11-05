@@ -13,11 +13,12 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import ru.lumastack.lumawork.domain.wiki.WikiCatalogInfo
 import ru.lumastack.lumawork.domain.wiki.WikiArticle
 import ru.lumastack.lumawork.domain.wiki.WikiSearchResult
 
 interface WikiApi {
-    suspend fun catalogVersion(): String?
+    suspend fun catalogInfo(): WikiCatalogInfo
     suspend fun search(query: String, limit: Int = 10): List<WikiSearchResult>
     suspend fun article(id: String, maxChars: Int = 90_000): WikiArticle
     suspend fun isPdfAvailable(id: String): Boolean
@@ -42,9 +43,12 @@ class OkHttpWikiApi(
 ) : WikiApi {
     private val base = origin.trimEnd('/').toHttpUrl()
 
-    override suspend fun catalogVersion(): String? {
+    override suspend fun catalogInfo(): WikiCatalogInfo {
         val response = executeSuspend<WikiHealthResponse>(request(base.newBuilder().addPathSegment("health").build().toString()))
-        return response.snapshotId?.takeIf(String::isNotBlank) ?: response.contentVersion?.takeIf(String::isNotBlank)
+        return WikiCatalogInfo(
+            response.snapshotId?.takeIf(String::isNotBlank) ?: response.contentVersion?.takeIf(String::isNotBlank),
+            response.updatedAt?.takeIf(String::isNotBlank),
+        )
     }
 
     override suspend fun search(query: String, limit: Int): List<WikiSearchResult> {
@@ -104,7 +108,7 @@ class OkHttpWikiApi(
 }
 
 @Serializable
-private data class WikiHealthResponse(val snapshotId: String? = null, val contentVersion: String? = null)
+private data class WikiHealthResponse(val snapshotId: String? = null, val contentVersion: String? = null, val updatedAt: String? = null)
 
 @Serializable
 private data class WikiSearchResponse(val query: String = "", val results: List<WikiSearchResult> = emptyList())

@@ -3,6 +3,7 @@ package ru.lumastack.lumawork.data.wiki
 import ru.lumastack.lumawork.data.simpleone.SimpleOneAccess
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import ru.lumastack.lumawork.domain.wiki.WikiCatalogInfo
 import ru.lumastack.lumawork.domain.wiki.WikiArticle
 import ru.lumastack.lumawork.domain.wiki.WikiSearchSnapshot
 
@@ -20,18 +21,20 @@ class WikiRepository(
         val results = api.search(query)
         searchCacheMutex.withLock {
             access.require(ownerUserId)
-            WikiSearchSnapshot(query, results, nowEpochMillis(), cache.readSearch(ownerUserId)?.snapshotId)
+            val cached = cache.readSearch(ownerUserId)
+            WikiSearchSnapshot(query, results, nowEpochMillis(), cached?.snapshotId, cached?.catalogUpdatedAt)
                 .also { cache.saveSearch(ownerUserId, it) }
         }
     }
 
-    suspend fun refreshCatalogVersion(ownerUserId: String): String? = access.protect(ownerUserId) {
-        val version = api.catalogVersion()?.takeIf(String::isNotBlank) ?: return@protect null
+    suspend fun refreshCatalogInfo(ownerUserId: String): WikiCatalogInfo? = access.protect(ownerUserId) {
+        val info = api.catalogInfo()
+        val version = info.snapshotId?.takeIf(String::isNotBlank) ?: return@protect null
         searchCacheMutex.withLock {
             val cached = cache.readSearch(ownerUserId) ?: WikiSearchSnapshot("инструкция", emptyList())
-            cache.saveSearch(ownerUserId, cached.copy(snapshotId = version))
+            cache.saveSearch(ownerUserId, cached.copy(snapshotId = version, catalogUpdatedAt = info.updatedAt))
         }
-        version
+        info.copy(snapshotId = version)
     }
 
     suspend fun readArticle(articleId: String): WikiArticle? = access.protect(access.requireCurrent().ownerUserId) { cache.readArticle(articleId) }
