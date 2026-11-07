@@ -41,6 +41,14 @@ class VersionSelectionTests(unittest.TestCase):
         self.assertEqual(pub.next_version('0.1.56', '0.1.57'), '0.1.58')
     def test_newer_public_release_sets_next_version(self):
         self.assertEqual(pub.next_version('0.1.60', '0.1.57'), '0.1.61')
+    def test_next_release_can_start_new_minor_version(self):
+        self.assertEqual(pub.next_version('0.1.60', '0.1.60', minimum='0.2.0'), '0.2.0')
+    def test_published_target_continues_with_next_patch(self):
+        self.assertEqual(pub.next_version('0.2.0', minimum='0.2.0'), '0.2.1')
+    def test_next_release_can_start_new_major_version(self):
+        self.assertEqual(pub.next_version('0.2.5', minimum='1.0.0'), '1.0.0')
+    def test_first_release_uses_configured_minimum(self):
+        self.assertEqual(pub.next_version(minimum='0.2.0'), '0.2.0')
 
 class SourceGuardTests(unittest.TestCase):
     def test_publisher_rejects_checkout_without_leaderboard_before_network(self):

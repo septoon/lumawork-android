@@ -68,12 +68,15 @@ def parse_badging(info):
 
 
 
-def next_version(*values):
-    require(all(re.fullmatch(r'\d+\.\d+\.\d+', value) for value in values if value), 'Version must be X.Y.Z')
+def next_version(*values, minimum=None):
+    require(all(re.fullmatch(r'\d+\.\d+\.\d+', value) for value in (*values, minimum) if value), 'Version must be X.Y.Z')
     versions = [tuple(map(int, value.split('.'))) for value in values if value]
-    require(bool(versions), 'Version must be X.Y.Z')
-    major, minor, patch = max(versions)
-    return f'{major}.{minor}.{patch + 1}'
+    require(bool(versions) or bool(minimum), 'Version must be X.Y.Z')
+    candidates = [tuple(map(int, minimum.split('.')))] if minimum else []
+    if versions:
+        major, minor, patch = max(versions)
+        candidates.append((major, minor, patch + 1))
+    return '.'.join(map(str, max(candidates)))
 
 
 def main():
@@ -107,7 +110,7 @@ def main():
         local_package, local_code, local_name, _, local_cert = inspect(local_apk)
         require(local_package == contract.APP_ID and local_cert == contract.TRUSTED_CERT, 'Existing local APK has unknown identity/signature')
     code = max(default_code + 1, (previous['versionCode'] + 1) if previous else 1, local_code + 1)
-    name = next_version(previous['versionName'] if previous else '', default_name, local_name if local_code else '')
+    name = next_version(previous['versionName'] if previous else '', local_name if local_code else '', minimum=default_name)
     name = os.environ.get('RELEASE_VERSION', name)
     require(re.fullmatch(r'\d+\.\d+\.\d+', name), 'RELEASE_VERSION must be X.Y.Z')
     env = {**os.environ, 'RELEASE_VERSION_NAME': name, 'RELEASE_VERSION_CODE': str(code)}
