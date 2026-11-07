@@ -38,7 +38,6 @@ import kotlinx.coroutines.delay
 import ru.lumastack.lumawork.data.analytics.*
 import ru.lumastack.lumawork.domain.analytics.*
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
-import ru.lumastack.lumawork.ui.requests.RequestLoadingTitle
 import ru.lumastack.lumawork.ui.shell.AppHeaderSegments
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.*
@@ -117,12 +116,12 @@ internal fun LeaderboardContent(state: LeaderboardState, widthClass: AppWidthCla
                 if (sidePanel) Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                     Column(Modifier.width(280.dp).verticalScroll(rememberScrollState()).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         OwnPosition(state, skeleton = state.isLoading && state.response == null)
-                        RankingFreshness(state)
                     }
                     RankingList(state, listState, false, onRefresh, onNext, onCity, Modifier.weight(1f))
-                } else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                } else Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                     RankingList(state, listState, true, onRefresh, onNext, onCity, Modifier.widthIn(max = 760.dp).fillMaxSize())
                 }
+                RankingFreshness(state)
             }
         }
     }
@@ -130,15 +129,9 @@ internal fun LeaderboardContent(state: LeaderboardState, widthClass: AppWidthCla
 
 @Composable
 private fun RankingFilters(filter: LeaderboardFilter, onFilter: (LeaderboardFilter) -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        val vertical = maxWidth.value / LocalDensity.current.fontScale < 360
-        if (vertical) Column(Modifier.fillMaxWidth()) {
-            RankingMenu(LeaderboardCategory.entries.map { it.title }, LeaderboardCategory.entries.indexOf(filter.category), "Тип оборудования") { onFilter(filter.copy(category = LeaderboardCategory.entries[it])) }
-            RankingMenu(LeaderboardPeriod.entries.map { it.title }, LeaderboardPeriod.entries.indexOf(filter.period), "Период") { onFilter(filter.copy(period = LeaderboardPeriod.entries[it])) }
-        } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { RankingMenu(LeaderboardCategory.entries.map { it.title }, LeaderboardCategory.entries.indexOf(filter.category), "Тип оборудования") { onFilter(filter.copy(category = LeaderboardCategory.entries[it])) } }
-            Box(Modifier.weight(1.35f), contentAlignment = Alignment.CenterEnd) { RankingMenu(LeaderboardPeriod.entries.map { it.title }, LeaderboardPeriod.entries.indexOf(filter.period), "Период") { onFilter(filter.copy(period = LeaderboardPeriod.entries[it])) } }
-        }
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) { RankingMenu(LeaderboardCategory.entries.map { it.title }, LeaderboardCategory.entries.indexOf(filter.category), "Тип оборудования") { onFilter(filter.copy(category = LeaderboardCategory.entries[it])) } }
+        Box(Modifier.weight(1.35f), contentAlignment = Alignment.CenterEnd) { RankingMenu(LeaderboardPeriod.entries.map { it.title }, LeaderboardPeriod.entries.indexOf(filter.period), "Период") { onFilter(filter.copy(period = LeaderboardPeriod.entries[it])) } }
     }
 }
 @Composable
@@ -161,11 +154,8 @@ private fun RankingMenu(titles: List<String>, selected: Int, label: String, onSe
 private fun RankingList(state: LeaderboardState, scroll: LazyListState, includeOwn: Boolean, onRefresh: () -> Unit, onNext: () -> Unit, onCity: () -> Unit, modifier: Modifier) {
     val response = state.response?.participantsOnly()
     LazyColumn(modifier, state = scroll, contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item("title") { RequestLoadingTitle(isLoading = state.isLoading && response != null,
-            text = "Рейтинг пользователей", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)) }
         if (includeOwn) {
             if (response?.me != null || state.isLoading && response == null) item("me") { OwnPosition(state, state.isLoading && response == null) }
-            if (response != null) item("freshness") { RankingFreshness(state) }
         }
         if (state.error != null) item("error") {
             Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -175,7 +165,7 @@ private fun RankingList(state: LeaderboardState, scroll: LazyListState, includeO
         }
         item("columns") { Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Место", Modifier.width(60.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Место", Modifier.width(48.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Инженер", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text("Заявок", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } }
@@ -193,7 +183,7 @@ private fun OwnPosition(state: LeaderboardState, skeleton: Boolean) {
     val me = state.response?.participantsOnly()?.me ?: return
     AppCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Ваша позиция", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Text("Моя позиция", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             RankingRow(me, own = true)
         }
     }
@@ -201,10 +191,14 @@ private fun OwnPosition(state: LeaderboardState, skeleton: Boolean) {
 @Composable
 private fun RankingFreshness(state: LeaderboardState) {
     val response = state.response?.participantsOnly() ?: return
-    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Участников рейтинга: ${response.usersWithDataCount}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (state.isSaved) Text("Сохранённые данные · ${rankingTime(state.savedAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        response.me?.sourceSyncedAt?.let { Text("Ваши заявки обновлены: ${rankingTime(it)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    Column(Modifier.fillMaxWidth().padding(start = 4.dp, top = 8.dp, end = 4.dp, bottom = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Участников рейтинга: ${response.usersWithDataCount}", textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        response.me?.sourceSyncedAt?.let { Text("Ваши заявки обновлены: ${rankingTime(it)}", textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (state.isSaved) Text("Сохранённые данные · ${rankingTime(state.savedAt)}", textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 private fun rankingTime(value: String?): String = runCatching { DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").format(Instant.parse(value).atZone(workStatisticsZone)) }.getOrDefault("—")
@@ -214,22 +208,15 @@ private fun RankingRow(entry: LeaderboardEntry, own: Boolean = false) {
     val value = if (entry.hasData) entry.value.toString() else "Нет данных"
     val position = entry.rank?.let { "$it место" } ?: "Без места"
     val highlight = entry.isCurrentUser && !own
-    BoxWithConstraints(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
         .background(if (highlight) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .35f) else if (own) Color.Transparent else AppSurfaces.card)
         .semantics(mergeDescendants = true) { contentDescription = "${entry.displayName}, $position, ${if (entry.hasData) "$value заявок" else value}" }
-        .padding(if (own) 0.dp else 12.dp)) {
-        val stacked = maxWidth.value / LocalDensity.current.fontScale < 340
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            RankingPlace(entry.rank)
-            if (stacked) Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(entry.displayName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Text(if (entry.hasData) "$value заявок" else value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            } else {
-                Text(entry.displayName, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Text(value, style = if (entry.hasData) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.End, fontWeight = if (entry.hasData) FontWeight.SemiBold else FontWeight.Normal)
-            }
-        }
+        .padding(if (own) 0.dp else 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        RankingPlace(entry.rank)
+        Text(entry.displayName, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        Text(value, style = if (entry.hasData) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.End, fontWeight = if (entry.hasData) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 @Composable
