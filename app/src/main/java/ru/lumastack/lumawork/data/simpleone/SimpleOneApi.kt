@@ -90,6 +90,7 @@ interface SimpleOneApi {
     suspend fun officeEquipment(authKey: String): List<OfficeEquipmentItem> = emptyList()
     suspend fun officeEquipmentDetails(item: OfficeEquipmentItem, authKey: String): OfficeEquipmentItem = item
     suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest
+    suspend fun statisticsDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest = requestDetails(request, authKey)
     suspend fun coordinationRequests(region: CoordinationRegion, authKey: String): List<SimpleOneRequest>
     suspend fun returnEquipmentRequests(userId: String, authKey: String): List<SimpleOneRequest>
     suspend fun groupClosedRequestsPage(region: CoordinationRegion, page: Int, authKey: String, perPage: Int = 100, newestFirst: Boolean = false): GroupClosedRequestsPage = throw SimpleOneFailure.InvalidResponse
@@ -306,6 +307,9 @@ class OkHttpSimpleOneApi(
         val record = simpleOneRecordItem(raw) ?: throw serverFailure(raw) ?: SimpleOneFailure.InvalidResponse
         return parseOfficeEquipment(record, item)
     }
+
+    override suspend fun statisticsDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest =
+        closedSyncClient(authKey).completeForStatistics(request)
 
     override suspend fun requestDetails(request: SimpleOneRequest, authKey: String): SimpleOneRequest {
         if (request.sysId.isBlank()) return request
@@ -672,6 +676,7 @@ class OkHttpSimpleOneApi(
             "multicard_comment_ing",
             "multicard_information",
             "description",
+            "multicard_additional_information",
             "new_closure_code",
             "closure_notes",
             "close_code",
@@ -726,6 +731,39 @@ class OkHttpSimpleOneApi(
     }
 }
 
+private fun JsonObject.readableRankingDate(vararg keys: String): String = keys.firstNotNullOfOrNull { key ->
+    val raw = get(key) ?: return@firstNotNullOfOrNull null
+    if (raw is JsonObject && raw["read_access"] == JsonPrimitive(false)) null
+    else fieldValue(raw, false).takeIf(String::isNotBlank)
+}.orEmpty()
+
+/** Keep readability evidence separate from display strings and mergeMissing fallbacks. */
+private fun rankingSourceFieldsReadable(item: JsonObject): Boolean {
+    val fields = item.toMutableMap()
+    (item["sections"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().forEach { section ->
+        (section["elements"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().forEach { element ->
+            listOf("sys_column_name", "system_name", "name").forEach { name ->
+                element.field(name).takeIf(String::isNotBlank)?.let { key ->
+                    if (element["read_access"] == JsonPrimitive(false)) fields[key] = element
+                    else if (key !in fields && "value" in element) fields[key] = element.getValue("value")
+                }
+            }
+        }
+    }
+    fun readable(raw: JsonElement): Boolean = raw !is JsonObject ||
+        raw["read_access"] != JsonPrimitive(false) &&
+        ("value" in raw || "display_value" in raw || "database_value" in raw)
+    fun group(vararg keys: String): Boolean {
+        val present = keys.mapNotNull { fields[it] }
+        return present.isNotEmpty() && present.all(::readable)
+    }
+    return group("multicard_request_type", "request_type", "Тип заявки") &&
+        group("new_closure_code", "close_code", "closure_code", "resolution_code", "multicard_close_code") &&
+        group("multicard_information", "multicard_info", "information", "description") &&
+        group("multicard_additional_information", "additional_information") &&
+        group("completed_at", "completion_time", "multicard_completed_at", "resolved_at", "closed_at", "multicard_closing_date")
+}
+
 internal fun parseSimpleOneRequest(
     item: JsonObject,
     source: SimpleOneRequestSource = SimpleOneRequestSource.Active,
@@ -741,6 +779,13 @@ internal fun parseSimpleOneRequest(
         source = source,
         sysId = item.field("sys_id"),
         sysUpdatedAt = item.field("sys_updated_at"),
+        rankingDates = ru.lumastack.lumawork.domain.analytics.RankingDates(
+            ru.lumastack.lumawork.domain.analytics.RankingDateContext.ApiUtc,
+            completedAt = item.readableRankingDate("completed_at", "completion_time", "multicard_completed_at"),
+            resolvedAt = item.readableRankingDate("resolved_at"),
+            closedAt = item.readableRankingDate("closed_at", "multicard_closing_date"),
+            complete = rankingSourceFieldsReadable(item),
+        ),
         number = item.field("number", "__display_value"),
         incomingNumber = firstNonEmpty(
             item.field(
@@ -1147,6 +1192,7 @@ internal fun SimpleOneRequest.mergeMissing(fallback: SimpleOneRequest): SimpleOn
     deadline = deadline.ifBlank { fallback.deadline },
     resolvedAt = resolvedAt.ifBlank { fallback.resolvedAt },
     completedAt = completedAt.ifBlank { fallback.completedAt },
+    rankingDates = rankingDates ?: fallback.rankingDates,
     closedAt = closedAt.ifBlank { fallback.closedAt },
     assignedUser = assignedUser.ifBlank { fallback.assignedUser },
     assignedUserId = assignedUserId.ifBlank { fallback.assignedUserId },

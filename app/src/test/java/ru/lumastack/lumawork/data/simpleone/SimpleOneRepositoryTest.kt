@@ -41,6 +41,58 @@ import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.backpack.BackpackItem
 
 class SimpleOneRepositoryTest {
+    @Test fun `incomplete authoritative source cannot commit archive or statistics outbox`() = runTest {
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val cache = FakeSimpleOneSupplementalCache()
+        val disk = ru.lumastack.lumawork.data.analytics.WorkStatisticsSourceIndex(java.nio.file.Files.createTempDirectory("stats-incomplete").toFile(), kotlinx.serialization.json.Json { encodeDefaults = true })
+        val api = object : ru.lumastack.lumawork.data.analytics.WorkStatisticsApi {
+            override suspend fun me(token: String) = ru.lumastack.lumawork.domain.analytics.WorkStatisticsMe(0, false, "simple-user", null, null, 1)
+            override suspend fun upload(token: String, payload: ru.lumastack.lumawork.domain.analytics.WorkStatisticsUpload): ru.lumastack.lumawork.domain.analytics.WorkStatisticsReceipt = error("incomplete source must not upload")
+        }
+        val stats = ru.lumastack.lumawork.data.analytics.WorkStatisticsSyncCoordinator(api, disk,
+            { ru.lumastack.lumawork.data.analytics.StatisticsIdentity("owner", "token", simpleOneSessionFingerprint(sessions.read("owner")!!)) }, backgroundScope)
+        val incomplete = parseSimpleOneRequest(kotlinx.serialization.json.Json.parseToJsonElement(
+            """{"sys_id":"id","number":"REQ1","multicard_request_type":"install","resolved_at":"2026-11-01 10:00:00","description":"","multicard_additional_information":"","new_closure_code":{"read_access":false,"value":""}}"""
+        ).let { it as kotlinx.serialization.json.JsonObject }, ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource.Closed)
+        val repository = SimpleOneRepository(FakeSimpleOneApi(closed = listOf(incomplete)), sessions, FakeSimpleOneCache(), cache, workStatistics = stats)
+        assertTrue(runCatching { repository.refreshClosedArchive("owner") }.isFailure)
+        assertNull(cache.readClosedArchive("owner"))
+        assertNull(disk.read("owner").pending)
+        assertTrue(disk.read("owner").dirty)
+    }
+
+    @Test fun `ranking preflight precedes source and trusted baseline excludes merged local rows`() = runTest {
+        val events = mutableListOf<String>()
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val cache = FakeSimpleOneSupplementalCache().apply {
+            saveClosedArchive("owner", ClosedSimpleOneArchive(listOf(request().copy(number = "LOCAL-ONLY")), 1L, true, ClosedArchiveSource.Xlsx, 2,
+                syncUserId = "simple-user", wideCursor = ClosedRequestsSyncCursor("v", "id"), lastWideSyncAtEpochMillis = 1L))
+        }
+        val statsDisk = ru.lumastack.lumawork.data.analytics.WorkStatisticsSourceIndex(java.nio.file.Files.createTempDirectory("stats-source").toFile(), kotlinx.serialization.json.Json { encodeDefaults = true })
+        val statsApi = object : ru.lumastack.lumawork.data.analytics.WorkStatisticsApi {
+            override suspend fun me(token: String): ru.lumastack.lumawork.domain.analytics.WorkStatisticsMe {
+                events += "preflight"
+                return ru.lumastack.lumawork.domain.analytics.WorkStatisticsMe(0, false, "simple-user", null, null, 1)
+            }
+            override suspend fun upload(token: String, payload: ru.lumastack.lumawork.domain.analytics.WorkStatisticsUpload): ru.lumastack.lumawork.domain.analytics.WorkStatisticsReceipt = error("not in source lock")
+        }
+        val stats = ru.lumastack.lumawork.data.analytics.WorkStatisticsSyncCoordinator(statsApi, statsDisk,
+            { ru.lumastack.lumawork.data.analytics.StatisticsIdentity("owner", "token", simpleOneSessionFingerprint(sessions.read("owner")!!)) }, backgroundScope)
+        val api = FakeSimpleOneApi(exportedXlsx = ClosedRequestsXlsxExport.create(emptyList()), beforeExport = { events += "source" })
+        val repository = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache, workStatistics = stats)
+        val archive = repository.refreshClosedArchive("owner")
+        assertEquals(listOf("preflight", "source"), events)
+        assertEquals(1, archive.requests.size)
+        assertTrue(statsDisk.read("owner").index!!.entries.isEmpty())
+        assertEquals(0, api.syncCalls)
+        repository.refreshClosedArchive("owner")
+        assertEquals(1, api.syncCalls)
+        val diskState = statsDisk.read("owner")
+        statsDisk.write("owner", diskState.copy(dirty = true))
+        repository.refreshClosedArchive("owner")
+        assertEquals(2, api.exportCalls)
+    }
+
     @Test fun `request filter defaults to all when no local choice exists`() {
         assertEquals(ru.lumastack.lumawork.domain.simpleone.ActiveRequestsStatusFilter.All, SimpleOneUiState().statusFilter)
     }

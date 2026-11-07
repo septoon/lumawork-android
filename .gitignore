@@ -43,3 +43,6 @@ captures/
 # Python publisher cache
 __pycache__/
 *.pyc
+
+# Shared synthetic work statistics contract fixtures
+!app/src/test/resources/work-statistics-fixtures.json

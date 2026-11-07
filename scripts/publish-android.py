@@ -68,10 +68,21 @@ def parse_badging(info):
 
 
 
+def next_version(*values):
+    require(all(re.fullmatch(r'\d+\.\d+\.\d+', value) for value in values if value), 'Version must be X.Y.Z')
+    versions = [tuple(map(int, value.split('.'))) for value in values if value]
+    require(bool(versions), 'Version must be X.Y.Z')
+    major, minor, patch = max(versions)
+    return f'{major}.{minor}.{patch + 1}'
+
+
 def main():
     check_only = '--check-only' in sys.argv[1:]
     notes = [x for x in sys.argv[1:] if x != '--check-only']
     notes = '\n'.join(notes).strip() or 'Обновление «Инженер» для Android'
+    require((PROJECT / 'app/src/main/java/ru/lumastack/lumawork/data/analytics/LeaderboardRepository.kt').is_file()
+            and 'AnalyticsRoute(' in (PROJECT / 'app/src/main/java/ru/lumastack/lumawork/ui/shell/AppShell.kt').read_text(),
+            'Исходники рейтинга Android отсутствуют в текущей рабочей копии; публикация остановлена')
     previous = get_json(contract.ORIGIN + '/android/latest.json', optional=True)
     if previous:
         contract.validate(previous)
@@ -95,18 +106,8 @@ def main():
     if local_apk.is_file():
         local_package, local_code, local_name, _, local_cert = inspect(local_apk)
         require(local_package == contract.APP_ID and local_cert == contract.TRUSTED_CERT, 'Existing local APK has unknown identity/signature')
-    code = max(default_code, (previous['versionCode'] + 1) if previous else 1, local_code + 1)
-    if previous:
-        parts = previous['versionName'].split('.')
-        parts[-1] = str(int(parts[-1]) + 1)
-        name = '.'.join(parts)
-    elif local_code:
-        parts = local_name.split('.')
-        require(len(parts) == 3 and all(p.isdigit() for p in parts), 'Existing APK versionName is not X.Y.Z')
-        parts[-1] = str(int(parts[-1]) + 1)
-        name = '.'.join(parts)
-    else:
-        name = default_name
+    code = max(default_code + 1, (previous['versionCode'] + 1) if previous else 1, local_code + 1)
+    name = next_version(previous['versionName'] if previous else '', default_name, local_name if local_code else '')
     name = os.environ.get('RELEASE_VERSION', name)
     require(re.fullmatch(r'\d+\.\d+\.\d+', name), 'RELEASE_VERSION must be X.Y.Z')
     env = {**os.environ, 'RELEASE_VERSION_NAME': name, 'RELEASE_VERSION_CODE': str(code)}

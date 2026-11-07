@@ -34,8 +34,8 @@ val requestsConfigKeys = listOf(
     "SIMPLEONE_CLOSED_MONTH_FIRST_OPTION_ID",
     "SIMPLEONE_CLOSED_MONTH_SECOND_OPTION_ID",
 )
-val releaseVersionCode = providers.gradleProperty("releaseVersionCode").orNull?.toIntOrNull() ?: 1
-val releaseVersionName = providers.gradleProperty("releaseVersionName").orNull ?: "0.1.0"
+val releaseVersionCode = providers.gradleProperty("releaseVersionCode").orNull?.toIntOrNull() ?: 64
+val releaseVersionName = providers.gradleProperty("releaseVersionName").orNull ?: "0.1.57"
 val releaseStoreFile = signingProperties.getProperty("storeFile")?.takeIf(String::isNotBlank)
 val releaseKeyAlias = signingProperties.getProperty("keyAlias")?.takeIf(String::isNotBlank)
 val releaseStorePassword = providers.environmentVariable("LUMAWORK_ANDROID_STORE_PASSWORD").orNull

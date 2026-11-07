@@ -49,16 +49,9 @@ class ProfileCompletedWorkStatistics(records: List<SimpleOneRequest>) {
         val seen = mutableSetOf<String>()
         records.forEach { record ->
             val fields = record.workInfoFields()
-            val closureCode = record.closureCode.ifBlank { fields.firstValue("Код закрытия") }
+            val closureCode = record.closureCode.ifBlank { fields.firstWorkInfoValue("Код закрытия") }
             if (!closureCode.folded().replace(WHITESPACE, " ").startsWith("решено с выездом")) return@forEach
-            val operation = ProfileWorkOperation.entries.firstOrNull { it.rawValue == record.requestType.trim() }
-                ?: return@forEach
-            val labels = if (operation == ProfileWorkOperation.Dismounting) {
-                listOf("Тип демонтируемого ТО", "Тип устанавливаемого ТО", "Тип терминала")
-            } else listOf("Тип устанавливаемого ТО", "Тип терминала")
-            val category = labels.firstNotNullOfOrNull { label ->
-                ProfileWorkCategory.fromTerminalType(fields.firstValue(label))
-            } ?: return@forEach
+            val (category, operation) = classifyCompletedWork(record, fields) ?: return@forEach
             val number = record.number.trim()
             if (number.isEmpty() || !seen.add(number)) return@forEach
             val categoryCounts = counts.getOrPut(category) { mutableMapOf() }
@@ -69,7 +62,7 @@ class ProfileCompletedWorkStatistics(records: List<SimpleOneRequest>) {
 }
 
 // Android retains SO information as text and original table columns rather than iOS infoFields.
-private fun SimpleOneRequest.workInfoFields(): List<Pair<String, String>> {
+fun SimpleOneRequest.workInfoFields(): List<Pair<String, String>> {
     val texts = listOf(
         additionalInformation,
         description,
@@ -90,7 +83,7 @@ private fun SimpleOneRequest.workInfoFields(): List<Pair<String, String>> {
         .map { it.key to it.value.trim() }
 }
 
-private fun List<Pair<String, String>>.firstValue(label: String): String = firstOrNull {
+fun List<Pair<String, String>>.firstWorkInfoValue(label: String): String = firstOrNull {
     it.first.trim { character -> character.isWhitespace() || character == ':' }.equals(label, ignoreCase = true)
 }?.second.orEmpty()
 
@@ -100,3 +93,15 @@ private fun String.folded(): String = Normalizer.normalize(trim(), Normalizer.Fo
 
 private val WHITESPACE = Regex("[\\s\\p{Z}]+")
 private val DIACRITICS = Regex("\\p{M}+")
+
+/** Shared, pure SO equipment/operation rules. UI titles stay with their feature. */
+fun classifyCompletedWork(record: SimpleOneRequest, fields: List<Pair<String, String>> = record.workInfoFields()): Pair<ProfileWorkCategory, ProfileWorkOperation>? {
+    val operation = ProfileWorkOperation.entries.firstOrNull {
+        it.rawValue == record.requestType.ifBlank { fields.firstWorkInfoValue("Тип заявки") }.trim()
+    } ?: return null
+    val labels = if (operation == ProfileWorkOperation.Dismounting)
+        listOf("Тип демонтируемого ТО", "Тип устанавливаемого ТО", "Тип терминала")
+    else listOf("Тип устанавливаемого ТО", "Тип терминала")
+    val category = labels.firstNotNullOfOrNull { ProfileWorkCategory.fromTerminalType(fields.firstWorkInfoValue(it)) } ?: return null
+    return category to operation
+}

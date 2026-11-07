@@ -1,0 +1,557 @@
+{
+  "schemaVersion": 1,
+  "rulesVersion": 1,
+  "timezone": "Europe/Moscow",
+  "cases": [
+    {
+      "name": "portable install",
+      "row": {
+        "Номер заявки": "fixture-1",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "portable replacement",
+      "row": {
+        "Номер заявки": "fixture-2",
+        "Статус": "Закрыта",
+        "Тип заявки": "replacement",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "replacement"
+    },
+    {
+      "name": "portable serviceStd",
+      "row": {
+        "Номер заявки": "fixture-3",
+        "Статус": "Закрыта",
+        "Тип заявки": "serviceStd",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "serviceStd"
+    },
+    {
+      "name": "portable dismounting",
+      "row": {
+        "Номер заявки": "fixture-4",
+        "Статус": "Закрыта",
+        "Тип заявки": "dismounting",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "dismounting"
+    },
+    {
+      "name": "stationary install",
+      "row": {
+        "Номер заявки": "fixture-5",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: stat_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "stationary",
+      "operation": "install"
+    },
+    {
+      "name": "stationary replacement",
+      "row": {
+        "Номер заявки": "fixture-6",
+        "Статус": "Закрыта",
+        "Тип заявки": "replacement",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: stat_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "stationary",
+      "operation": "replacement"
+    },
+    {
+      "name": "stationary serviceStd",
+      "row": {
+        "Номер заявки": "fixture-7",
+        "Статус": "Закрыта",
+        "Тип заявки": "serviceStd",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: stat_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "stationary",
+      "operation": "serviceStd"
+    },
+    {
+      "name": "stationary dismounting",
+      "row": {
+        "Номер заявки": "fixture-8",
+        "Статус": "Закрыта",
+        "Тип заявки": "dismounting",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: stat_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "stationary",
+      "operation": "dismounting"
+    },
+    {
+      "name": "integration install",
+      "row": {
+        "Номер заявки": "fixture-9",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: intel_pin"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "integration",
+      "operation": "install"
+    },
+    {
+      "name": "integration replacement",
+      "row": {
+        "Номер заявки": "fixture-10",
+        "Статус": "Закрыта",
+        "Тип заявки": "replacement",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: intel_pin"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "integration",
+      "operation": "replacement"
+    },
+    {
+      "name": "integration serviceStd",
+      "row": {
+        "Номер заявки": "fixture-11",
+        "Статус": "Закрыта",
+        "Тип заявки": "serviceStd",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: intel_pin"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "integration",
+      "operation": "serviceStd"
+    },
+    {
+      "name": "integration dismounting",
+      "row": {
+        "Номер заявки": "fixture-12",
+        "Статус": "Закрыта",
+        "Тип заявки": "dismounting",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: intel_pin"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "integration",
+      "operation": "dismounting"
+    },
+    {
+      "name": "fiscal install",
+      "row": {
+        "Номер заявки": "fixture-13",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: fiscal_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "fiscal",
+      "operation": "install"
+    },
+    {
+      "name": "fiscal replacement",
+      "row": {
+        "Номер заявки": "fixture-14",
+        "Статус": "Закрыта",
+        "Тип заявки": "replacement",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: fiscal_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "fiscal",
+      "operation": "replacement"
+    },
+    {
+      "name": "fiscal serviceStd",
+      "row": {
+        "Номер заявки": "fixture-15",
+        "Статус": "Закрыта",
+        "Тип заявки": "serviceStd",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: fiscal_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "fiscal",
+      "operation": "serviceStd"
+    },
+    {
+      "name": "fiscal dismounting",
+      "row": {
+        "Номер заявки": "fixture-16",
+        "Статус": "Закрыта",
+        "Тип заявки": "dismounting",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: fiscal_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "fiscal",
+      "operation": "dismounting"
+    },
+    {
+      "name": "universal",
+      "row": {
+        "Номер заявки": "fixture-17",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: universal_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "unknown equipment",
+      "row": {
+        "Номер заявки": "fixture-18",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: alien"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": null,
+      "operation": null
+    },
+    {
+      "name": "unknown operation",
+      "row": {
+        "Номер заявки": "fixture-19",
+        "Статус": "Закрыта",
+        "Тип заявки": "other",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": null,
+      "operation": null
+    },
+    {
+      "name": "return",
+      "row": {
+        "Номер заявки": "fixture-20",
+        "Статус": "Закрыта",
+        "Тип заявки": "returnEquip",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 0,
+      "returned": 1,
+      "category": null,
+      "operation": null
+    },
+    {
+      "name": "refusal",
+      "row": {
+        "Номер заявки": "fixture-21",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Отказ клиента",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 0,
+      "returned": 0,
+      "category": null,
+      "operation": null
+    },
+    {
+      "name": "no visit",
+      "row": {
+        "Номер заявки": "fixture-22",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено без выезда",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 0,
+      "returned": 0,
+      "category": null,
+      "operation": null
+    },
+    {
+      "name": "unicode closure",
+      "row": {
+        "Номер заявки": "fixture-23",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "  РЕШЁНО С ВЫЕЗДОМ   успешно ",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "dismount priority",
+      "row": {
+        "Номер заявки": "fixture-24",
+        "Статус": "Закрыта",
+        "Тип заявки": "dismounting",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-11-01T10:00:00Z",
+        "Информация": "Тип демонтируемого ТО: stat_pos\nТип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "stationary",
+      "operation": "dismounting"
+    },
+    {
+      "name": "UTC year boundary",
+      "row": {
+        "Номер заявки": "fixture-25",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2025-12-31T21:30:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-01",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "UTC month boundary",
+      "row": {
+        "Номер заявки": "fixture-26",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "2026-10-31T21:30:00Z",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "localized XLSX",
+      "row": {
+        "Номер заявки": "fixture-27",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "01.11.2026 00:15",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "Excel serial local midnight",
+      "row": {
+        "Номер заявки": "fixture-28",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "46327",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "unknown date",
+      "row": {
+        "Номер заявки": "fixture-29",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": null,
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "execution before resolution",
+      "row": {
+        "Номер заявки": "fixture-30",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "31.10.2026 23:00",
+        "Информация": "Тип устанавливаемого ТО: portable_pos",
+        "Время решения": "01.11.2026 05:00"
+      },
+      "month": "2026-10",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "invalid execution uses resolution",
+      "row": {
+        "Номер заявки": "fixture-31",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "invalid",
+        "Информация": "Тип устанавливаемого ТО: portable_pos",
+        "Время решения": "01.11.2026 05:00"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "Excel serial local month end fraction",
+      "row": {
+        "Номер заявки": "fixture-excel-boundary",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Выполнена": "46326.99",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-10",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    },
+    {
+      "name": "API unzoned UTC before month boundary",
+      "row": {
+        "Номер заявки": "fixture-api-utc-boundary",
+        "Статус": "Закрыта",
+        "Тип заявки": "install",
+        "Код закрытия": "Решено с выездом",
+        "Время \"Выполнена\"": "31.10.2026 22:00",
+        "__workStatisticsUTC:Время \"Выполнена\"": "2026-10-31 22:00:00",
+        "Информация": "Тип устанавливаемого ТО: portable_pos"
+      },
+      "month": "2026-11",
+      "completed": 1,
+      "returned": 0,
+      "category": "portable",
+      "operation": "install"
+    }
+  ],
+  "cities": [
+    {
+      "input": " г. МОСКВА ",
+      "key": "москва"
+    },
+    {
+      "input": "город Москва",
+      "key": "москва"
+    },
+    {
+      "input": "  ",
+      "key": null
+    }
+  ],
+  "ties": [
+    1,
+    1,
+    3
+  ]
+}

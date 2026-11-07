@@ -35,3 +35,18 @@ class BadgingTests(unittest.TestCase):
     def test_debug_apk_rejected(self):
         with self.assertRaises(ValueError):
             pub.parse_badging("package: name='ru.lumastack.lumawork' versionCode='1' versionName='0.1.0'\nminSdkVersion:'26'\napplication-debuggable\n")
+
+class VersionSelectionTests(unittest.TestCase):
+    def test_local_installed_release_sets_next_version(self):
+        self.assertEqual(pub.next_version('0.1.56', '0.1.57'), '0.1.58')
+    def test_newer_public_release_sets_next_version(self):
+        self.assertEqual(pub.next_version('0.1.60', '0.1.57'), '0.1.61')
+
+class SourceGuardTests(unittest.TestCase):
+    def test_publisher_rejects_checkout_without_leaderboard_before_network(self):
+        import tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory, patch.object(pub, 'PROJECT', Path(directory)):
+            with patch.object(pub, 'get_json', side_effect=AssertionError('network contacted')):
+                with self.assertRaisesRegex(ValueError, 'Исходники рейтинга'):
+                    pub.main()

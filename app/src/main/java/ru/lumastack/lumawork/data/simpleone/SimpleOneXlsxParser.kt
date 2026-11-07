@@ -156,6 +156,10 @@ internal object SimpleOneXlsxParser {
         val information = row.firstValue("Информация", "Доп. информация", "Дополнительная информация")
         val info = parseInfo(information)
         val description = row.value("Описание")
+        fun hasHeader(vararg names: String) = row.keys.any { key -> names.any { normalizeHeader(key) == normalizeHeader(it) } }
+        val rankingComplete = hasHeader("Тип заявки") && hasHeader("Код закрытия") &&
+            hasHeader("Информация", "Описание") && hasHeader("Доп. информация", "Дополнительная информация") &&
+            hasHeader("Выполнена", "Время Выполнена", "Время \"Выполнена\"", "Время выполнения", "Время решения", "Дата закрытия в МК", "Дата закрытия")
         val closedAt = normalizeExcelDate(
             row.firstValue("Дата закрытия в МК", "Дата закрытия МК", "Дата закрытия"),
         )
@@ -167,6 +171,13 @@ internal object SimpleOneXlsxParser {
         )
         return SimpleOneRequest(
             source = SimpleOneRequestSource.Closed,
+            rankingDates = ru.lumastack.lumawork.domain.analytics.RankingDates(
+                ru.lumastack.lumawork.domain.analytics.RankingDateContext.MoscowDisplay,
+                completedAt = row.firstValue("Выполнена", "Время Выполнена", "Время \"Выполнена\"", "Время выполнения"),
+                resolvedAt = row.firstValue("Время решения"),
+                closedAt = row.firstValue("Дата закрытия в МК", "Дата закрытия МК", "Дата закрытия"),
+                complete = rankingComplete,
+            ),
             sysId = row.value("sys_id"),
             number = number,
             incomingNumber = firstNonEmpty(

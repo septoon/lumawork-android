@@ -14,6 +14,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.lumastack.lumawork.ui.auth.AuthContent
@@ -43,6 +45,18 @@ class MainActivity : ComponentActivity() {
         receiveNotification(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        lifecycleScope.launch {
+            val container = withContext(Dispatchers.IO) { (application as LumaWorkApplication).container }
+            container.leaderboardAccess.refresh()
+            container.workStatistics.resumePending()
+        }
+    }
+    override fun onStop() {
+        (application as LumaWorkApplication).container.workStatistics.stopRetries()
+        super.onStop()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (resources.configuration.smallestScreenWidthDp < 600) {
@@ -80,6 +94,7 @@ class MainActivity : ComponentActivity() {
                         authRepository = container.authRepository,
                         routeRepository = container.routeRepository,
                         simpleOneRepository = container.simpleOneRepository,
+                        leaderboardRepository = container.leaderboardRepository,
                         coordinationRepository = container.coordinationRepository,
                         timeReportRepository = container.timeReportRepository,
                         backpackRepository = container.backpackRepository,

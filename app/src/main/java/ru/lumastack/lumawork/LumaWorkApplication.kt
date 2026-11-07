@@ -2,6 +2,11 @@ package ru.lumastack.lumawork
 
 import android.app.Application
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import ru.lumastack.lumawork.data.analytics.*
 import ru.lumastack.lumawork.data.ftp.FtpTransferJobService
 import kotlinx.serialization.json.Json
 import ru.lumastack.lumawork.data.auth.AuthRepository
@@ -149,11 +154,29 @@ class AppContainer(application: Application) {
 
     private val simpleOneApi = OkHttpSimpleOneApi(BuildConfig.SIMPLEONE_API_ORIGIN, json = json)
 
+    private fun statisticsIdentity(): StatisticsIdentity? {
+        val session = authRepository.session ?: return null
+        val so = runCatching { simpleOneAccess.require(session.user.id) }.getOrNull() ?: return null
+        return StatisticsIdentity(session.user.id, session.token,
+            ru.lumastack.lumawork.data.simpleone.simpleOneSessionFingerprint(so))
+    }
+    private val statisticsApi = OkHttpWorkStatisticsApi(BuildConfig.API_ORIGIN, protectedHttpClient(),
+        onAuthFailure = { token -> if (authRepository.session?.token == token) authRepository.clearSession() })
+    val workStatistics = WorkStatisticsSyncCoordinator(statisticsApi,
+        WorkStatisticsSourceIndex(java.io.File(application.noBackupFilesDir, "work-statistics"), json),
+        ::statisticsIdentity, protectedWorkScope)
+    val leaderboardAccess = LeaderboardAccessRepository(statisticsApi,
+        { authRepository.session?.let { it.user.id to it.token } })
+    val leaderboardRepository = LeaderboardRepository(statisticsApi,
+        FileLeaderboardCache(java.io.File(application.noBackupFilesDir, "leaderboard"), json), leaderboardAccess,
+        ::statisticsIdentity, protectedWorkScope)
+
     val simpleOneRepository = SimpleOneRepository(
         api = simpleOneApi,
         sessionStore = simpleOneSessionStore,
         cache = SharedPreferencesSimpleOneCache(application, json),
         supplementalCache = FileSimpleOneSupplementalCache(application, json),
+        workStatistics = workStatistics,
     )
 
     val coordinationGroupClosedRepository = ru.lumastack.lumawork.data.coordination.CoordinationGroupClosedRequestsRepository(
@@ -200,6 +223,27 @@ class AppContainer(application: Application) {
         sessionStore = simpleOneSessionStore,
         cache = FileEmployeeCache(application, json),
     )
+    init {
+        protectedWorkScope.launch {
+            var previous: Pair<Pair<String, String>?, String?>? = null
+            combine(authRepository.sessionChanges.map { it?.let { s -> s.user.id to s.token } }.distinctUntilChanged(),
+                simpleOneAccess.changes) { account, _ -> account to statisticsIdentity()?.fingerprint }
+                .collectLatest { current ->
+                    val old = previous
+                    previous = current
+                    if (current.first == null || old != null && old != current) {
+                        if (old?.first != current.first || current.first == null) leaderboardAccess.clear()
+                        leaderboardRepository.clear()
+                        workStatistics.clear()
+                    }
+                    if (current.first != null) { leaderboardAccess.refresh(); workStatistics.resumePending() }
+                }
+        }
+        protectedWorkScope.launch {
+            leaderboardAccess.state.collect { if (it.enabled == false) leaderboardRepository.clear() }
+        }
+    }
+
 }
 
 private fun appDeviceHeaders(application: Application): Map<String, String> {

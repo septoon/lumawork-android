@@ -13,6 +13,48 @@ import ru.lumastack.lumawork.domain.simpleone.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
 class ClosedRequestsSyncTest {
+    @Test fun `unreadable closure or classification fields cannot become a trusted ranking row`() {
+        val readable = Json.parseToJsonElement("""{"sys_id":"id","number":"REQ1","multicard_request_type":"install","resolved_at":"2026-11-01 10:00:00","new_closure_code":"","description":"","multicard_additional_information":""}""").jsonObject
+        // An explicitly readable empty closure is a real zero, not missing source data.
+        assertEquals(0, ru.lumastack.lumawork.domain.analytics.workContribution(parseSimpleOneRequest(readable, SimpleOneRequestSource.Closed)).metrics.completedWithVisitCount)
+        for (column in listOf("new_closure_code", "description", "multicard_additional_information")) {
+            val denied = JsonObject(readable.toMutableMap().apply { put(column, buildJsonObject { put("read_access", false); put("value", "") }) })
+            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+                ru.lumastack.lumawork.domain.analytics.workContribution(parseSimpleOneRequest(denied, SimpleOneRequestSource.Closed))
+            }
+            val missing = JsonObject(readable.toMutableMap().apply { remove(column) })
+            org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+                ru.lumastack.lumawork.domain.analytics.workContribution(parseSimpleOneRequest(missing, SimpleOneRequestSource.Closed))
+            }
+        }
+    }
+
+    @Test fun `ranking delta preserves explicit completion priority`() = runTest {
+        val item = Json.parseToJsonElement(syncItem("one")).jsonObject.toMutableMap().apply {
+            put("completed_at", JsonPrimitive("2026-10-30 10:00:00"))
+            put("resolved_at", JsonPrimitive("2026-11-01 10:00:00"))
+        }
+        val sync = SimpleOneClosedSyncClient("https://sd.test/v1", { url ->
+            if (url.toHttpUrl().encodedPath.endsWith("/list/itsm_request")) buildJsonObject {
+                put("data", buildJsonObject { put("list", buildJsonArray { add(JsonObject(item)) }) })
+            } else Json.parseToJsonElement("""{"data":{"value":"2026-11-01 10:00:00"}}""").jsonObject
+        }, { "wide" }, { "monthly" })
+        val record = sync.changes("user", ClosedRequestsSyncScope.All, null, emptyMap()) {}.changes.single().request!!
+        assertEquals("2026-10", ru.lumastack.lumawork.domain.analytics.workContribution(record).monthKey)
+    }
+    @Test fun `ranking delta preserves UTC across XLSX adaptation at month boundary`() = runTest {
+        val item = Json.parseToJsonElement(syncItem("one")).jsonObject.toMutableMap().apply {
+            put("resolved_at", JsonPrimitive("2026-10-31 22:00:00"))
+        }
+        val sync = SimpleOneClosedSyncClient("https://sd.test/v1", { url ->
+            if (url.toHttpUrl().encodedPath.endsWith("/list/itsm_request")) buildJsonObject {
+                put("data", buildJsonObject { put("list", buildJsonArray { add(JsonObject(item)) }) })
+            } else Json.parseToJsonElement("""{"data":{"value":"2026-11-01 10:00:00"}}""").jsonObject
+        }, { "wide" }, { "monthly" })
+        val record = sync.changes("user", ClosedRequestsSyncScope.All, null, emptyMap()) {}.changes.single().request!!
+        assertEquals("2026-11", ru.lumastack.lumawork.domain.analytics.workContribution(record).monthKey)
+    }
+
     @Test fun `closed row completion overlaps at most four requests and commits in cursor order`() = runTest {
         var running = 0
         var maximum = 0

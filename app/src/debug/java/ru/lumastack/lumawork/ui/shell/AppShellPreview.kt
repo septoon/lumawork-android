@@ -129,6 +129,7 @@ internal fun PreviewShell() {
             isOffline = false,
             routeRepository = previewRouteRepository,
             simpleOneRepository = previewSimpleOneRepository,
+            leaderboardRepository = ru.lumastack.lumawork.ui.analytics.rememberPreviewLeaderboard(context),
             coordinationRepository = previewCoordinationRepository,
             timeReportRepository = previewTimeReportRepository,
             backpackRepository = previewBackpackRepository,

@@ -113,7 +113,7 @@ import ru.lumastack.lumawork.ui.ftp.FtpRoute
 import ru.lumastack.lumawork.ui.tools.ToolsRoute
 import ru.lumastack.lumawork.ui.salary.SalaryRoute
 import ru.lumastack.lumawork.ui.feedback.FeedbackRoute
-import ru.lumastack.lumawork.ui.analytics.AnalyticsScreen
+import ru.lumastack.lumawork.ui.analytics.AnalyticsRoute
 import ru.lumastack.lumawork.ui.admin.AdminRoute
 import ru.lumastack.lumawork.ui.theme.appScreenBackground
 
@@ -147,6 +147,7 @@ fun AppShell(
     authRepository: ru.lumastack.lumawork.data.auth.AuthRepository,
     routeRepository: RouteRepository,
     simpleOneRepository: SimpleOneRepository,
+    leaderboardRepository: ru.lumastack.lumawork.data.analytics.LeaderboardRepository,
     coordinationRepository: CoordinationRepository,
     timeReportRepository: TimeReportRepository,
     backpackRepository: BackpackRepository,
@@ -290,6 +291,7 @@ fun AppShell(
             isOffline = isOffline,
             routeRepository = routeRepository,
             simpleOneRepository = simpleOneRepository,
+            leaderboardRepository = leaderboardRepository,
             coordinationRepository = coordinationRepository,
             timeReportRepository = timeReportRepository,
             backpackRepository = backpackRepository,
@@ -352,6 +354,7 @@ private fun AppDrawerShell(
     isOffline: Boolean,
     routeRepository: RouteRepository,
     simpleOneRepository: SimpleOneRepository,
+    leaderboardRepository: ru.lumastack.lumawork.data.analytics.LeaderboardRepository,
     coordinationRepository: CoordinationRepository,
     timeReportRepository: TimeReportRepository,
     backpackRepository: BackpackRepository,
@@ -443,6 +446,7 @@ private fun AppDrawerShell(
                         isOffline = isOffline,
                         routeRepository = routeRepository,
                         simpleOneRepository = simpleOneRepository,
+                        leaderboardRepository = leaderboardRepository,
                         coordinationRepository = coordinationRepository,
                         timeReportRepository = timeReportRepository,
                         backpackRepository = backpackRepository,
@@ -634,6 +638,7 @@ private fun DestinationContent(
     isOffline: Boolean,
     routeRepository: RouteRepository,
     simpleOneRepository: SimpleOneRepository,
+    leaderboardRepository: ru.lumastack.lumawork.data.analytics.LeaderboardRepository,
     coordinationRepository: CoordinationRepository,
     timeReportRepository: TimeReportRepository,
     backpackRepository: BackpackRepository,
@@ -770,7 +775,9 @@ private fun DestinationContent(
                 widthClass = contentWidthClass,
                 onCancel = { onSelect(AppDestination.Home) },
             )
-            AppDestination.Analytics -> AnalyticsScreen(
+            AppDestination.Analytics -> AnalyticsRoute(
+                repository = leaderboardRepository,
+                publication = simpleOneRepository.workStatistics,
                 state = simpleOneState,
                 widthClass = contentWidthClass,
                 onRefresh = simpleOneActions.onRefreshAnalytics,

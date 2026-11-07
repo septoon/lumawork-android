@@ -65,6 +65,7 @@ data class SimpleOneRequest(
     val usedSimCard: String = "",
     val tableFields: Map<String, String> = emptyMap(),
     val sysUpdatedAt: String = "",
+    val rankingDates: ru.lumastack.lumawork.domain.analytics.RankingDates? = null,
 ) {
     val id: String
         get() = sysId.ifBlank { number }

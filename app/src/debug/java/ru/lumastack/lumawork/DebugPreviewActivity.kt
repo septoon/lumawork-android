@@ -17,7 +17,11 @@ class DebugPreviewActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             val previewContext = remember { PreviewStorageContext(this) }
-            CompositionLocalProvider(LocalContext provides previewContext) { PreviewShell() }
+            CompositionLocalProvider(LocalContext provides previewContext) {
+                if (intent.getStringExtra("screen") == "leaderboard")
+                    ru.lumastack.lumawork.ui.analytics.LeaderboardPreview(previewContext, intent.getBooleanExtra("dark", false))
+                else PreviewShell()
+            }
         }
     }
 }

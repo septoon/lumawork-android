@@ -46,6 +46,24 @@ internal class SimpleOneClosedSyncClient(
     suspend fun head(userId: String, scope: ClosedRequestsSyncScope): ClosedRequestsSyncCursor? =
         page(userId, scope, 1).first.firstOrNull()?.let { cursor(identity(it).first) }
 
+    /** Reuse delta's readable-column/cell fallback for incomplete authoritative API/XLSX rows. */
+    suspend fun completeForStatistics(request: SimpleOneRequest): SimpleOneRequest {
+        if (request.sysId.isBlank()) throw SimpleOneFailure.InvalidResponse
+        val row = completeRow(buildJsonObject { put("sys_id", request.sysId); put("number", request.number) }, request.sysId)
+        val parsed = SimpleOneXlsxParser.recordFromExportRow(row) ?: throw SimpleOneFailure.Http(409,
+            "Заявка изменилась во время выгрузки. Повторите обновление архива.")
+        if (parsed.number != request.number) throw SimpleOneFailure.InvalidResponse
+        val from = request.rankingDates
+        val fetched = requireNotNull(parsed.rankingDates).copy(context = ru.lumastack.lumawork.domain.analytics.RankingDateContext.ApiUtc)
+        fun normalized(raw: String?, context: ru.lumastack.lumawork.domain.analytics.RankingDateContext?): String? =
+            if (raw == null || context == null) null else ru.lumastack.lumawork.domain.analytics.parseRankingDate(raw, context)
+                ?.atZone(ru.lumastack.lumawork.domain.analytics.workStatisticsZone)?.toOffsetDateTime()?.toString()
+        return parsed.copy(rankingDates = fetched.copy(
+            completedAt = normalized(from?.completedAt, from?.context) ?: fetched.completedAt,
+            resolvedAt = normalized(from?.resolvedAt, from?.context) ?: fetched.resolvedAt,
+            closedAt = normalized(from?.closedAt, from?.context) ?: fetched.closedAt))
+    }
+
     suspend fun changes(
         userId: String, scope: ClosedRequestsSyncScope, since: ClosedRequestsSyncCursor?,
         knownVersions: Map<String, String>, onProgress: (String) -> Unit,
@@ -96,7 +114,10 @@ internal class SimpleOneClosedSyncClient(
                                     val row = completeRow(item, id)
                                     completionCalls.incrementAndGet()
                                     completionNanos.addAndGet(System.nanoTime() - completionStarted)
-                                    val record = SimpleOneXlsxParser.recordFromExportRow(row)?.copy(sysId = id, sysUpdatedAt = version.updatedAt)
+                                    val record = SimpleOneXlsxParser.recordFromExportRow(row)?.let { parsed ->
+                                        parsed.copy(sysId = id, sysUpdatedAt = version.updatedAt,
+                                            rankingDates = parsed.rankingDates?.copy(context = ru.lumastack.lumawork.domain.analytics.RankingDateContext.ApiUtc))
+                                    }
                                     ClosedRequestsSyncChange(id, number, version, record)
                                 } else null
                                 Result.success(CompletedRow(id, version, change))
@@ -212,6 +233,9 @@ internal class SimpleOneClosedSyncClient(
                     })
                 }
             }
+            if (column in setOf("resolved_at", "multicard_closing_date")) {
+                row["__workStatisticsUTC:$title"] = fieldValue(raw, false)
+            }
             row[title] = when (column) {
                 "state" -> databaseValue(raw)
                 "assigned_user", "new_closure_code" -> fieldValue(raw, true)
@@ -238,6 +262,18 @@ internal class SimpleOneClosedSyncClient(
                 val full = fieldValue(raw, false)
                 if (!readable(raw) || (full.isBlank() && value.isNotBlank())) throw error
                 full
+            }
+        }
+        // Some API presets expose a separate execution field in addition to resolved_at.
+        // Retain its higher priority; its UTC context is carried into the ranking adapter.
+        for (column in listOf("completed_at", "completion_time", "multicard_completed_at")) {
+            val raw = item[column] ?: detail?.get(column) ?: continue
+            if (!readable(raw)) throw SimpleOneFailure.Http(422, "SimpleOne не вернул время выполнения. Повторите обновление архива.")
+            val value = fieldValue(raw, false)
+            if (value.isNotBlank()) {
+                row["Выполнена"] = value
+                row["__workStatisticsUTC:Выполнена"] = value
+                break
             }
         }
         return row
