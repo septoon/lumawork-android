@@ -30,12 +30,22 @@ class FtpViewModel(private val repository: FtpRepository, private val session: A
     private var loadJob: Job? = null
     private var pathRevision = 0L
     private var refreshingTransfers = false
-    init { viewModelScope.launch {
-        try { repository.read(session.user.id)?.let(::applySnapshot); refreshTransfers() }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { mutableState.update { it.copy(errorMessage = "Не удалось прочитать сохранённые данные FTP.") } }
-        if (!startOffline && pathRevision == 0L) navigate("/")
-    } }
+    init {
+        viewModelScope.launch {
+            repository.personalState?.changes?.collect {
+                try { repository.read(session.user.id)?.let(::applySnapshot) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { }
+            }
+        }
+        viewModelScope.launch {
+            try { repository.read(session.user.id)?.let(::applySnapshot); refreshTransfers() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { mutableState.update { it.copy(errorMessage = "Не удалось прочитать сохранённые данные FTP.") } }
+            if (!startOffline) viewModelScope.launch { repository.synchronizeFavorites(session.user.id) }
+            if (!startOffline && pathRevision == 0L) navigate("/")
+        }
+    }
     private fun applySnapshot(snapshot: FtpSnapshot) { mutableState.update { if (snapshot.revision >= it.snapshot.revision) it.copy(snapshot = snapshot) else it } }
     fun search(value: String) { mutableState.update { it.copy(search = value) } }
     fun downloadedSearch(value: String) { mutableState.update { it.copy(downloadedSearch = value) } }
@@ -64,7 +74,10 @@ class FtpViewModel(private val repository: FtpRepository, private val session: A
         }
     }
     fun up() { navigate(state.value.path.trimEnd('/').substringBeforeLast('/', "").ifBlank { "/" }) }
-    fun refresh() { if (!startOffline) navigate(state.value.path) }
+    fun refresh() { if (!startOffline) {
+        viewModelScope.launch { repository.synchronizeFavorites(session.user.id) }
+        navigate(state.value.path)
+    } }
     fun selectActions(item: FtpItem) { mutableState.update { it.copy(selected = item) } }
     fun closeSelected() { mutableState.update { it.copy(selected = null) } }
     fun showQueue() { mutableState.update { it.copy(queueOpen = true, selected = null) } }

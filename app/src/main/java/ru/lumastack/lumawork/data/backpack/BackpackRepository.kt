@@ -13,10 +13,25 @@ class BackpackRepository(
     private val sessionStore: SimpleOneSessionStore,
     private val cache: BackpackCache,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
+    val personalState: ru.lumastack.lumawork.data.personal.PersonalStateRepository? = null,
 ) {
     private val cacheMutex = Mutex()
     suspend fun read(ownerUserId: String, simpleOneUserId: String): BackpackSnapshot? =
-        cache.read(ownerUserId)?.takeIf { it.simpleOneUserId == simpleOneUserId }
+        cache.read(ownerUserId)?.takeIf { it.simpleOneUserId == simpleOneUserId }?.let { withLocations(ownerUserId, it) }
+
+    private suspend fun withLocations(owner: String, snapshot: BackpackSnapshot): BackpackSnapshot =
+        personalState?.let { state -> snapshot.copy(locationOverrides = state.values(owner,
+            snapshot.locationOverrides.mapValues { it.value.name.lowercase(java.util.Locale.ROOT) }).mapNotNull { (key, value) ->
+                BackpackLocation.entries.firstOrNull { it.name.equals(value, true) }?.let { key to it }
+            }.toMap()) } ?: snapshot
+
+    suspend fun synchronizeLocations(owner: String, user: String) {
+        try {
+            if (read(owner, user) == null) personalState?.values(owner)
+            personalState?.synchronize(owner)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { }
+    }
 
     suspend fun refresh(ownerUserId: String, simpleOneUserId: String): BackpackSnapshot {
         val items = authorized(ownerUserId) { api.backpackList(it) }
@@ -49,8 +64,11 @@ class BackpackRepository(
         }
     }
 
-    suspend fun updateLocation(owner: String, user: String, item: BackpackItem, location: BackpackLocation) =
-        update(owner, user) { it.copy(locationOverrides = it.locationOverrides + (item.storageIdentity to location)) }
+    suspend fun updateLocation(owner: String, user: String, item: BackpackItem, location: BackpackLocation): BackpackSnapshot {
+        read(owner, user)
+        personalState?.set(owner, item.storageIdentity, location.name.lowercase(java.util.Locale.ROOT))
+        return update(owner, user) { it.copy(locationOverrides = it.locationOverrides + (item.storageIdentity to location)) }
+    }
 
     suspend fun refreshReturns(owner: String, user: String): BackpackSnapshot {
         val requests = authorized(owner) { key ->
@@ -82,7 +100,7 @@ class BackpackRepository(
 
     private suspend fun update(owner: String, user: String, transform: (BackpackSnapshot) -> BackpackSnapshot): BackpackSnapshot = cacheMutex.withLock {
         currentCoroutineContext().ensureActive()
-        val previous = read(owner, user) ?: BackpackSnapshot(user)
+        val previous = read(owner, user) ?: withLocations(owner, BackpackSnapshot(user))
         transform(previous).also { cache.save(owner, it) }
     }
 

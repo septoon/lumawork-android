@@ -113,9 +113,23 @@ class FtpRepository(
     private val cache: FtpCache,
     val transfers: FtpTransfers? = null,
     val access: SimpleOneAccess = SimpleOneAccess.DenyAll,
+    val personalState: ru.lumastack.lumawork.data.personal.PersonalStateRepository? = null,
     private val nowEpochMillis: () -> Long = System::currentTimeMillis,
 ) {
-    suspend fun read(ownerUserId: String): FtpSnapshot? = access.protect(ownerUserId) { cache.read(ownerUserId) }
+    suspend fun read(ownerUserId: String): FtpSnapshot? = access.protect(ownerUserId) {
+        val cached = cache.read(ownerUserId)
+        if (personalState == null) return@protect cached
+        val snapshot = cached ?: FtpSnapshot()
+        snapshot.copy(favoritePaths = personalState.values(ownerUserId,
+            snapshot.favoritePaths.associateWith { "selected" }).keys.sortedWith(String.CASE_INSENSITIVE_ORDER))
+    }
+    suspend fun synchronizeFavorites(owner: String) {
+        try {
+            read(owner)
+            personalState?.synchronize(owner)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { }
+    }
     private val mutex = Mutex()
     suspend fun load(ownerUserId: String, token: String, path: String): FtpSnapshot = access.protect(ownerUserId) {
         val normalized = normalizeFtpPath(path)
@@ -132,6 +146,7 @@ class FtpRepository(
         val previous = read(owner) ?: FtpSnapshot()
         if (normalized == "/") return@withLock previous
         val paths = if (normalized in previous.favoritePaths) previous.favoritePaths - normalized else previous.favoritePaths + normalized
+        personalState?.set(owner, normalized, if (normalized in paths) "selected" else null)
         previous.copy(favoritePaths = paths.distinct().sortedWith(String.CASE_INSENSITIVE_ORDER), revision = previous.revision + 1).also { cache.save(owner, it) }
     } }
 

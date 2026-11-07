@@ -33,6 +33,21 @@ class BackpackRepositoryTest {
         models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }
         models.clear()
     }
+    @Test fun `first inventory refresh uses locations already restored from server`() = runTest {
+        val memory = object : ru.lumastack.lumawork.data.personal.PersonalStateCache {
+            var value: ru.lumastack.lumawork.data.personal.PersonalState? = null
+            override suspend fun read(owner: String) = value
+            override suspend fun save(owner: String, state: ru.lumastack.lumawork.data.personal.PersonalState) { value = state }
+        }
+        val personal = ru.lumastack.lumawork.data.personal.PersonalStateRepository("backpack-locations", memory,
+            ru.lumastack.lumawork.data.personal.PersonalStateApi { _, _, _, _ -> listOf(ru.lumastack.lumawork.data.personal.PersonalEntry("SN", "home")) },
+            { "token" }, backgroundScope)
+        personal.values("owner"); personal.synchronize("owner")
+        val repository = BackpackRepository(FakeBackpackApi(listOf(item("1"))), authorizedStore(), FakeBackpackCache(), personalState = personal)
+        val snapshot = repository.refresh("owner", "simple-user")
+        assertEquals(BackpackLocation.Home, snapshot.location(item("1")))
+    }
+
     @Test fun `offline mode never starts list refresh`() = runTest {
         kotlinx.coroutines.Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {

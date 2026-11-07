@@ -33,10 +33,23 @@ class BackpackViewModel(
     private var detailJob: Job? = null
     private var generation = 0L
 
-    init { viewModelScope.launch {
-        runCatching { photoRepository.cached() }.getOrNull()?.let { catalog -> mutableState.update { it.copy(photoCatalog = catalog) } }
-        runCatching { photoRepository.cachedEquipment() }.getOrNull()?.let { catalog -> mutableState.update { it.copy(officePhotoCatalog = catalog) } }
-    } }
+    init {
+        viewModelScope.launch {
+            repository.personalState?.changes?.collect {
+                val user = state.value.simpleOneUserId
+                try {
+                    if (user.isNotBlank()) repository.read(ownerUserId, user)?.let { snapshot ->
+                        mutableState.update { it.copy(snapshot = it.snapshot?.copy(locationOverrides = snapshot.locationOverrides) ?: snapshot) }
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { }
+            }
+        }
+        viewModelScope.launch {
+            runCatching { photoRepository.cached() }.getOrNull()?.let { catalog -> mutableState.update { it.copy(photoCatalog = catalog) } }
+            runCatching { photoRepository.cachedEquipment() }.getOrNull()?.let { catalog -> mutableState.update { it.copy(officePhotoCatalog = catalog) } }
+        }
+    }
 
     fun activate(simpleOneUserId: String, isAuthorized: Boolean) {
         val old = state.value
@@ -60,6 +73,7 @@ class BackpackViewModel(
             val cached = repository.read(ownerUserId, simpleOneUserId)
             if (generation != revision) return@launch
             mutableState.update { it.copy(snapshot = cached, isLoading = false) }
+            if (state.value.isAuthorized && !startOffline) viewModelScope.launch { repository.synchronizeLocations(ownerUserId, simpleOneUserId) }
             if (state.value.isAuthorized && !startOffline) refreshCurrent(force = false, revision)
         }
     }
@@ -68,6 +82,7 @@ class BackpackViewModel(
         if (startOffline || !state.value.isAuthorized || state.value.isLoading) return
         val revision = generation
         loadJob?.cancel(); secondaryJob?.cancel()
+        viewModelScope.launch { repository.synchronizeLocations(ownerUserId, state.value.simpleOneUserId) }
         loadJob = viewModelScope.launch { refreshCurrent(force = true, revision) }
     }
     fun updateQuery(value: String) { mutableState.update { it.copy(query = value) } }

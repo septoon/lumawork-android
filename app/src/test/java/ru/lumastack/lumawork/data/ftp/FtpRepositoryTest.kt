@@ -11,6 +11,11 @@ import ru.lumastack.lumawork.domain.model.*
 import ru.lumastack.lumawork.ui.ftp.FtpViewModel
 
 class FtpRepositoryTest {
+    @Test fun `background sync tolerates revoked access`() = runBlocking {
+        val api = object : FtpApi { override suspend fun files(token: String, path: String) = FtpDirectoryResponse(path) }
+        FtpRepository(api, MemoryFtpCache()).synchronizeFavorites("owner")
+    }
+
     @Test fun `SO logout during listing never saves or returns the response`() = runBlocking {
         var signedIn = true
         val access = ru.lumastack.lumawork.data.simpleone.SimpleOneAccess({ "owner" }, { id ->

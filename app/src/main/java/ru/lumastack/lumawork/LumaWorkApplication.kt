@@ -73,7 +73,7 @@ class LumaWorkApplication : Application() {
     }
 }
 
-class AppContainer(application: Application) {
+class AppContainer(private val application: Application) {
     private val protectedWorkScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = Json {
         ignoreUnknownKeys = true
@@ -116,6 +116,15 @@ class AppContainer(application: Application) {
         .followRedirects(false).followSslRedirects(false)
         .addInterceptor(ru.lumastack.lumawork.data.simpleone.SimpleOneAccessInterceptor(simpleOneAccess)).build()
 
+    private fun personalState(collection: String) = ru.lumastack.lumawork.data.personal.PersonalStateRepository(
+        collection, ru.lumastack.lumawork.data.personal.FilePersonalStateCache(application, json, collection),
+        ru.lumastack.lumawork.data.personal.OkHttpPersonalStateApi(BuildConfig.API_ORIGIN, json, protectedHttpClient()),
+        { owner -> authRepository.session?.takeIf { it.user.id == owner && simpleOneAccess.isAuthorized(owner) }?.token },
+        protectedWorkScope,
+    )
+    private val backpackLocations = personalState("backpack-locations")
+    private val ftpFavorites = personalState("ftp-favorites")
+
     val wikiRepository = WikiRepository(
         api = OkHttpWikiApi("${BuildConfig.API_ORIGIN}/api/v2/wiki", { authRepository.session?.token.orEmpty() }, json, protectedHttpClient()),
         cache = FileWikiCache(application, json),
@@ -127,6 +136,7 @@ class AppContainer(application: Application) {
     val ftpRepository = FtpRepository(
         api = OkHttpFtpApi(BuildConfig.API_ORIGIN, json, protectedHttpClient()),
         cache = FileFtpCache(application, json),
+        personalState = ftpFavorites,
         transfers = ftpTransfers,
         access = simpleOneAccess,
     )
@@ -201,6 +211,7 @@ class AppContainer(application: Application) {
         api = simpleOneApi,
         sessionStore = simpleOneSessionStore,
         cache = FileBackpackCache(application, json),
+        personalState = backpackLocations,
     )
 
     val backpackPhotoRepository = BackpackPhotoRepository(
@@ -238,6 +249,18 @@ class AppContainer(application: Application) {
                     }
                     if (current.first != null) { leaderboardAccess.refresh(); workStatistics.resumePending() }
                 }
+        }
+        protectedWorkScope.launch {
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                val foreground = android.app.ActivityManager.RunningAppProcessInfo().also { android.app.ActivityManager.getMyMemoryState(it) }
+                    .importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+                val owner = authRepository.session?.user?.id
+                if (foreground && owner != null && simpleOneAccess.isAuthorized(owner)) {
+                    backpackLocations.synchronize(owner)
+                    ftpFavorites.synchronize(owner)
+                }
+                kotlinx.coroutines.delay(30_000)
+            }
         }
         protectedWorkScope.launch {
             leaderboardAccess.state.collect { if (it.enabled == false) leaderboardRepository.clear() }
