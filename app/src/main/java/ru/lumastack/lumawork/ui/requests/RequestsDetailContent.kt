@@ -121,6 +121,11 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
     val data = remember(request) { RequestDetailsData(request) }
     val reference = remember(json) { RequestReferenceApi(BuildConfig.API_ORIGIN, json) }
     var notice by remember(request.id) { mutableStateOf<String?>(null) }
+    val copySnackbar = remember(request.id) { SnackbarHostState() }
+    var copyFeedbackRevision by remember(request.id) { mutableIntStateOf(0) }
+    LaunchedEffect(copyFeedbackRevision) {
+        if (copyFeedbackRevision > 0) copySnackbar.showSnackbar("Ткст скопирован")
+    }
     var map by rememberSaveable(request.id) { mutableStateOf<String?>(null) }
     var companyTIN by rememberSaveable(request.id) { mutableStateOf<String?>(null) }
     var historyPresented by rememberSaveable(request.id) { mutableStateOf(false) }
@@ -128,6 +133,10 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
     var browser by remember(request.id) { mutableStateOf<Pair<String, String>?>(null) }
     val copy: (String) -> Unit = { text ->
         (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Заявка", text))
+    }
+    fun copyChatQuestion(message: String) {
+        copy(message)
+        copyFeedbackRevision++
     }
     fun openExternal(primary: String, fallback: String = "") {
         fun launch(url: String): Boolean {
@@ -173,18 +182,18 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
             if (data.showsEvotorDrivers) item("drivers") { EvotorDriverActions(reference, session, state.isOffline, open = { openExternal(it) }) }
             if (data.showsChatQuestions) item("chat") {
                 RequestActionsCard("Вопросы в чат", "Текст заявки скопируется автоматически") {
-                    RequestActionButton("КА и пин", "Скопировать текст и открыть чат Dion", Icons.Default.Email) {
-                        if (BuildConfig.DION_CHAT_URL.isBlank()) notice = "Чат Dion не настроен."
-                        else { copy(data.kaAndPinMessage); openExternal(BuildConfig.DION_CHAT_URL) }
+                    RequestActionButton("КА и пин", "Скопировать текст", Icons.Default.Email,
+                        trailingIcon = RequestDetailIcons.Copy) {
+                        copyChatQuestion(data.kaAndPinMessage)
                     }
-                    RequestActionButton("Активация ОФД", "Скопировать текст и открыть чат Dion", Icons.Default.CheckCircle) {
-                        if (BuildConfig.DION_CHAT_URL.isBlank()) notice = "Чат Dion не настроен."
-                        else { copy(data.ofdMessage); openExternal(BuildConfig.DION_CHAT_URL) }
+                    RequestActionButton("Активация ОФД", "Скопировать текст", Icons.Default.CheckCircle,
+                        trailingIcon = RequestDetailIcons.Copy) {
+                        copyChatQuestion(data.ofdMessage)
                     }
                     RequestActionButton("Код автореги", "Скопировать текст и открыть Telegram", Icons.AutoMirrored.Filled.Send) {
-                        copy(data.autoregMessage); openExternal(BuildConfig.TELEGRAM_APP_URL, BuildConfig.TELEGRAM_WEB_URL)
+                        copyChatQuestion(data.autoregMessage); openExternal(BuildConfig.TELEGRAM_APP_URL, BuildConfig.TELEGRAM_WEB_URL)
                     }
-                    Text("После перехода в чат нажмите «Вставить» в поле сообщения и отправьте текст.",
+                    Text("Скопированный текст можно вставить в нужный чат и отправить.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -192,7 +201,7 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
                 RequestActionsCard("Вопрос Менеджеру", "Текст заявки скопируется автоматически") {
                     RequestActionButton("Вопрос Менеджеру", "Скопировать текст для отправки менеджеру", Icons.Default.Person,
                         trailingIcon = RequestDetailIcons.Copy) {
-                        copy(data.managerMessage); notice = "Текст скопирован. Вставьте его в нужный чат менеджера."
+                        copyChatQuestion(data.managerMessage)
                     }
                 }
             }
@@ -217,6 +226,8 @@ internal fun RequestsDetailContent(request: SimpleOneRequest, state: SimpleOneUi
                 }
             }
         }
+        SnackbarHost(copySnackbar, Modifier.align(Alignment.BottomCenter)
+            .padding(bottom = if (showsEquipment && !hidesEquipment) 80.dp else 0.dp))
     }
     if (historyPresented) TerminalRequestHistoryDialog(
         terminalId = historyTerminal, ownerUserId = session.user.id,
