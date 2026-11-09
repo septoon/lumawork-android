@@ -281,7 +281,7 @@ private fun RequestDetailsHeader(data: RequestDetailsData, onCopy: (String) -> U
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             RequestHeaderMetric(RequestDetailIcons.Alarm, data.deadlineText)
-            RequestHeaderMetric(RequestDetailIcons.Sync, closedRequestTypeTitle(data.type))
+            RequestHeaderMetric(RequestTypeIcons.forType(data.type), closedRequestTypeTitle(data.type))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
                 Text("TID", Modifier.width(31.dp), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = muted)
                 Text(data.terminal, Modifier.weight(1f).then(if (data.terminal.isNotBlank()) Modifier.combinedClickable(

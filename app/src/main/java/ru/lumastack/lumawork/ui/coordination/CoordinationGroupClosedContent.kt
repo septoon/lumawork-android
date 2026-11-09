@@ -28,6 +28,7 @@ import ru.lumastack.lumawork.domain.coordination.CoordinationRegion
 import ru.lumastack.lumawork.domain.coordination.queryGroupClosedRequests
 import ru.lumastack.lumawork.domain.requests.*
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
+import ru.lumastack.lumawork.ui.requests.RequestTypeIcons
 import ru.lumastack.lumawork.ui.requests.closedTypeColor
 import ru.lumastack.lumawork.ui.requests.requestStatusColor
 import ru.lumastack.lumawork.ui.requests.requestStatusTextColor
@@ -126,7 +127,10 @@ private fun GroupClosedRequestCard(item: ClosedRequestsItem, open: () -> Unit, c
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(record.incomingNumber.ifBlank { record.number }, Modifier.weight(1f), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                 Surface(shape = MaterialTheme.shapes.small, color = closedTypeColor(item.typeText)) {
-                    Text(item.typeText.ifBlank { "Тип не указан" }, Modifier.padding(8.dp), color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.labelSmall)
+                    Row(Modifier.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(RequestTypeIcons.forType(item.typeText), null, Modifier.size(14.dp), tint = androidx.compose.ui.graphics.Color.White)
+                        Text(item.typeText.ifBlank { "Тип не указан" }, color = androidx.compose.ui.graphics.Color.White, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
             GroupClosedField(item.timeTitle, item.timeText.ifBlank { "Дата не указана" })

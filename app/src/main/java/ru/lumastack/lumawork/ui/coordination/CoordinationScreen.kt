@@ -1,5 +1,6 @@
 package ru.lumastack.lumawork.ui.coordination
 
+import ru.lumastack.lumawork.ui.requests.RequestTypeIcons
 import ru.lumastack.lumawork.ui.theme.AppContentHorizontalPadding
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -305,7 +306,10 @@ private fun CoordinationRequestCard(request: SimpleOneRequest, loading: Boolean,
             data.secondaryNumber?.let { Text("| $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!returning && data.typeTitle.isNotBlank()) Text(data.typeTitle, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            if (data.typeTitle.isNotBlank()) Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(RequestTypeIcons.forType(data.typeTitle), null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(data.typeTitle, style = MaterialTheme.typography.bodySmall)
+            }
             data.status?.let { status -> Text(status, color = coordinationStatusColor(status), style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f)) }
             if (loading) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
         }
