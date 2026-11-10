@@ -65,6 +65,10 @@ internal fun MtkInstallState.freshOperation(id: String,nextPhase: MtkInstallPhas
     info=null,target=null,agentStarted=false,destructiveStarted=false,pendingAction=null,lastAcknowledgedAction=null,
     backupDirectory=null,bootConfirmedAt=null,upgradeRequested=upgrade,confirmedActions=emptyList())
 
+internal fun MtkInstallState.resetForNewOperation(id: String): MtkInstallState = freshOperation(id,
+    if(packageDirectory!=null && packageHash!=null) MtkInstallPhase.Prepared else MtkInstallPhase.Idle,false,
+    "Процесс сброшен. Перезапустите терминал и начните новую прошивку.")
+
 internal class MtkFirmwareStore(context: Context, private val owner: String) {
     val directory = File(context.noBackupFilesDir, "mtk-firmware/${mtkSha256(owner.toByteArray())}")
         .apply { require(owner.isNotBlank()); check(isDirectory || mkdirs()) }

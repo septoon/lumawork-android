@@ -34,6 +34,7 @@ internal fun PaxFirmwarePanel(
     onStart: () -> Unit,
     onResume: () -> Unit,
     onRetryConnection: () -> Unit,
+    onReset: () -> Unit,
     connection: @Composable ColumnScope.() -> Unit,
 ) {
     var confirm by remember { mutableStateOf(false) }
@@ -47,7 +48,7 @@ internal fun PaxFirmwarePanel(
     val completedCurrent = installationMatchesModel && installation.phase == PaxInstallPhase.Complete && installation.mode == state.installMode
     val canResume = installation.canResume && installationMatchesModel
     val active = installation.active
-    val busy = state.firmwareBusy || state.globalInstallBusy || active
+    val busy = state.firmwareResetting || state.firmwareBusy || state.globalInstallBusy || active
     val bundle = state.firmware?.takeIf { it.model == state.paxModel }
     val device = usb.devices.singleOrNull { it.hasPermission && isPaxUsbCandidate(it) }
     val passport = device?.let { usb.passports[it.key] }
@@ -189,6 +190,7 @@ internal fun PaxFirmwarePanel(
                     { stable = false; s210Prepared = false; retryConfirmed = false; resuming = false; confirm = true },
                     Modifier.fillMaxWidth(), enabled = canStart, icon = Icons.Outlined.PlayArrow, primary = true)
             }
+            FirmwareResetButton(state.firmwareResetting,onReset)
         }
     }
     if (confirm) {

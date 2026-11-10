@@ -27,6 +27,7 @@ class MtkFirmwareService : Service() {
     private val link=AtomicReference<MtkWire?>()
     private val epoch=AtomicLong()
     private var job: Job?=null
+    private val stopped=CompletableDeferred<Unit>()
     private var wake: PowerManager.WakeLock?=null
     private var snapshot=MtkInstallState()
     private lateinit var store: MtkFirmwareStore
@@ -52,7 +53,7 @@ class MtkFirmwareService : Service() {
     override fun onStartCommand(intent: Intent?,flags: Int,startId: Int): Int {
         if(job?.isActive==true) return START_NOT_STICKY
         val request=MtkFirmwareRuntime.request
-        if(request==null || intent?.getStringExtra("operation")!=request.initial.operationId ||
+        if(request==null || stopRequested==request.initial.operationId || intent?.getStringExtra("operation")!=request.initial.operationId ||
             terminalOperationGate.owner.value!=request.initial.operationId || MtkFirmwareRuntime.state.value?.active!=true) {
             stopSelf();return START_NOT_STICKY
         }
@@ -145,7 +146,7 @@ class MtkFirmwareService : Service() {
         val operation=snapshot.operationId
         val cleanup={
             if(snapshot.active && this::store.isInitialized) terminal(CancellationException("Служба P8 остановлена."))
-            terminalOperationGate.release(operation);synchronized(Companion) { if(instance===this) instance=null };scope.cancel()
+            terminalOperationGate.release(operation);synchronized(Companion) { if(instance===this) instance=null };scope.cancel();stopped.complete(Unit)
         }
         job?.invokeOnCompletion { cleanup() } ?: cleanup()
         super.onDestroy()
@@ -164,5 +165,20 @@ class MtkFirmwareService : Service() {
             catch(failure: Exception) { MtkFirmwareRuntime.mutable.value=null;MtkFirmwareRuntime.request=null;throw failure }
         }
         fun interrupt(operation: String) { stopRequested=operation;instance?.takeIf { it.snapshot.operationId==operation }?.interrupt() }
+        internal suspend fun stopForReset(context: Context,owner: String,operation: String) {
+            val service=synchronized(this) {
+                val current=MtkFirmwareRuntime.state.value
+                if(current?.owner!=owner || current.operationId!=operation) return
+                stopRequested=operation
+                // A queued onStartCommand must not open USB after the user requested reset.
+                MtkFirmwareRuntime.mutable.value=current.copy(phase=MtkInstallPhase.Interrupted)
+                instance.also {
+                    it?.interrupt()
+                    context.stopService(Intent(context,MtkFirmwareService::class.java))
+                }
+            }
+            if(service!=null) withTimeout(15_000) { service.stopped.await() }
+            terminalOperationGate.release(operation)
+        }
     }
 }

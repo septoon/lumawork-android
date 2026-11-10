@@ -28,11 +28,12 @@ import ru.lumastack.lumawork.data.tools.*
 internal fun MtkFirmwarePanel(state: MtkFirmwareUiState, tools: ToolsUiState, onArchive: () -> Unit,
     onFtp: () -> Unit, onInspect: () -> Unit, onInspectAgent: () -> Unit, onCancel: () -> Unit, onCancelDownload: () -> Unit,
     onDownload: () -> Unit, onEmergency: () -> Unit, onBootConfirmed: () -> Unit,
+    onReset: () -> Unit,
 ) {
     val colors = ToolsColors.current
     val operation = state.installation
     val waiting = operation.active && !state.serviceRunning && !state.loading
-    val editable = !state.loading && !operation.active && !tools.globalInstallBusy && tools.mtkDownload == null
+    val editable = !tools.firmwareResetting && !state.loading && !operation.active && !tools.globalInstallBusy && tools.mtkDownload == null
     var confirmDownload by remember { mutableStateOf(false) }
     var confirmEmergency by remember { mutableStateOf(false) }
     var diagnostics by remember { mutableStateOf(false) }
@@ -156,6 +157,7 @@ internal fun MtkFirmwarePanel(state: MtkFirmwareUiState, tools: ToolsUiState, on
                     icon = Icons.Outlined.CheckCircle, accent = colors.blue)
                 else FirmwareSummaryRow(Icons.Outlined.CheckCircle, "Загрузка подтверждена инженером.", accent = colors.success)
             }
+            FirmwareResetButton(tools.firmwareResetting,onReset)
         }
     }
     if (confirmDownload) AlertDialog(onDismissRequest = { confirmDownload = false }, title = { Text("Прошивка UniTodi P8") },

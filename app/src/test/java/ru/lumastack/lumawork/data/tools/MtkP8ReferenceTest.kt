@@ -11,6 +11,18 @@ import org.junit.rules.TemporaryFolder
 /** Opt-in local artifact check. Full firmware and captured GPT replies remain private. */
 class MtkP8ReferenceTest {
     @get:Rule val temp = TemporaryFolder()
+    @Test fun captured_64gb_gpt_matches_both_crc_valid_tables_and_the_new_profile() {
+        val root=System.getenv("UNITODI_P8_64GB_FIXTURE_DIRECTORY")?.let(::File)
+        assumeTrue("Set UNITODI_P8_64GB_FIXTURE_DIRECTORY to private 64 GB capture replies",root?.isDirectory==true)
+        val result=parseMtkGpt(File(root,"reference-pgpt.bin").readBytes(),File(root,"reference-sgpt.bin").readBytes(),62528684032L)
+        assertEquals(48,result.partitions.size)
+        assertEquals(mtkP8LayoutFixture(62528684032L),result)
+        assertTrue(result.matchesP8Profile)
+        assertEquals(0xe7a7f8000L,mtkUpgradeLayout(result).formats.first().sizeBytes)
+        assertThrows(MtkProtocolException::class.java) {
+            parseMtkGpt(File(root,"reference-pgpt.bin").readBytes(),File(root,"reference-sgpt.bin").readBytes(),31289507840L)
+        }
+    }
     @Test fun captured_primary_and_backup_gpt_match_the_profile() {
         val root = System.getenv("UNITODI_P8_GPT_FIXTURE_DIRECTORY")?.let(::File)
         assumeTrue("Set UNITODI_P8_GPT_FIXTURE_DIRECTORY to private captured GPT replies", root?.isDirectory == true)

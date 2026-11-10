@@ -21,21 +21,22 @@ import kotlinx.serialization.Serializable
     // This is the same software BOM compatibility field used by Agenew, not a hardware/eFuse attestation.
     val modelConfirmed: Boolean get() = boardName == MTK_P8_BOARD && chip.hwCode == 0x0717 &&
         chip.hwSubCode == 0x8a00 && chip.hwVersion == 0xca01 && chip.swVersion == 0x0200
-    val compatible: Boolean get() = modelConfirmed && gpt?.matchesP8Profile == true
+    val compatible: Boolean get() = modelConfirmed && gpt?.matchesP8Profile == true && emmc.userSize == gpt.userSize
 }
 
 /** Obtained only for a freshly verified, explicitly requested upgrade. No command retry after failure. */
 internal class MtkXflashWriter(private val codec: MtkXflashCodec, private val writeLength: Int,
-    private val readLength: Int, private val checkpoint: ()->Unit, private val sleep: (Long)->Unit = { Thread.sleep(it) },
+    private val readLength: Int, private val userSize: Long, private val checkpoint: ()->Unit,
+    private val sleep: (Long)->Unit = { Thread.sleep(it) },
 ) : MtkUpgradeAgent {
     private var failed=false
     private var finished=false
     private var started=false
-    init { require(writeLength in 1..MTK_MAX_FRAME && readLength in 1..MTK_MAX_FRAME) }
+    init { require(writeLength in 1..MTK_MAX_FRAME && readLength in 1..MTK_MAX_FRAME && userSize >= 65536 && userSize % 512 == 0L) }
     override fun read(partition: MtkPartition, output: OutputStream) = guard {
-        mtkReadUserData(codec,partition.startBytes,partition.sizeBytes,readLength,output)
+        mtkReadUserData(codec,partition.startBytes,partition.sizeBytes,readLength,output,userSize)
     }
-    override fun readLayout(): MtkGptInfo = guard { MtkGptReader(codec).inspect(31289507840L) }
+    override fun readLayout(): MtkGptInfo = guard { MtkGptReader(codec).inspect(userSize) }
     override fun beginUpgrade() = guard {
         check(!started) { "Журнал Download уже инициализирован. Повтор запрещён." }
         // Original Agenew calls START_DL_INFO before FORMAT. The stock DA's named
@@ -46,7 +47,7 @@ internal class MtkXflashWriter(private val codec: MtkXflashCodec, private val wr
     override fun format(range: MtkFormatRange) = guard {
         check(started) { "Перед FORMAT нужен подтверждённый START_DL_INFO." }
         require(range.startBytes>=32768 && range.sizeBytes>0 && range.startBytes%512==0L && range.sizeBytes%512==0L &&
-            range.startBytes<=31289507840L-16896-range.sizeBytes)
+            range.startBytes<=userSize-16896-range.sizeBytes)
         word(0x10003); codec.expectSuccess()
         send(ByteBuffer.allocate(56).order(ByteOrder.LITTLE_ENDIAN).putInt(1).putInt(8).putLong(range.startBytes).putLong(range.sizeBytes).array())
         codec.expectSuccess()
@@ -148,7 +149,7 @@ class MtkXflashSession internal constructor(wire: MtkWire, private val stage2: M
             "Для записи нужен новый сеанс Firmware Upgrade с подтверждёнными GPT и BOM."
         }
         upgradeClaimed=true;inspectedTarget=null
-        return MtkXflashWriter(codec,target.writePacketLength,target.readPacketLength,checkpoint)
+        return MtkXflashWriter(codec,target.writePacketLength,target.readPacketLength,target.emmc.userSize,checkpoint)
     }
     fun inspectTarget(expected: MtkPreloaderInfo? = null): MtkTargetInfo {
         check(!used) { "Диагностический сеанс агента уже завершён. Автоматический повтор запрещён." }

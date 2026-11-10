@@ -28,6 +28,7 @@ class PaxFirmwareService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val link = AtomicReference<AutoCloseable?>(null)
     private var job: Job? = null
+    private val stopped = CompletableDeferred<Unit>()
     private var wake: PowerManager.WakeLock? = null
     private lateinit var store: PaxFirmwareStore
     private var snapshot = PaxInstallState()
@@ -46,7 +47,7 @@ class PaxFirmwareService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        synchronized(Companion) { serviceAlive = true }
+        synchronized(Companion) { serviceAlive = true; instance = this }
         store = PaxFirmwareStore(this)
         ContextCompat.registerReceiver(this, usbReceiver, IntentFilter().apply {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED); addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
@@ -59,7 +60,7 @@ class PaxFirmwareService : Service() {
         if (job?.isActive == true) return START_NOT_STICKY
         val reserved = PaxFirmwareRuntime.state.value
         val key = intent?.getStringExtra("device")
-        if (key == null || !reserved.active || reserved.operationId != intent.getStringExtra("operation")) { stopSelf(); return START_NOT_STICKY }
+        if (key == null || !reserved.active || stopRequested == reserved.operationId || reserved.operationId != intent.getStringExtra("operation")) { stopSelf(); return START_NOT_STICKY }
         snapshot = reserved
         try {
             val notification = notification(snapshot.detail)
@@ -261,7 +262,7 @@ class PaxFirmwareService : Service() {
         val operation = snapshot.operationId
         val finished: () -> Unit = {
             terminalOperationGate.release(operation)
-            synchronized(Companion) { serviceAlive = false }; scope.cancel()
+            synchronized(Companion) { serviceAlive = false; if (instance === this) instance = null }; scope.cancel(); stopped.complete(Unit)
         }
         job?.invokeOnCompletion { finished() } ?: finished()
         super.onDestroy()
@@ -270,6 +271,23 @@ class PaxFirmwareService : Service() {
         private const val CHANNEL = "pax-firmware"
         private const val NOTIFICATION = 0x504158
         private var serviceAlive = false
+        @Volatile private var instance: PaxFirmwareService? = null
+        @Volatile private var stopRequested: String? = null
+        internal suspend fun stopForReset(context: Context, owner: String, operation: String) {
+            val service = synchronized(this) {
+                val current = PaxFirmwareRuntime.state.value
+                if (current.owner != owner || current.operationId != operation) return
+                stopRequested = operation
+                PaxFirmwareRuntime.mutable.value = current.copy(phase = PaxInstallPhase.Interrupted)
+                instance.also {
+                    it?.job?.cancel()
+                    runCatching { it?.link?.getAndSet(null)?.close() }
+                    context.stopService(Intent(context, PaxFirmwareService::class.java))
+                }
+            }
+            if (service != null) withTimeout(15_000) { service.stopped.await() }
+            terminalOperationGate.release(operation)
+        }
         fun start(context: Context, owner: String, bundle: String?, device: String, fingerprint: String?,
             model: PaxModel = PaxModel.D270, mode: PaxInstallMode = PaxInstallMode.Full, resume: Boolean = false, expectedPinpadOs: String? = null,
         ) = synchronized(this) {
@@ -292,6 +310,7 @@ class PaxFirmwareService : Service() {
             check(model != PaxModel.S210 || start.mode != PaxInstallMode.MainApp || start.deviceFingerprint != null) { "Перед отдельной записью APP прочитайте данные S210 в системном меню." }
             start = start.copy(updatedAt = System.currentTimeMillis())
             check(terminalOperationGate.tryAcquire(operation)) { "Другая USB-операция ещё выполняется. Дождитесь её завершения." }
+            stopRequested = null
             try {
                 store.write(start)
                 PaxFirmwareRuntime.mutable.value = start

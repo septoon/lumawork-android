@@ -8,8 +8,12 @@ import kotlinx.serialization.Serializable
 
 @Serializable data class MtkPartition(val name: String, val startBytes: Long, val sizeBytes: Long)
 @Serializable data class MtkGptInfo(val userSize: Long, val partitions: List<MtkPartition>, val layoutSha256: String) {
-    // Canonical names/offsets/sizes from the CRC-valid reference PGPT; no device GUIDs or banking data.
-    val matchesP8Profile: Boolean get() = userSize == 31289507840L && layoutSha256 == "94d753b45de3798de2b30b49476bbd7796bc4756c844be3270bc828e36b33e2e"
+    // Canonical names/offsets/sizes from CRC-valid Agenew captures; no device GUIDs or banking data.
+    val matchesP8Profile: Boolean get() = when (userSize) {
+        31289507840L -> layoutSha256 == "94d753b45de3798de2b30b49476bbd7796bc4756c844be3270bc828e36b33e2e" // 32 GB
+        62528684032L -> layoutSha256 == "c178c9c1dc37b62384c6ea681e9e11fdc80124101acc0bd9826a2dfc457e1a12" // 64 GB
+        else -> false
+    }
 }
 private data class MtkGptHeader(val firstUsable: Long, val lastUsable: Long, val guid: ByteArray, val entries: ByteArray)
 
@@ -106,13 +110,14 @@ internal class MtkBootBoardReader(private val codec: MtkXflashCodec) {
         if (partition.name != "boot_a" || partition.sizeBytes < 4096 || partition.startBytes < 0 || partition.startBytes > userSize-4096)
             throw MtkProtocolException("MTK: boot_a вне проверенной геометрии eMMC.")
         val output=java.io.ByteArrayOutputStream(4096)
-        mtkReadUserData(codec,partition.startBytes,4096,4096,output)
+        mtkReadUserData(codec,partition.startBytes,4096,4096,output,userSize)
         return parseMtkBootBoard(output.toByteArray())
     }
 }
 
-internal fun mtkReadUserData(codec: MtkXflashCodec, address: Long, length: Long, packetLength: Int, output: java.io.OutputStream) {
-    require(address >= 0 && length > 0 && address <= 31289507840L-length && packetLength in 1..MTK_MAX_FRAME)
+internal fun mtkReadUserData(codec: MtkXflashCodec, address: Long, length: Long, packetLength: Int, output: java.io.OutputStream, userSize: Long) {
+    require(userSize > 0 && userSize % 512 == 0L && address >= 0 && length > 0 && length <= userSize &&
+        address <= userSize-length && packetLength in 1..MTK_MAX_FRAME)
     fun send(bytes: ByteArray) = codec.writePayload(ByteArrayInputStream(bytes),bytes.size.toLong())
     fun word(value: Int) = send(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).array())
     word(0x010005); codec.expectSuccess()

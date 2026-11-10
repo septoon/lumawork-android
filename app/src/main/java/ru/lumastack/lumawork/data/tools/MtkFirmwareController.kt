@@ -17,6 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -47,6 +48,8 @@ class MtkFirmwareController(context: Context, private val owner: String, private
     private val mutable = MutableStateFlow(MtkFirmwareUiState(installation = MtkInstallState(owner = owner)))
     val state = mutable.asStateFlow()
     private var job: Job? = null
+    private var initialization: Job? = null
+    private var resetting = false
     private val link = AtomicReference<MtkWire?>()
     private val epoch = AtomicLong()
     private var visible = false
@@ -62,7 +65,7 @@ class MtkFirmwareController(context: Context, private val owner: String, private
         }
     }
     init {
-        scope.launch {
+        initialization = scope.launch {
             try { mtkPreparationMutex.withLock {
                 val running=MtkFirmwareRuntime.state.value?.takeIf { it.owner==owner && it.active }
                 val recovered = running ?: withContext(Dispatchers.IO) { store.read() }
@@ -88,8 +91,10 @@ class MtkFirmwareController(context: Context, private val owner: String, private
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { mutable.update { it.copy(error = failure.message ?: "Не удалось восстановить комплект P8. Выберите его заново.") } }
             finally { mutable.update { it.copy(loading = false) } }
+        }
+        scope.launch {
             MtkFirmwareRuntime.state.collect { current ->
-                if(current!=null && current.owner==owner && (current.active || current.operationId==state.value.installation.operationId)) {
+                if(!resetting && current!=null && current.owner==owner && (current.active || current.operationId==state.value.installation.operationId)) {
                     mutable.update { it.copy(installation=current,serviceRunning=current.active) }
                     if(!current.active) onResult(current)
                 }
@@ -128,7 +133,7 @@ class MtkFirmwareController(context: Context, private val owner: String, private
         }
     }
     private fun prepare(block: suspend CoroutineScope.() -> Unit) {
-        if (state.value.loading || state.value.installation.active || job?.isActive == true || terminalOperationGate.owner.value != null) {
+        if (resetting || state.value.loading || state.value.installation.active || job?.isActive == true || terminalOperationGate.owner.value != null) {
             mutable.update { it.copy(error = "Дождитесь завершения текущей операции, затем выберите комплект повторно. Скачанный ZIP остаётся в FTP-файлах.") }
             return
         }
@@ -149,7 +154,7 @@ class MtkFirmwareController(context: Context, private val owner: String, private
     fun inspectAgent() = startInspection(loadAgent = true)
     fun download() = startInspection(loadAgent=true,upgrade=true)
     private fun startInspection(loadAgent: Boolean,upgrade: Boolean=false) {
-        if (!visible || state.value.loading || job?.isActive == true) return
+        if (resetting || !visible || state.value.loading || job?.isActive == true) return
         if(upgrade && (state.value.firmware==null || !state.value.installation.canWrite)) return
         if (loadAgent && !state.value.agentVerified) { mutable.update { it.copy(error = "Встроенный Download Agent не подготовлен. Откройте вкладку P8 заново.") }; return }
         val operation = UUID.randomUUID().toString()
@@ -271,6 +276,44 @@ class MtkFirmwareController(context: Context, private val owner: String, private
         }
     }
     fun emergencyStop()=MtkFirmwareService.interrupt(state.value.installation.operationId)
+    suspend fun reset() {
+        check(!resetting)
+        resetting=true
+        try {
+            mutable.update { it.copy(loading=true,error=null) }
+            initialization?.cancelAndJoin()
+            job?.cancel();runCatching { link.getAndSet(null)?.close() };job?.join()
+            val operation=state.value.installation.operationId
+            withContext(Dispatchers.IO) {
+                MtkFirmwareService.stopForReset(context,owner,operation)
+                mtkPreparationMutex.withLock {
+                    val previous=runCatching { store.read() }.getOrElse { state.value.installation }
+                    onResult(previous)
+                    val reader=MtkFirmwarePackageReader(checkpoint={ensureActive()})
+                    reader.ensureBundledAgent(store.agent) { context.assets.open(MTK_P8_AGENT_ASSET) }
+                    val pkg=state.value.firmware ?: previous.packageDirectory?.let { path ->
+                        try { reader.inspect(store.packageDirectory(path)) }
+                        catch(cancelled: CancellationException) { throw cancelled }
+                        catch(_: Exception) { null }
+                    }
+                    val fresh=previous.copy(packageDirectory=pkg?.directory?.path,packageHash=pkg?.sha256)
+                        .resetForNewOperation(UUID.randomUUID().toString())
+                    persist(fresh)
+                    MtkFirmwareRuntime.mutable.update { current ->
+                        if(current?.owner==owner && current.operationId==operation) fresh else current
+                    }
+                    if(MtkFirmwareRuntime.request?.initial?.operationId==operation) MtkFirmwareRuntime.request=null
+                    mutable.update { it.copy(firmware=pkg,agentVerified=true,serviceRunning=false,error=null) }
+                }
+            }
+        } finally {
+            resetting=false
+            val current=MtkFirmwareRuntime.state.value
+            mutable.update { value -> value.copy(loading=false,
+                installation=if(current?.owner==owner && current.operationId==value.installation.operationId) current else value.installation,
+                serviceRunning=if(current?.owner==owner && current.operationId==value.installation.operationId) current.active else value.serviceRunning) }
+        }
+    }
     fun confirmBoot() {
         val before=state.value.installation
         if(before.phase!=MtkInstallPhase.WriteComplete || before.bootConfirmedAt!=null) return

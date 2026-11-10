@@ -27,12 +27,35 @@ class MtkXflashSessionTest {
     private fun query(payload: ByteArray) = mtkStatus() + mtkStatus() + mtkFrame(payload) + mtkStatus()
     private fun initialized() = mtkStatus() + mtkStatus() + mtkStatus(0x434e5953) +
         query("preloader".toByteArray()) + mtkStatus() + mtkStatus() + mtkStatus(0x434e5953)
-    private fun target(sla: Int = 0, hw: Int = 0x0717): ByteArray {
+    private fun target(sla: Int = 0, hw: Int = 0x0717, userSize: Long = 0x7454f8000): ByteArray {
         val fw = ByteArray(68)
         val ram = mtkLongs(1,0x200000,0x40000,2,0x40000000,0x80000000)
-        val emmc = mtkWords(1,512) + mtkLongs(0x400000,0x400000,0x400000,0,0,0,0,0x7454f8000) + ByteArray(32)
+        val emmc = mtkWords(1,512) + mtkLongs(0x400000,0x400000,0x400000,0,0,0,0,userSize) + ByteArray(32)
         val chip = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).putShort(hw.toShort()).putShort(0x8a00.toShort()).putShort(0xca01.toShort()).putShort(0x0200).putShort(1).putShort(0).array()
         return query(fw) + query(mtkWords(sla)) + query(ram) + query(emmc) + query(chip) + query(mtkWords(2097152,2097152)) + query(mtkWords(100))
+    }
+    @Test fun verified_session_passes_64gb_geometry_to_its_bound_upgrade_writer() {
+        val size=62528684032L;val layout=mtkP8LayoutFixture(size)
+        val (p,b)=mtkGptFixture(userSize=size,partitions=layout.partitions)
+        fun table(bytes: ByteArray)=mtkStatus()+mtkStatus()+mtkFrame(mtkLongs(bytes.size.toLong()))+mtkStatus()+mtkFrame(bytes)+mtkStatus()
+        val boot=ByteArray(4096).apply {
+            "ANDROID!".toByteArray().copyInto(this)
+            ByteBuffer.wrap(this).order(ByteOrder.LITTLE_ENDIAN).putInt(36,2048).putInt(40,2)
+            MTK_P8_BOARD.toByteArray().copyInto(this,48)
+        }
+        val io=MtkFakeIo(initialized()+target(userSize=size)+table(p)+table(b)+
+            mtkStatus()+mtkStatus()+mtkStatus()+mtkFrame(boot)+mtkStatus()+
+            mtkStatus()+mtkStatus()+mtkStatus()+ // START_DL_INFO
+            mtkStatus()+mtkStatus()+mtkStatus(0x40040005))
+        val session=MtkXflashSession(MtkStreamWire(io),stage,stage2,storageWrites=true)
+        val inspected=session.inspectLayout(session.inspectTarget())
+        assertTrue(inspected.compatible)
+        assertEquals(layout,inspected.gpt)
+        val writer=session.upgradeAgent(inspected) {}
+        writer.beginUpgrade();writer.format(mtkUpgradeLayout(layout).formats.first())
+        assertTrue(sentFrames(io.output.toByteArray()).any {
+            it.contentEquals(mtkWords(1,8)+mtkLongs(0x10d00000L,0xe7a7f8000L)+ByteArray(32))
+        })
     }
     @Test fun agent_initialization_and_queries_parse_runtime_values_without_storage_writes() {
         val io = MtkFakeIo(initialized() + target(), chunk = 19)

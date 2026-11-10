@@ -128,7 +128,7 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
                                 onModel = model::selectPaxModel, onMode = model::selectInstallMode, onPinpadOs = model::setPinpadExpectedOs,
                                 onImport = { kind -> importKind = kind; importFirmware.launch(arrayOf("application/x-7z-compressed", "application/zip", "application/rar", "application/vnd.rar", "application/x-rar-compressed", "application/x-rar", "application/octet-stream")) },
                                 onFtp = model::openArchivePicker, onArchive = model::selectArchive, onCancelDownload = model::cancelArchiveDownload, onStart = model::startFirmware, onResume = model::resumeFirmware,
-                                onRetryConnection = model::retryConnection,
+                                onRetryConnection = model::retryConnection, onReset = model::resetPaxFirmware,
                                 connection = {
                                     ToolsDeviceWorkspace(usb, model.usb::scan, model.usb::requestPermission,
                                         model.usb::probe, model.usb::cancelProbe, onWiki,
@@ -141,7 +141,8 @@ fun ToolsRoute(owner: String, token: String, repository: FtpRepository, requests
                                 onFtp = model::openMtkArchivePicker, onInspect = model.mtk::inspect,
                                 onInspectAgent = model.mtk::inspectAgent,
                                 onCancel = model.mtk::cancelInspection, onCancelDownload = model::cancelMtkDownload,
-                                onDownload=model.mtk::download,onEmergency=model.mtk::emergencyStop,onBootConfirmed=model.mtk::confirmBoot)
+                                onDownload=model.mtk::download,onEmergency=model.mtk::emergencyStop,onBootConfirmed=model.mtk::confirmBoot,
+                                onReset=model::resetMtkFirmware)
                         }
                         ToolsSection.Morefun -> item { ToolCard("Morefun") { Text("Скоро..") } }
                         ToolsSection.History -> {

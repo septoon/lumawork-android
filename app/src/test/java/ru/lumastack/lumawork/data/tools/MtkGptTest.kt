@@ -6,12 +6,23 @@ import java.util.zip.CRC32
 import org.junit.Assert.*
 import org.junit.Test
 
-internal fun mtkGptFixture(userSize: Long = 31289507840L, name: String = "proinfo", first: Long = 64, last: Long = 127): Pair<ByteArray,ByteArray> {
+internal fun mtkGptFixture(userSize: Long = 31289507840L, name: String = "proinfo", first: Long = 64, last: Long = 127,
+    partitions: List<MtkPartition>? = null): Pair<ByteArray,ByteArray> {
     val total = userSize / 512
     val entries = ByteArray(16384)
     ByteBuffer.wrap(entries).order(ByteOrder.LITTLE_ENDIAN).apply {
         putLong(1); position(16); putLong(2); position(32); putLong(first); putLong(last)
         position(56); put(name.toByteArray(Charsets.UTF_16LE))
+    }
+    if (partitions != null) {
+        entries.fill(0)
+        partitions.forEachIndexed { index,part ->
+            ByteBuffer.wrap(entries,index*128,128).slice().order(ByteOrder.LITTLE_ENDIAN).apply {
+                putLong(1); position(16); putLong(index+2L)
+                position(32); putLong(part.startBytes/512); putLong((part.startBytes+part.sizeBytes)/512-1)
+                position(56); put(part.name.toByteArray(Charsets.UTF_16LE))
+            }
+        }
     }
     fun header(current: Long, other: Long, table: Long): ByteArray {
         val h = ByteBuffer.allocate(512).order(ByteOrder.LITTLE_ENDIAN)

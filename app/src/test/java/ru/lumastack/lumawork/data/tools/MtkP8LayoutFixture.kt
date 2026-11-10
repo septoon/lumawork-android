@@ -1,7 +1,9 @@
 package ru.lumastack.lumawork.data.tools
 
 // Sanitized names and geometry only; no device GUIDs, CID or partition contents.
-internal fun mtkP8LayoutFixture(): MtkGptInfo {
+internal fun mtkP8LayoutFixture(userSize: Long = 31289507840L): MtkGptInfo {
+    require(userSize == 31289507840L || userSize == 62528684032L)
+    val large = userSize == 62528684032L
     val parts = listOf(
     MtkPartition("boot_para",0x8000L,0x100000L),
     MtkPartition("para",0x108000L,0x80000L),
@@ -48,11 +50,11 @@ internal fun mtkP8LayoutFixture(): MtkGptInfo {
     MtkPartition("privdata",0x171800000L,0x13000000L),
     MtkPartition("keychain",0x184800000L,0x800000L),
     MtkPartition("hardwareinfo",0x185000000L,0x800000L),
-    MtkPartition("userdata",0x185800000L,0x5bfcf8000L),
-    MtkPartition("otp",0x7454f8000L,0x2b00000L),
-    MtkPartition("flashinfo",0x747ff8000L,0x1000000L),
+    MtkPartition("userdata",0x185800000L,if (large) 0xd05cf8000L else 0x5bfcf8000L),
+    MtkPartition("otp",if (large) 0xe8b4f8000L else 0x7454f8000L,0x2b00000L),
+    MtkPartition("flashinfo",if (large) 0xe8dff8000L else 0x747ff8000L,0x1000000L),
     )
-    val size = 31289507840L
+    val size = userSize
     val canonical = "$size\n" + parts.joinToString("\n") { "${it.name}:${it.startBytes}:${it.sizeBytes}" }
     return MtkGptInfo(size,parts,mtkSha256(canonical.toByteArray()))
 }

@@ -31,18 +31,42 @@ internal fun mtkWritePackage(root: File): Pair<MtkFirmwarePackage,MtkPackageProf
 class MtkFirmwareWorkflowTest {
     @get:Rule val temp=TemporaryFolder()
     private class Agent(private val events: List<MtkWriteEvent>,val failure: String?=null,
-        val changedLayout: Boolean=false,val afterFinish: ()->Unit={}): MtkUpgradeAgent {
+        val changedLayout: Boolean=false,val afterFinish: ()->Unit={},val layout: MtkGptInfo=mtkP8LayoutFixture()): MtkUpgradeAgent {
         val calls=mutableListOf<String>(); private var formats=0
+        val ranges=mutableListOf<MtkFormatRange>()
         private fun call(action: String) { calls+=action; if(action.startsWith("format:") || action.startsWith("download:") || action=="start-download-info" || action=="finish") assertEquals(action,events.last().pendingAction)
             if(action==failure) throw IOException("Test disconnect") }
         override fun read(partition: MtkPartition,output: OutputStream) {
             throw AssertionError("Штатная прошивка не должна копировать служебные разделы: ${partition.name}")
         }
-        override fun readLayout(): MtkGptInfo { call("layout");return mtkP8LayoutFixture().let { if(changedLayout) it.copy(partitions=it.partitions.dropLast(1)) else it } }
+        override fun readLayout(): MtkGptInfo { call("layout");return layout.let { if(changedLayout) it.copy(partitions=it.partitions.dropLast(1)) else it } }
         override fun beginUpgrade()=call("start-download-info")
-        override fun format(range: MtkFormatRange)=call("format:${formats++}")
+        override fun format(range: MtkFormatRange) { ranges+=range;call("format:${formats++}") }
         override fun download(image: MtkImage,confirmed: (Long)->Unit) { call("download:${image.partitionName}");confirmed(image.size) }
         override fun finish() { call("finish");afterFinish() }
+    }
+    @Test fun both_capacities_use_the_same_package_and_full_upgrade_with_their_own_format_ranges() {
+        for (size in listOf(31289507840L,62528684032L)) {
+            val gpt=mtkP8LayoutFixture(size)
+            val target=mtkWriteTarget().copy(emmc=mtkWriteTarget().emmc.copy(userSize=size),gpt=gpt)
+            val (pkg,profile)=mtkWritePackage(temp.newFolder())
+            val events=mutableListOf<MtkWriteEvent>();val agent=Agent(events,layout=gpt)
+            MtkFirmwareWorkflow(agent,profile=profile,event={events+=it}).execute(pkg,target)
+            assertEquals(mtkUpgradeLayout(gpt).formats,agent.ranges)
+            assertEquals(MTK_P8_PROFILE.images.map { "download:${it.partitionName}" },agent.calls.filter { it.startsWith("download:") })
+            assertEquals(25,events.mapNotNull { it.acknowledgedAction }.distinct().size)
+            assertEquals(MtkWritePhase.WriteComplete,events.last().phase)
+        }
+    }
+    @Test fun a_32gb_table_after_64gb_format_stops_before_any_download() {
+        val (pkg,profile)=mtkWritePackage(temp.root)
+        val gpt=mtkP8LayoutFixture(62528684032L)
+        val target=mtkWriteTarget().copy(emmc=mtkWriteTarget().emmc.copy(userSize=gpt.userSize),gpt=gpt)
+        val events=mutableListOf<MtkWriteEvent>();val agent=Agent(events)
+        assertThrows(IllegalArgumentException::class.java) { MtkFirmwareWorkflow(agent,profile=profile,event={events+=it}).execute(pkg,target) }
+        assertEquals("layout",agent.calls.last())
+        assertEquals(0xe7a7f8000L,agent.ranges.first().sizeBytes)
+        assertFalse(agent.calls.any { it.startsWith("download:") })
     }
     @Test fun full_upgrade_starts_download_info_without_backups_then_formats_downloads_and_finalizes_once() {
         val (pkg,profile)=mtkWritePackage(temp.root)

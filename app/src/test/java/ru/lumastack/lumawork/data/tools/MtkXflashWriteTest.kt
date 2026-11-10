@@ -8,11 +8,49 @@ import org.junit.rules.TemporaryFolder
 
 class MtkXflashWriteTest {
     @get:Rule val temp=TemporaryFolder()
-    private fun writer(input: ByteArray,begin: Boolean=false,sleep: (Long)->Unit={}): Pair<MtkXflashWriter,MtkFakeIo> {
+    private fun writer(input: ByteArray,begin: Boolean=false,sleep: (Long)->Unit={},userSize: Long=31289507840L): Pair<MtkXflashWriter,MtkFakeIo> {
         val io=MtkFakeIo((if(begin) mtkStatus()+mtkStatus()+mtkStatus() else byteArrayOf())+input,511)
-        val writer=MtkXflashWriter(MtkXflashCodec(MtkStreamWire(io)),4,8,{},sleep)
+        val writer=MtkXflashWriter(MtkXflashCodec(MtkStreamWire(io)),4,8,userSize,{},sleep)
         if(begin) { writer.beginUpgrade();io.output.reset() }
         return writer to io
+    }
+    @Test fun format_64gb_uses_full_captured_length_without_truncating_to_32gb() {
+        val (writer,io)=writer(mtkStatus()+mtkStatus()+mtkStatus(0x40040005),begin=true,userSize=62528684032L)
+        writer.format(MtkFormatRange(0x10d00000L,0xe7a7f8000L))
+        assertArrayEquals(mtkWords(1,8)+mtkLongs(0x10d00000L,0xe7a7f8000L)+ByteArray(32),frames(io.output.toByteArray())[1])
+    }
+    @Test fun post_format_gpt_read_uses_the_same_target_capacity_for_both_variants() {
+        for (size in listOf(31289507840L,62528684032L)) {
+            val (p,b)=mtkGptFixture(userSize=size)
+            val response=mtkStatus()+mtkStatus()+mtkFrame(mtkLongs(p.size.toLong()))+mtkStatus()+mtkFrame(p)+mtkStatus()+
+                mtkStatus()+mtkStatus()+mtkFrame(mtkLongs(b.size.toLong()))+mtkStatus()+mtkFrame(b)+mtkStatus()
+            val (writer,_)=writer(response,userSize=size)
+            assertEquals(size,writer.readLayout().userSize)
+        }
+    }
+    @Test fun reading_above_32gb_is_bounded_by_the_connected_64gb_geometry() {
+        val input=mtkStatus()+mtkStatus()+mtkStatus()+mtkFrame(ByteArray(8) { 1 })+mtkFrame(ByteArray(8) { 2 })+mtkStatus()
+        val (writer,io)=writer(input,userSize=62528684032L)
+        val output=ByteArrayOutputStream()
+        writer.read(MtkPartition("flashinfo",0xe8dff8000L,16),output)
+        assertArrayEquals(ByteArray(8) { 1 }+ByteArray(8) { 2 },output.toByteArray())
+        assertArrayEquals(mtkWords(1,8)+mtkLongs(0xe8dff8000L,16)+ByteArray(32),frames(io.output.toByteArray())[1])
+    }
+    @Test fun format_and_read_overflows_are_rejected_before_any_usb_command_on_both_variants() {
+        for (size in listOf(31289507840L,62528684032L)) {
+            for (range in listOf(MtkFormatRange(size-16896,512),MtkFormatRange(Long.MAX_VALUE-511,512),
+                MtkFormatRange(32768,Long.MAX_VALUE))) {
+                val (writer,io)=writer(byteArrayOf(),begin=true,userSize=size)
+                assertThrows(IllegalArgumentException::class.java) { writer.format(range) }
+                assertEquals(0,io.output.size())
+            }
+            val (writer,io)=writer(byteArrayOf(),userSize=size)
+            assertThrows(IllegalArgumentException::class.java) { writer.read(MtkPartition("outside",size-8,16),ByteArrayOutputStream()) }
+            assertEquals(0,io.output.size())
+        }
+        val (small,io)=writer(byteArrayOf(),begin=true)
+        assertThrows(IllegalArgumentException::class.java) { small.format(MtkFormatRange(0x10d00000L,0xe7a7f8000L)) }
+        assertEquals(0,io.output.size())
     }
     @Test fun download_info_initialization_is_mandatory_once_and_requires_all_captured_statuses() {
         val (writer,io)=writer(mtkStatus()+mtkStatus()+mtkStatus())

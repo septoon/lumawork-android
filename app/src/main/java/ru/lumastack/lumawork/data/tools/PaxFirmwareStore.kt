@@ -34,6 +34,11 @@ import kotlinx.serialization.json.Json
         (bundleDirectory != null || mode == PaxInstallMode.RemoveMainApp)
 }
 
+internal fun PaxInstallState.resetForNewOperation(id: String): PaxInstallState = PaxInstallState(
+    owner=owner,operationId=id,model=model,mode=mode,bundleDirectory=bundleDirectory,expectedPinpadOs=expectedPinpadOs,
+    phase=if(bundleDirectory!=null || mode==PaxInstallMode.RemoveMainApp) PaxInstallPhase.Ready else PaxInstallPhase.Idle,
+    detail="Процесс сброшен. Перезапустите терминал и проверьте подключение перед новой прошивкой.")
+
 /** Separate install journal: FTP/history refresh cannot overwrite critical installation state. No serial or raw replies. */
 class PaxFirmwareStore(context: Context) {
     private val root = File(context.noBackupFilesDir, "pax-firmware")
