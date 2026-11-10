@@ -57,6 +57,7 @@ import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncScope
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncCursor
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncChange
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncBatch
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncProgress
 import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.workschedule.WorkSchedule
 import ru.lumastack.lumawork.domain.workschedule.WorkScheduleJournal
@@ -73,7 +74,7 @@ interface SimpleOneApi {
         closedRequests(userId, authKey)
     suspend fun closedSyncHead(userId: String, authKey: String, scope: ClosedRequestsSyncScope): ClosedRequestsSyncCursor? = null
     suspend fun closedSyncChanges(userId: String, authKey: String, scope: ClosedRequestsSyncScope,
-        since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>, onProgress: (String) -> Unit): ClosedRequestsSyncBatch {
+        since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>, onProgress: suspend (ClosedRequestsSyncProgress) -> Unit): ClosedRequestsSyncBatch {
         val records = closedRequestsSince(userId, authKey, since?.updatedAt)
         val changes = records.map { record -> ClosedRequestsSyncChange(record.sysId, record.number,
             ClosedRequestsSyncCursor(record.sysUpdatedAt, record.sysId), record) }
@@ -189,7 +190,7 @@ class OkHttpSimpleOneApi(
         closedSyncClient(authKey).head(userId, scope)
 
     override suspend fun closedSyncChanges(userId: String, authKey: String, scope: ClosedRequestsSyncScope,
-        since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>, onProgress: (String) -> Unit): ClosedRequestsSyncBatch =
+        since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>, onProgress: suspend (ClosedRequestsSyncProgress) -> Unit): ClosedRequestsSyncBatch =
         closedSyncClient(authKey).changes(userId, scope, since, knownVersions, onProgress)
 
     private fun closedSyncClient(authKey: String) = SimpleOneClosedSyncClient(origin,

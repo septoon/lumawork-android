@@ -68,6 +68,7 @@ import ru.lumastack.lumawork.domain.route.RouteWorkType
 import ru.lumastack.lumawork.domain.route.makeYandexRouteUrl
 import ru.lumastack.lumawork.domain.simpleone.RequestsMode
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequest
+import ru.lumastack.lumawork.domain.simpleone.ClosedSimpleOneArchive
 import ru.lumastack.lumawork.ui.adaptive.AppWidthClass
 import ru.lumastack.lumawork.ui.requests.RequestsActions
 import ru.lumastack.lumawork.ui.requests.SimpleOneRequestDetailContent
@@ -115,13 +116,17 @@ fun HomeScreen(
     var detailOpen by rememberSaveable { mutableStateOf(false) }
     var routeUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var mapError by remember { mutableStateOf<String?>(null) }
-    var cachedClosed by remember(session.user.id) { mutableStateOf(emptyList<SimpleOneRequest>()) }
+    var cachedClosed by remember(session.user.id) { mutableStateOf<ClosedSimpleOneArchive?>(null) }
     LaunchedEffect(session.user.id) {
-        cachedClosed = simpleOneRepository.readClosedArchive(session.user.id)?.requests.orEmpty()
+        cachedClosed = simpleOneRepository.readClosedArchive(session.user.id)
     }
+    val closedForImport = if (simpleOneState.hasLoadedClosedArchive) simpleOneState.closedArchive else cachedClosed
     LaunchedEffect(state.record.date, state.record.workType, state.isDeletingArchivedDay,
-        state.isRefreshing, archiveOpen, cachedClosed, simpleOneState.closedArchive) {
-        if (!archiveOpen) model.autoImportClosedRequests(simpleOneState.closedArchive.requests.ifEmpty { cachedClosed })
+        state.isRefreshing, archiveOpen, closedForImport, simpleOneState.isClosedLoading) {
+        // An early checkpoint may contain only part of the selected day's requests.
+        if (!archiveOpen && !simpleOneState.isClosedLoading && closedForImport?.hasPendingSync == false) {
+            model.autoImportClosedRequests(closedForImport.requests)
+        }
     }
     LaunchedEffect(state.notice, state.errorMessage) {
         if (state.notice != null || state.errorMessage != null) { delay(5000); model.dismissMessage() }

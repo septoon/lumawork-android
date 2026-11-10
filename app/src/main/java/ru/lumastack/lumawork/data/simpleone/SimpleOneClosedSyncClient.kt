@@ -34,7 +34,7 @@ internal fun closedMerchantTIN(request: SimpleOneRequest): String {
     return resolvedClosedMerchantTIN("", request.description + "\n" + request.additionalInformation)
 }
 
-/** Same scan, cell-value versions and export-row completion as iOS ClosedRequestsIncrementalSync. */
+/** Bounded incremental scan with authoritative cell fallback for incomplete list rows. */
 internal class SimpleOneClosedSyncClient(
     private val origin: String,
     private val get: suspend (String) -> JsonObject,
@@ -44,7 +44,7 @@ internal class SimpleOneClosedSyncClient(
     private data class CompletedRow(val id: String, val cursor: ClosedRequestsSyncCursor, val change: ClosedRequestsSyncChange?)
 
     suspend fun head(userId: String, scope: ClosedRequestsSyncScope): ClosedRequestsSyncCursor? =
-        page(userId, scope, 1).first.firstOrNull()?.let { cursor(identity(it).first) }
+        page(userId, scope, 1, perPage = 1).first.firstOrNull()?.let { cursor(it, identity(it).first) }
 
     /** Reuse delta's readable-column/cell fallback for incomplete authoritative API/XLSX rows. */
     suspend fun completeForStatistics(request: SimpleOneRequest): SimpleOneRequest {
@@ -66,14 +66,16 @@ internal class SimpleOneClosedSyncClient(
 
     suspend fun changes(
         userId: String, scope: ClosedRequestsSyncScope, since: ClosedRequestsSyncCursor?,
-        knownVersions: Map<String, String>, onProgress: (String) -> Unit,
+        knownVersions: Map<String, String>, onProgress: suspend (ClosedRequestsSyncProgress) -> Unit,
     ): ClosedRequestsSyncBatch {
+        if (since != null && closedSyncTimestamp(since.updatedAt) == null) throw SimpleOneFailure.InvalidResponse
         val started = System.nanoTime()
         val cursorCalls = AtomicInteger()
         val cursorNanos = AtomicLong()
         val completionCalls = AtomicInteger()
         val completionNanos = AtomicLong()
         val changes = linkedMapOf<String, ClosedRequestsSyncChange>()
+        val scanKnownVersions = knownVersions.toMutableMap()
         var watermark = since
         repeat(3) {
             var pageNumber = 1
@@ -84,7 +86,8 @@ internal class SimpleOneClosedSyncClient(
             val seen = mutableSetOf<String>()
             do {
                 currentCoroutineContext().ensureActive()
-                val (items, hasMore) = page(userId, scope, pageNumber)
+                val (items, hasMore, totalCount) = page(userId, scope, pageNumber, since = since)
+                val pageChanges = mutableListOf<ClosedRequestsSyncChange>()
                 val before = seen.size
                 // Fetch at most four rows ahead, but validate and apply in server order.
                 // Results beyond the stopping boundary are speculative and never committed.
@@ -104,11 +107,10 @@ internal class SimpleOneClosedSyncClient(
                             try {
                                 val (id, number) = identity(item)
                                 val cursorStarted = System.nanoTime()
-                                val version = cursor(id)
-                                cursorCalls.incrementAndGet()
+                                val version = cursor(item, id) { cursorCalls.incrementAndGet() }
                                 cursorNanos.addAndGet(System.nanoTime() - cursorStarted)
                                 val needsCompletion = (since == null || version.updatedAt >= since.updatedAt) &&
-                                    knownVersions[id]?.let { it >= version.updatedAt } != true
+                                    scanKnownVersions[id]?.let { it >= version.updatedAt } != true
                                 val change = if (needsCompletion) {
                                     val completionStarted = System.nanoTime()
                                     val row = completeRow(item, id)
@@ -139,20 +141,24 @@ internal class SimpleOneClosedSyncClient(
                                 break
                             }
                             if (change != null) {
-                                if (changes[id]?.cursor?.let { it >= version } != true) changes[id] = change
+                                if (changes[id]?.cursor?.let { it >= version } != true) {
+                                    changes[id] = change
+                                    pageChanges += change
+                                }
                                 changed = true
                             }
                             schedule()
                         }
                     } finally { inFlight.forEach { it.cancel() } }
                 }
-                onProgress("Проверено заявок: ${seen.size}")
+                pageChanges.forEach { scanKnownVersions[it.sysId] = it.cursor.updatedAt }
+                onProgress(ClosedRequestsSyncProgress(seen.size, totalCount, pageChanges))
                 if (!reachedBoundary && items.isNotEmpty() && seen.size == before) throw SimpleOneFailure.InvalidResponse
                 if (reachedBoundary || !hasMore) break
                 pageNumber++
             } while (true)
             val first = anchor
-            if (first != null && (watermark == null || first > watermark!!)) watermark = first
+            if (first != null && (watermark == null || first > watermark)) watermark = first
             // iOS rechecks the head only if this scan actually observed changes.
             if (!changed || first == null || head(userId, scope)?.let { it > first } != true) {
                 android.util.Log.i("SimpleOneSync", "scope=$scope changes=${changes.size} cursorCalls=${cursorCalls.get()} " +
@@ -164,20 +170,25 @@ internal class SimpleOneClosedSyncClient(
         throw SimpleOneFailure.Http(409, "Список закрытых заявок изменяется слишком быстро. Повторите синхронизацию.")
     }
 
-    private suspend fun page(userId: String, scope: ClosedRequestsSyncScope, page: Int): Pair<List<JsonObject>, Boolean> {
+    private suspend fun page(userId: String, scope: ClosedRequestsSyncScope, page: Int,
+        since: ClosedRequestsSyncCursor? = null, perPage: Int = 20): Triple<List<JsonObject>, Boolean, Int?> {
         val condition = when (scope) {
             ClosedRequestsSyncScope.Monthly -> monthlyCondition(userId)
             ClosedRequestsSyncScope.All -> wideCondition()
         }
+        // Keep the entire same-second cohort, including new rows below the saved sys_id.
+        val incremental = since?.let { "($condition)^sys_updated_at>=${it.updatedAt}" } ?: condition
         val url = "$origin/list/itsm_request".toHttpUrl().newBuilder()
-            .addQueryParameter("condition", "$condition^ORDERBYDESCsys_updated_at^ORDERBYDESCsys_id")
-            .addQueryParameter("page", page.toString()).addQueryParameter("per_page", "20").build()
+            .addQueryParameter("condition", "$incremental^ORDERBYDESCsys_updated_at^ORDERBYDESCsys_id")
+            .addQueryParameter("columns", (listOf("sys_id", "sys_updated_at", "multicard_merchant_tin", "terminal_model",
+                "completed_at", "completion_time", "multicard_completed_at") + columns.keys).joinToString(","))
+            .addQueryParameter("page", page.toString()).addQueryParameter("per_page", perPage.toString()).build()
         val started = System.nanoTime()
         val response = get(url.toString())
         val items = simpleOneListItems(response) ?: throw SimpleOneFailure.InvalidResponse
         val total = simpleOneTotalCount(response)
         android.util.Log.i("SimpleOneSync", "scope=$scope page=$page rows=${items.size} total=$total listMs=${(System.nanoTime() - started) / 1_000_000}")
-        return items to (total?.let { page.toLong() * 20 < it } ?: (items.size == 20))
+        return Triple(items, total?.let { page.toLong() * perPage < it } ?: (items.size == perPage), total)
     }
 
     private fun identity(item: JsonObject): Pair<String, String> {
@@ -187,7 +198,10 @@ internal class SimpleOneClosedSyncClient(
         return id to number
     }
 
-    private suspend fun cursor(id: String): ClosedRequestsSyncCursor {
+    private suspend fun cursor(item: JsonObject, id: String, onFallback: () -> Unit = {}): ClosedRequestsSyncCursor {
+        val raw = item["sys_updated_at"]
+        listVersion(raw)?.let { return ClosedRequestsSyncCursor(it, id) }
+        onFallback()
         val value = cell("sys_updated_at", id)
         val version = closedSyncTimestamp(value) ?: throw SimpleOneFailure.InvalidResponse
         return ClosedRequestsSyncCursor(version, id)
@@ -280,6 +294,15 @@ internal class SimpleOneClosedSyncClient(
     }
 
     companion object {
+        private fun listVersion(raw: JsonElement?): String? {
+            if (!readable(raw)) return null
+            return when (raw) {
+                is JsonPrimitive -> raw.contentOrNull?.let(::closedSyncTimestamp)
+                is JsonObject -> listVersion(raw["database_value"]) ?: listVersion(raw["value"])
+                else -> null
+            }
+        }
+
         private fun readable(raw: JsonElement?): Boolean = when (raw) {
             null -> false
             is JsonObject -> raw["read_access"] != JsonPrimitive(false) && (raw["value"]?.let(::readable) ?: true)

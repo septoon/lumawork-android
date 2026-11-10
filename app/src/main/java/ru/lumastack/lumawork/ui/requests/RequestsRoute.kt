@@ -173,6 +173,14 @@ private fun RequestsToolbar(state: SimpleOneUiState, actions: RequestsActions, c
         }
     }
     Column {
+        if (state.isClosedLoading) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text(state.closedSyncProgressText ?: "Обновляю закрытые заявки…",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         if (fileBusy) {
             CircularProgressIndicator(Modifier.padding(horizontal = AppContentHorizontalPadding).size(20.dp), strokeWidth = 2.dp)
         }

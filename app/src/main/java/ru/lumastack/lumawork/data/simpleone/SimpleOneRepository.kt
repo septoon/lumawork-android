@@ -32,6 +32,7 @@ import ru.lumastack.lumawork.domain.requests.closedClosureCode
 import ru.lumastack.lumawork.domain.requests.isClosedReturnEquipment
 import ru.lumastack.lumawork.domain.simpleone.SimpleOneRequestSource
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncScope
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncChange
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncRecord
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncCursor
 
@@ -177,6 +178,7 @@ class SimpleOneRepository(
         cachedSnapshot: SimpleOneSnapshot? = null,
         scope: ClosedRequestsSyncScope = ClosedRequestsSyncScope.All,
         forceAuthoritativeBaseline: Boolean = false,
+        onArchiveUpdated: suspend (ClosedSimpleOneArchive) -> Unit = {},
         onProgress: (String) -> Unit = {},
     ): ClosedSimpleOneArchive = archiveMutex.withLock {
         val session = storedSession(ownerUserId) ?: throw SimpleOneFailure.MissingCredentials
@@ -195,7 +197,7 @@ class SimpleOneRepository(
                 // A completed full baseline remains valid when optional heads were unavailable or empty:
                 // retain its null cursor and scan safely rather than repeatedly regenerating XLSX.
                 return@withLock updateClosedArchive(ownerUserId, session, currentUser.sysId,
-                    previous.copy(syncRevision = 1, syncUserId = currentUser.sysId), scope, onProgress, statisticsPass)
+                    previous.copy(syncRevision = 1, syncUserId = currentUser.sysId), scope, onProgress, onArchiveUpdated, statisticsPass)
             }
             // As on iOS, capture the server heads before the full XLSX baseline, never from the device clock.
             val heads = coroutineScope {
@@ -266,6 +268,7 @@ class SimpleOneRepository(
         previous: ClosedSimpleOneArchive,
         scope: ClosedRequestsSyncScope,
         onProgress: (String) -> Unit,
+        onArchiveUpdated: suspend (ClosedSimpleOneArchive) -> Unit,
         statisticsPass: ru.lumastack.lumawork.data.analytics.WorkStatisticsPass?,
     ): ClosedSimpleOneArchive {
         onProgress(if (scope == ClosedRequestsSyncScope.Monthly) "Проверяю текущий и прошлый месяцы…" else "Проверяю изменения архива…")
@@ -276,21 +279,57 @@ class SimpleOneRepository(
                 .map { (id, record) -> ClosedRequestsSyncCursor(record.updatedAt, id) }.minOrNull()
             known to missing
         }
+        var checkpoint = previous
+        val pending = linkedMapOf<String, ClosedRequestsSyncChange>()
+        var checkpointAt: Long? = null
         val batch = api.closedSyncChanges(userId, session.authKey, scope,
             recoveryCursor ?: if (scope == ClosedRequestsSyncScope.Monthly) previous.monthlyCursor else previous.wideCursor,
-            knownVersions, onProgress)
+            knownVersions) { progress ->
+            progress.changes.forEach { change ->
+                if (pending[change.sysId]?.cursor?.let { it >= change.cursor } != true) pending[change.sysId] = change
+            }
+            if (pending.isNotEmpty() && (checkpointAt?.let { nowEpochMillis() - it >= 3_000 } != false)) {
+                val updated = mergeClosedChanges(checkpoint, pending.values.toList()).copy(
+                    updatedAtEpochMillis = nowEpochMillis(), hasPendingSync = true)
+                // A checkpoint never advances the cursor or publishes a partial statistics index.
+                supplementalCache.saveClosedArchive(owner, updated) { commit -> withCurrentSession(owner, session, commit) }
+                withCurrentSession(owner, session) { onArchiveUpdated(updated) }
+                checkpoint = updated
+                pending.clear()
+                checkpointAt = nowEpochMillis()
+            }
+            val total = progress.totalCount?.let { " из $it" }.orEmpty()
+            onProgress("Проверено заявок: ${progress.scannedCount}$total")
+        }
         val sourceIndex = statisticsPass?.let { pass -> withContext(Dispatchers.Default) {
             requireNotNull(pass.previous).apply(batch.changes).copy(
                 sourceSyncedAt = java.time.Instant.ofEpochMilli(nowEpochMillis()).toString(),
                 monthlyCursor = if (scope == ClosedRequestsSyncScope.Monthly) batch.cursor ?: pass.previous.monthlyCursor else pass.previous.monthlyCursor,
                 wideCursor = if (scope == ClosedRequestsSyncScope.All) batch.cursor ?: pass.previous.wideCursor else pass.previous.wideCursor)
         } }
-        val archive = withContext(Dispatchers.Default) {
-            val known = previous.requests.associateBy { it.number }
+        val archive = mergeClosedChanges(checkpoint, batch.changes).copy(
+            updatedAtEpochMillis = nowEpochMillis(), syncUserId = userId, hasPendingSync = false,
+            monthlyCursor = if (scope == ClosedRequestsSyncScope.Monthly) batch.cursor ?: previous.monthlyCursor else previous.monthlyCursor,
+            wideCursor = if (scope == ClosedRequestsSyncScope.All) batch.cursor ?: previous.wideCursor else previous.wideCursor,
+            syncUpdatedAt = if (scope == ClosedRequestsSyncScope.All) batch.cursor?.updatedAt ?: previous.syncUpdatedAt else previous.syncUpdatedAt,
+            lastWideSyncAtEpochMillis = if (scope == ClosedRequestsSyncScope.All) nowEpochMillis() else previous.lastWideSyncAtEpochMillis)
+
+        supplementalCache.saveClosedArchive(owner, archive) { commit -> withCurrentSession(owner, session, commit) }
+        if (statisticsPass != null && sourceIndex != null) withCurrentSession(owner, session) {
+            workStatistics!!.commit(statisticsPass, sourceIndex, scope == ClosedRequestsSyncScope.All)
+        }
+        android.util.Log.i("SimpleOneSync", "sync scope=$scope changes=${batch.changes.size} saved=${archive.requests.size}")
+        return archive
+    }
+
+    private suspend fun mergeClosedChanges(archive: ClosedSimpleOneArchive, changes: List<ClosedRequestsSyncChange>): ClosedSimpleOneArchive =
+        withContext(Dispatchers.Default) {
+            if (changes.isEmpty()) return@withContext archive
+            val known = archive.requests.associateBy { it.number }
             val merged = known.toMutableMap()
-            val metadata = previous.syncRecords.toMutableMap()
+            val metadata = archive.syncRecords.toMutableMap()
             val idsByNumber = metadata.entries.associate { it.value.number to it.key }.toMutableMap()
-            for (change in batch.changes) {
+            for (change in changes) {
                 if (metadata[change.sysId]?.number?.let { it != change.number } == true ||
                     idsByNumber[change.number]?.let { it != change.sysId } == true ||
                     known[change.number]?.sysId?.takeIf(String::isNotBlank)?.let { it != change.sysId } == true) {
@@ -306,20 +345,8 @@ class SimpleOneRepository(
                 metadata[change.sysId] = ClosedRequestsSyncRecord(change.number, change.cursor.updatedAt, change.request == null)
                 idsByNumber[change.number] = change.sysId
             }
-            previous.copy(requests = if (merged == known) previous.requests else merged.values.toList(),
-                updatedAtEpochMillis = nowEpochMillis(), syncRecords = metadata, syncUserId = userId,
-                monthlyCursor = if (scope == ClosedRequestsSyncScope.Monthly) batch.cursor ?: previous.monthlyCursor else previous.monthlyCursor,
-                wideCursor = if (scope == ClosedRequestsSyncScope.All) batch.cursor ?: previous.wideCursor else previous.wideCursor,
-                syncUpdatedAt = if (scope == ClosedRequestsSyncScope.All) batch.cursor?.updatedAt ?: previous.syncUpdatedAt else previous.syncUpdatedAt,
-                lastWideSyncAtEpochMillis = if (scope == ClosedRequestsSyncScope.All) nowEpochMillis() else previous.lastWideSyncAtEpochMillis)
+            archive.copy(requests = if (merged == known) archive.requests else merged.values.toList(), syncRecords = metadata)
         }
-        supplementalCache.saveClosedArchive(owner, archive) { commit -> withCurrentSession(owner, session, commit) }
-        if (statisticsPass != null && sourceIndex != null) withCurrentSession(owner, session) {
-            workStatistics!!.commit(statisticsPass, sourceIndex, scope == ClosedRequestsSyncScope.All)
-        }
-        android.util.Log.i("SimpleOneSync", "sync scope=$scope changes=${batch.changes.size} saved=${archive.requests.size}")
-        return archive
-    }
 
     private fun SimpleOneRequest.needsClosedDetails(): Boolean =
         (workStatistics != null && rankingDates?.complete != true) || closedRequestType().isBlank() ||

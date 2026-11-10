@@ -13,6 +13,65 @@ import ru.lumastack.lumawork.domain.simpleone.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
 class ClosedRequestsSyncTest {
+    @Test fun `unreadable malformed and display only versions use the authoritative cell`() = runBlocking {
+        val version = "2026-11-09 12:00:00"
+        for (raw in listOf(
+            """{"read_access":false,"value":"$version"}""",
+            """{"display_value":"$version"}""",
+            """"09.11.2026 15:00:00"""",
+            """"2026-02-30 12:00:00"""",
+        )) {
+            var cellCalls = 0
+            val row = JsonObject(Json.parseToJsonElement(syncItem("one")).jsonObject +
+                ("sys_updated_at" to Json.parseToJsonElement(raw)))
+            val sync = SimpleOneClosedSyncClient("https://sd.test/v1", { url ->
+                if (url.toHttpUrl().encodedPath.endsWith("/list/itsm_request")) buildJsonObject {
+                    put("data", buildJsonObject { put("list", buildJsonArray { add(row) }) })
+                } else { cellCalls++; Json.parseToJsonElement("""{"data":{"value":"$version"}}""").jsonObject }
+            }, { "wide" }, { "monthly" })
+            val result = sync.changes("user", ClosedRequestsSyncScope.All,
+                ClosedRequestsSyncCursor(version, "one"), mapOf("one" to version)) {}
+            assertTrue(result.changes.isEmpty())
+            assertEquals(raw, 1, cellCalls)
+        }
+    }
+
+    @Test fun `unchanged refresh uses one bounded list request and no per row version requests`() = runBlocking {
+        val urls = mutableListOf<okhttp3.HttpUrl>()
+        val version = "2026-11-09 12:00:00"
+        val row = JsonObject(Json.parseToJsonElement(syncItem("z")).jsonObject +
+            ("sys_updated_at" to JsonPrimitive(version)))
+        val sync = SimpleOneClosedSyncClient("https://sd.test/v1", { url ->
+            urls += url.toHttpUrl()
+            if (url.toHttpUrl().encodedPath.endsWith("/list/itsm_request")) buildJsonObject {
+                put("data", buildJsonObject { put("list", buildJsonArray { add(row) }) })
+            } else Json.parseToJsonElement("""{"data":{"value":"$version"}}""").jsonObject
+        }, { "wide" }, { "monthly" })
+        val result = sync.changes("user", ClosedRequestsSyncScope.All,
+            ClosedRequestsSyncCursor(version, "z"), mapOf("z" to version)) {}
+        assertTrue(result.changes.isEmpty())
+        assertEquals(1, urls.size)
+        assertEquals("(wide)^sys_updated_at>=2026-11-09 12:00:00^ORDERBYDESCsys_updated_at^ORDERBYDESCsys_id",
+            urls.single().queryParameter("condition"))
+        assertTrue(urls.single().queryParameter("columns").orEmpty().split(',').contains("sys_updated_at"))
+    }
+
+    @Test fun `same second unknown row below saved sys id is imported using list versions`() = runBlocking {
+        var cellCalls = 0
+        val version = "2026-11-09 12:00:00"
+        val rows = listOf("z", "a").map { id -> JsonObject(Json.parseToJsonElement(syncItem(id)).jsonObject +
+            ("sys_updated_at" to buildJsonObject { put("database_value", version); put("display_value", "09.11.2026 15:00:00") })) }
+        val sync = SimpleOneClosedSyncClient("https://sd.test/v1", { url ->
+            if (url.toHttpUrl().encodedPath.endsWith("/list/itsm_request")) buildJsonObject {
+                put("data", buildJsonObject { put("list", JsonArray(rows)) })
+            } else { cellCalls++; Json.parseToJsonElement("""{"data":{"value":"$version"}}""").jsonObject }
+        }, { "wide" }, { "monthly" })
+        val result = sync.changes("user", ClosedRequestsSyncScope.All,
+            ClosedRequestsSyncCursor(version, "z"), mapOf("z" to version)) {}
+        assertEquals(listOf("REQ-a"), result.changes.mapNotNull { it.request?.number })
+        assertEquals(0, cellCalls)
+    }
+
     @Test fun `unreadable closure or classification fields cannot become a trusted ranking row`() {
         val readable = Json.parseToJsonElement("""{"sys_id":"id","number":"REQ1","multicard_request_type":"install","resolved_at":"2026-11-01 10:00:00","new_closure_code":"","description":"","multicard_additional_information":""}""").jsonObject
         // An explicitly readable empty closure is a real zero, not missing source data.
@@ -36,7 +95,8 @@ class ClosedRequestsSyncTest {
         }
         val sync = SimpleOneClosedSyncClient("https://sd.test/v1", { url ->
             if (url.toHttpUrl().encodedPath.endsWith("/list/itsm_request")) buildJsonObject {
-                put("data", buildJsonObject { put("list", buildJsonArray { add(JsonObject(item)) }) })
+                val requested = url.toHttpUrl().queryParameter("columns")?.split(',')?.toSet() ?: item.keys
+                put("data", buildJsonObject { put("list", buildJsonArray { add(JsonObject(item.filterKeys { it in requested })) }) })
             } else Json.parseToJsonElement("""{"data":{"value":"2026-11-01 10:00:00"}}""").jsonObject
         }, { "wide" }, { "monthly" })
         val record = sync.changes("user", ClosedRequestsSyncScope.All, null, emptyMap()) {}.changes.single().request!!

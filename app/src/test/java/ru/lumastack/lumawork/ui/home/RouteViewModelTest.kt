@@ -2,6 +2,8 @@ package ru.lumastack.lumawork.ui.home
 
 import java.time.LocalDate
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
@@ -354,6 +356,21 @@ class RouteViewModelTest {
         advanceUntilIdle()
         model.autoImportClosedRequests(requests)
         assertEquals("", model.state.value.record.stops[1].address)
+    }
+
+    @Test fun `auto import yields during preparation and preserves a newly edited route`() = runTest(dispatcher) {
+        val model = model(offline = true)
+        advanceUntilIdle()
+        val requests = listOf(
+            SimpleOneRequest("one", "REQ1", address = "Ялта, Ленина, 1", closedAt = "16.10.2026 12:00:00"),
+            SimpleOneRequest("two", "REQ2", address = "Ялта, Ленина, 2", closedAt = "16.10.2026 13:00:00"),
+        )
+        val importing = launch(start = CoroutineStart.UNDISPATCHED) { model.autoImportClosedRequests(requests) }
+        model.updateStop(model.state.value.record.stops[1].id, "Мой адрес", "00099")
+        importing.join()
+        assertEquals(3, model.state.value.record.stops.size)
+        assertEquals("Мой адрес", model.state.value.record.stops[1].address)
+        assertEquals("00099", model.state.value.record.stops[1].requestNumber)
     }
 
     @Test fun `clearing monthly odometer does not resurrect an older day value`() = runTest(dispatcher) {

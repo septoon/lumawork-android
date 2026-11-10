@@ -164,6 +164,7 @@ data class ClosedSimpleOneArchive(
     val syncRecords: Map<String, ClosedRequestsSyncRecord> = emptyMap(),
     val syncRevision: Int? = null,
     val lastWideSyncAtEpochMillis: Long? = null,
+    val hasPendingSync: Boolean = false,
 ) {
     val isReady: Boolean get() = isComplete && queryRevision == 2
 }
@@ -185,6 +186,10 @@ data class ClosedRequestsSyncChange(
 
 data class ClosedRequestsSyncBatch(
     val changes: List<ClosedRequestsSyncChange>, val cursor: ClosedRequestsSyncCursor?,
+)
+
+data class ClosedRequestsSyncProgress(
+    val scannedCount: Int, val totalCount: Int?, val changes: List<ClosedRequestsSyncChange>,
 )
 
 @Serializable

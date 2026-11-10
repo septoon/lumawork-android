@@ -8,6 +8,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -143,10 +145,16 @@ class RouteViewModel(
         }
     }
 
-    fun autoImportClosedRequests(requests: List<SimpleOneRequest>) {
+    suspend fun autoImportClosedRequests(requests: List<SimpleOneRequest>) {
         val current = state.value
         if (current.isDeletingArchivedDay || current.isRefreshing || current.record.workType != RouteWorkType.Pos || current.record.hasWorkData()) return
-        val template = closedRouteTemplate(requests, current.record.date, settings.startAddress)
+        val expectedGeneration = generation
+        val expectedRevision = editRevision
+        val warehouse = settings.startAddress
+        val template = withContext(Dispatchers.Default) { closedRouteTemplate(requests, current.record.date, warehouse) }
+        val latest = state.value
+        if (generation != expectedGeneration || editRevision != expectedRevision || latest.record != current.record ||
+            latest.isRefreshing || latest.isDeletingArchivedDay || settings.startAddress != warehouse) return
         if (template.isEmpty()) return
         edit { record -> record.copy(stops = listOf(record.stops.first()) + template.map { request ->
             RouteStop(id = UUID.randomUUID().toString(), address = request.address, org = request.customer,

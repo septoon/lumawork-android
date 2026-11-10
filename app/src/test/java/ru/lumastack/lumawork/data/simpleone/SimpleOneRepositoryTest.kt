@@ -36,11 +36,39 @@ import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncScope
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncCursor
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncChange
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncBatch
+import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncProgress
+import okhttp3.ResponseBody.Companion.toResponseBody
 import ru.lumastack.lumawork.domain.simpleone.ClosedRequestsSyncRecord
 import ru.lumastack.lumawork.domain.timereport.TimeReportEntry
 import ru.lumastack.lumawork.domain.backpack.BackpackItem
 
 class SimpleOneRepositoryTest {
+    @Test fun `failed later page retains checked rows without advancing the saved cursor`() = runBlocking {
+        val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
+        val cursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "old")
+        val cache = FakeSimpleOneSupplementalCache().apply {
+            archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2,
+                syncUserId = "simple-user", wideCursor = cursor)
+        }
+        val client = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+            val page = chain.request().url.queryParameter("page")
+            val body = if (page == "1") """{"data":{"list":[${syncItem("new", "2026-10-28 12:00:00")}],"total":21}}""" else "{}"
+            okhttp3.Response.Builder().request(chain.request()).protocol(okhttp3.Protocol.HTTP_1_1)
+                .code(if (page == "1") 200 else 503).message("test")
+                .body(body.toResponseBody()).build()
+        }.build()
+        val api = OkHttpSimpleOneApi("https://sd.test/v1", client, closedArchiveCondition = { "wide" })
+        val snapshot = SimpleOneSnapshot(currentUser = SimpleOneUser("simple-user", "engineer", "Иван", "Инженеров"),
+            sessionFingerprint = simpleOneSessionFingerprint(sessions.read("owner")!!))
+        val repository = SimpleOneRepository(api, sessions, FakeSimpleOneCache(), cache)
+        assertTrue(runCatching { repository.refreshClosedArchive("owner", snapshot) }.isFailure)
+        val saved = cache.archives.getValue("owner")
+        assertEquals(setOf("REQ1", "REQ-new"), saved.requests.map { it.number }.toSet())
+        assertEquals(cursor, saved.wideCursor)
+        assertEquals("2026-10-28 12:00:00", saved.syncRecords["new"]?.updatedAt)
+        assertTrue(saved.hasPendingSync)
+    }
+
     @Test fun `incomplete authoritative source cannot commit archive or statistics outbox`() = runTest {
         val sessions = FakeSimpleOneSessionStore().apply { save(StoredSimpleOneSession("owner", "auth", "engineer")) }
         val cache = FakeSimpleOneSupplementalCache()
@@ -656,7 +684,7 @@ private class FakeSimpleOneApi(
     }
 
     override suspend fun closedSyncChanges(userId: String, authKey: String, scope: ClosedRequestsSyncScope,
-        since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>, onProgress: (String) -> Unit): ClosedRequestsSyncBatch {
+        since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>, onProgress: suspend (ClosedRequestsSyncProgress) -> Unit): ClosedRequestsSyncBatch {
         beforeSync()
         syncCalls++
         lastUpdatedSince = since?.updatedAt
@@ -798,6 +826,49 @@ private fun request() = SimpleOneRequest(
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class RequestsBootstrapTest {
+    @Test fun `checked rows reach the screen before the remaining pages finish`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val finish = CompletableDeferred<Unit>()
+        try {
+            val offered = CompletableDeferred<Unit>()
+            val oldCursor = ClosedRequestsSyncCursor("2026-10-27 12:00:00", "request-1")
+            val fresh = request().copy(sysId = "new", number = "REQ-new", requestType = "returnEquip",
+                registeredAt = "2026-10-28 10:00:00", sysUpdatedAt = "2026-10-28 12:00:00")
+            val change = ClosedRequestsSyncChange("new", "REQ-new", ClosedRequestsSyncCursor(fresh.sysUpdatedAt, "new"), fresh)
+            val api = object : SimpleOneApi by FakeSimpleOneApi() {
+                override suspend fun closedSyncChanges(userId: String, authKey: String, scope: ClosedRequestsSyncScope,
+                    since: ClosedRequestsSyncCursor?, knownVersions: Map<String, String>,
+                    onProgress: suspend (ClosedRequestsSyncProgress) -> Unit): ClosedRequestsSyncBatch {
+                    onProgress(ClosedRequestsSyncProgress(1, 21, listOf(change)))
+                    offered.complete(Unit)
+                    finish.await()
+                    return ClosedRequestsSyncBatch(listOf(change), change.cursor)
+                }
+            }
+            val cache = FakeSimpleOneSupplementalCache().apply {
+                archives["owner"] = ClosedSimpleOneArchive(listOf(request()), isComplete = true, queryRevision = 2,
+                    syncUserId = "simple-user", wideCursor = oldCursor)
+            }
+            val model = model(SimpleOneRepository(api, session(), FakeSimpleOneCache(), cache))
+            settled(model)
+            model.refreshClosedRequests()
+            withContext(Dispatchers.Default) { withTimeout(5_000) { offered.await() } }
+            assertTrue(model.state.value.isClosedLoading)
+            assertEquals("Проверено заявок: 1 из 21", model.state.value.closedSyncProgressText)
+            assertTrue(model.state.value.closedArchive.requests.any { it.number == "REQ-new" })
+            assertEquals(oldCursor, model.state.value.closedArchive.wideCursor)
+            assertTrue(model.state.value.closedArchive.hasPendingSync)
+            finish.complete(Unit)
+            settled(model)
+            assertEquals(change.cursor, model.state.value.closedArchive.wideCursor)
+            assertFalse(model.state.value.closedArchive.hasPendingSync)
+            assertNull(model.state.value.closedSyncProgressText)
+        } finally {
+            finish.complete(Unit)
+            models.forEach { it.viewModelScope.coroutineContext[Job]?.cancelAndJoin() }; models.clear(); Dispatchers.resetMain()
+        }
+    }
+
     @Test fun `request filter survives view model and repository recreation per owner`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
