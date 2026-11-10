@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
+import androidx.compose.foundation.clickable
 import ru.lumastack.lumawork.ui.shell.AppHeaderBackHandler as BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -50,6 +51,7 @@ import ru.lumastack.lumawork.ui.requests.*
 import ru.lumastack.lumawork.ui.simpleone.SimpleOneUiState
 import ru.lumastack.lumawork.ui.theme.AppRefreshContainer
 import ru.lumastack.lumawork.ui.shell.AppHeaderSegments
+import ru.lumastack.lumawork.ui.shell.AppHeaderActions
 import ru.lumastack.lumawork.ui.theme.AppCard
 
 @Composable
@@ -80,6 +82,11 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val user = simpleOne.snapshot.currentUser
+    // Keep the title when a refresh removes the engineer's last active request.
+    val selectedEngineerName = remember(state.selectedEngineerId, state.region, state.simpleOneUserId) {
+        coordinationEngineers(state.currentGroup?.requests.orEmpty())
+            .firstOrNull { it.id == state.selectedEngineerId }?.name ?: "Заявки"
+    }
     LaunchedEffect(user?.sysId, simpleOne.isAuthorized, simpleOne.isInitializing) {
         if (!simpleOne.isInitializing && user == null && simpleOne.isAuthorized && !offline) requestsActions?.onResolveCurrentUser?.invoke()
         model.activate(user?.sysId.orEmpty(), simpleOne.isAuthorized)
@@ -109,6 +116,16 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
                     Icon(painterResource(R.drawable.ic_nav_assignment), "Закрытые заявки группы")
                 }
             })
+    } else if (state.selectedRequest == null && state.selectedEngineerId != null && !state.isArchiveOpen) {
+        AppHeaderActions(title = {
+            Text(selectedEngineerName, style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }) {
+            IconButton(onClick = model::refresh, enabled = state.isAuthorized && !offline && !state.isLoading) {
+                Icon(Icons.Default.Refresh, if (state.selectedEngineerId == CoordinationEngineer.UNASSIGNED_ID)
+                    "Обновить заявки без назначения" else "Обновить заявки инженера")
+            }
+        }
     }
     BackHandler(state.selectedRequest != null || state.selectedEngineerId != null || state.isArchiveOpen, model::back)
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -127,11 +144,6 @@ private fun CoordinationRouteContent(owner: String, offline: Boolean, simpleOne:
             }
         } else {
             Column(Modifier.widthIn(max = 1100.dp).fillMaxSize()) {
-                if (state.selectedEngineerId != null) Row(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding), verticalAlignment = Alignment.CenterVertically) {
-                    val engineer = coordinationEngineers(state.currentGroup?.requests.orEmpty()).firstOrNull { it.id == state.selectedEngineerId }
-                    Text(engineer?.name ?: "Заявки", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 2)
-                    IconButton(onClick = model::refresh, enabled = state.isAuthorized && !offline && !state.isLoading) { Icon(Icons.Default.Refresh, "Обновить заявки инженера") }
-                }
                 if (simpleOne.isAuthorized && user == null) Column(Modifier.fillMaxWidth().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     if (simpleOne.isResolvingUser || simpleOne.isLoading || simpleOne.isInitializing) { CircularProgressIndicator(); Text("Проверяю профиль SimpleOne…") }
                     else {
@@ -175,12 +187,16 @@ private fun CoordinationActiveContent(state: CoordinationUiState, userName: Stri
     if (group != null && requests.isEmpty()) {
         Column(Modifier.fillMaxSize().padding(horizontal = AppContentHorizontalPadding, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             header()
-            ActiveRequestsEmptyState(Modifier.weight(1f).fillMaxWidth())
+            if (detail) CoordinationMessage("Активных заявок нет", when {
+                state.errorMessage != null -> "В последних сохранённых данных активных заявок нет."
+                state.selectedEngineerId == CoordinationEngineer.UNASSIGNED_ID -> "Все активные заявки региона уже назначены инженерам."
+                else -> "У инженера больше нет активных заявок в выбранном регионе."
+            }) else ActiveRequestsEmptyState(Modifier.weight(1f).fillMaxWidth())
         }
         return
     }
     LazyVerticalGrid(GridCells.Fixed(if (width == AppWidthClass.Compact) 1 else 2), contentPadding = PaddingValues(horizontal = AppContentHorizontalPadding, vertical = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(if (detail) 10.dp else 12.dp), modifier = Modifier.fillMaxSize()) {
         item("summary", span = { GridItemSpan(maxLineSpan) }) {
             header()
         }
@@ -209,21 +225,30 @@ private fun CoordinationActiveContent(state: CoordinationUiState, userName: Stri
 
 @Composable
 private fun CoordinationSummary(state: CoordinationUiState, userName: String, engineers: List<CoordinationEngineer>, detail: Boolean, onRegion: (CoordinationRegion) -> Unit) {
-    if (state.section == CoordinationSection.Distribution && !detail) {
+    if (detail) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.LocationOn, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(state.region.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                val count = state.engineerRequests.size
+                Text("$count ${coordinationRequestCountTitle(count)}", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        return
+    }
+    if (state.section == CoordinationSection.Distribution) {
         CoordinationRegionSummary(state, engineers, onRegion)
         return
     }
     AppCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                if (state.section == CoordinationSection.Distribution) {
-                    Text(state.region.title, style = MaterialTheme.typography.titleMedium)
-                } else { Text("Возврат ТО", style = MaterialTheme.typography.titleMedium); Text(userName, style = MaterialTheme.typography.bodyMedium) }
-            }
+            Column(Modifier.weight(1f)) { Text("Возврат ТО", style = MaterialTheme.typography.titleMedium); Text(userName, style = MaterialTheme.typography.bodyMedium) }
             if (state.isLoading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            Text("${if (detail) state.engineerRequests.size else state.currentGroup?.requests?.size ?: 0} заявок", style = MaterialTheme.typography.titleMedium)
+            Text("${state.currentGroup?.requests?.size ?: 0} заявок", style = MaterialTheme.typography.titleMedium)
         }
         state.currentGroup?.updatedAtEpochMillis?.let { CoordinationUpdatedAt(it) }
     } }
@@ -300,40 +325,66 @@ private fun CoordinationUpdatedAt(updatedAtEpochMillis: Long) {
 @Composable
 private fun CoordinationRequestCard(request: SimpleOneRequest, loading: Boolean, returning: Boolean, open: () -> Unit, copy: (String) -> Unit) {
     val data = remember(request, loading, returning) { CoordinationRequestPresentation(request, loading, usesMulticardStatus = !returning) }
-    AppCard(onClick = open, modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SelectionContainer(Modifier.weight(1f)) { Text(data.primaryNumber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium) }
-            data.secondaryNumber?.let { Text("| $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (data.typeTitle.isNotBlank()) Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(RequestTypeIcons.forType(data.typeTitle), null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(data.typeTitle, style = MaterialTheme.typography.bodySmall)
+    AppCard(onClick = open, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                SelectionContainer(Modifier.weight(1f, fill = false)) {
+                    Text(data.primaryNumber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                data.secondaryNumber?.let {
+                    Text("| $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
-            data.status?.let { status -> Text(status, color = coordinationStatusColor(status), style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f)) }
-            if (loading) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-        }
-        HorizontalDivider()
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f)) { CoordinationCopyField("ID терминала", data.terminalText, data.terminal, copy) }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                CoordinationCopyField("S/N установки", data.installedSerialText, data.installedSerial, copy)
-                CoordinationCopyField("S/N демонтажа", data.dismantledSerialText, data.dismantledSerial, copy)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (data.typeTitle.isNotBlank()) Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(RequestTypeIcons.forType(data.typeTitle), null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(data.typeTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                data.status?.let { status ->
+                    val tint = coordinationStatusColor(status)
+                    Row(Modifier.weight(1f, fill = false).background(tint.copy(alpha = .12f), CircleShape)
+                        .padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        if (status == "Загружаю статус") CircularProgressIndicator(Modifier.size(12.dp), color = tint, strokeWidth = 1.5.dp)
+                        else Box(Modifier.size(7.dp).background(tint, CircleShape))
+                        Text(status, color = tint, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
             }
+            HorizontalDivider()
+            Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f)) { CoordinationCopyField("ID терминала", data.terminalText, data.terminal, copy) }
+                VerticalDivider(Modifier.fillMaxHeight())
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    CoordinationCopyField("S/N установки", data.installedSerialText, data.installedSerial, copy)
+                    CoordinationCopyField("S/N демонтажа", data.dismantledSerialText, data.dismantledSerial, copy)
+                }
+            }
+            if (data.registeredAt != null || data.deadline != null) { HorizontalDivider(); Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                data.registeredAt?.let { Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.DateRange, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } }
+                data.deadline?.let { Text("До $it", style = MaterialTheme.typography.bodySmall, color = if (request.isOverdue()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
+            } }
+            if (data.address.isNotBlank()) { HorizontalDivider(); Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                Icon(Icons.Default.LocationOn, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Адрес: ${data.address}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            } }
         }
-        if (data.registeredAt != null || data.deadline != null) { HorizontalDivider(); Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            data.registeredAt?.let { Text("Регистрация: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            data.deadline?.let { Text("Срок СУТС: $it", style = MaterialTheme.typography.bodySmall, color = if (request.isOverdue()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
-        } }
-        if (data.address.isNotBlank()) { HorizontalDivider(); Column { Text("Адрес", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(data.address, maxLines = 2, overflow = TextOverflow.Ellipsis) } }
-    } }
+    }
 }
 
 @Composable
 private fun CoordinationCopyField(title: String, display: String, value: String, copy: (String) -> Unit) {
-    Column { Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (value.isBlank()) Text(display, style = MaterialTheme.typography.bodyMedium)
-        else TextButton(onClick = { copy(value) }, contentPadding = PaddingValues(0.dp)) { Text(display) }
+    Row(Modifier.fillMaxWidth().then(if (value.isBlank()) Modifier else Modifier.clickable(onClickLabel = "Скопировать $title") { copy(value) })
+        .padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
+        if (title == "ID терминала") Text("#", Modifier.width(16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else Icon(painterResource(R.drawable.ic_barcode_scan), null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("$title: $display", style = MaterialTheme.typography.bodySmall, overflow = TextOverflow.Ellipsis)
     }
 }
 @Composable
